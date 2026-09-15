@@ -1,0 +1,30 @@
+{
+  "gateCommand": "npm run check",
+  "testCommand": "npx vitest run",
+  "setupCommand": "npm install",
+  "patternsScript": "scripts/spec-patterns.sh",
+  "layerGroups": [
+    [
+      "schemas"
+    ],
+    [
+      "analysis",
+      "server"
+    ],
+    [
+      "cli",
+      "ui"
+    ]
+  ],
+  "agentMap": {
+    "tests": "test-owner",
+    "ui": "reviewer-ui",
+    "default": "package-dev"
+  },
+  "pipelineRules": ".claude/rules/spec-pipeline.md",
+  "runtime": {
+    "inert": "npm package (CLI + Vite plugin + React page) — nothing boots on its own; `mock-review serve` runs against a host app, which the test fixture host under tests/fixtures/host provides"
+  },
+  "generatedBy": "spec@7.190.0",
+  "contractHash": "0b9431e308f6"
+}

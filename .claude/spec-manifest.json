@@ -1,0 +1,94 @@
+{
+  "checks": [
+    {
+      "claim": "grounding config generated",
+      "kind": "file",
+      "target": ".claude/spec.config.json"
+    },
+    {
+      "claim": "pipeline rules file generated",
+      "kind": "file",
+      "target": ".claude/rules/spec-pipeline.md"
+    },
+    {
+      "claim": "convention rule schemas.md generated",
+      "kind": "file",
+      "target": ".claude/rules/conventions/schemas.md"
+    },
+    {
+      "claim": "convention rule cli.md generated",
+      "kind": "file",
+      "target": ".claude/rules/conventions/cli.md"
+    },
+    {
+      "claim": "convention rule ui.md generated",
+      "kind": "file",
+      "target": ".claude/rules/conventions/ui.md"
+    },
+    {
+      "claim": "agent package-dev generated",
+      "kind": "file",
+      "target": ".claude/agents/package-dev.md"
+    },
+    {
+      "claim": "agent reviewer-ui generated",
+      "kind": "file",
+      "target": ".claude/agents/reviewer-ui.md"
+    },
+    {
+      "claim": "agent test-owner generated",
+      "kind": "file",
+      "target": ".claude/agents/test-owner.md"
+    },
+    {
+      "claim": "spec-verify skill generated",
+      "kind": "file",
+      "target": ".claude/skills/spec-verify/SKILL.md"
+    },
+    {
+      "claim": "run skill generated",
+      "kind": "file",
+      "target": ".claude/skills/run/SKILL.md"
+    },
+    {
+      "claim": "patterns script executes cleanly",
+      "kind": "exec",
+      "target": "bash scripts/spec-patterns.sh"
+    },
+    {
+      "claim": "settings.json permissions merge applied",
+      "kind": "exec",
+      "target": "jq -e '(.permissions.allow|type==\"array\") and (.permissions.deny|type==\"array\")' .claude/settings.json"
+    },
+    {
+      "claim": "runtime smoke boots and cleanly stops (or is declared inert)",
+      "kind": "smoke",
+      "target": ""
+    },
+    {
+      "claim": "git remote / CI activation",
+      "kind": "remote",
+      "target": "origin"
+    },
+    {
+      "claim": "testCommand fails loud on a no-match path (re-verifiable activation claim)",
+      "kind": "exec",
+      "target": "bash -c \"! npx vitest run .spec-init-gen-nonexistent-probe.marker\""
+    },
+    {
+      "claim": "at-risk leg applicability",
+      "kind": "inert",
+      "target": "no long-running runtime of its own; the serve process is exercised by the CLI tests against the fixture host"
+    },
+    {
+      "claim": "gate command runs green",
+      "kind": "exec",
+      "target": "npm run check"
+    },
+    {
+      "claim": "build emits the CLI with its shebang",
+      "kind": "exec",
+      "target": "npm run build && head -1 dist/cli.js | grep -q '^#!/usr/bin/env node'"
+    }
+  ]
+}

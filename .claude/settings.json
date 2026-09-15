@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run check:*)",
+      "Bash(npx vitest run:*)",
+      "Bash(npm install:*)",
+      "Bash(bash scripts/spec-patterns.sh:*)",
+      "Bash(npm run:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx playwright:*)",
+      "Bash(node:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Read(.env*)",
+      "Bash(npm publish:*)",
+      "Bash(git push --force:*)"
+    ]
+  }
+}

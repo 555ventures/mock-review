@@ -1,0 +1,2 @@
+{"ts":"2026-09-15T16:50:16Z","stage":"plan","spec":"specs/20260915/01-schemas-cli-and-bare-serve.md","tier":"critical","brief":"01","spikes":9,"promiseSweep":{"rows":14,"carried":14,"sanctioned":0,"orphans":0},"acLint":{"mixed":0},"verdict":"locked"}
+{"ts":"2026-09-15T16:50:16Z","stage":"plan","spec":"specs/20260915/02-the-reviewer-page.md","tier":"standard","brief":"01","spikes":0,"promiseSweep":{"rows":14,"carried":14,"sanctioned":0,"orphans":0},"acLint":{"mixed":0},"verdict":"locked"}
