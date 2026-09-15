@@ -25,7 +25,7 @@ function statusJson(scratchRoot: string): {
   return JSON.parse(readFileSync(path.join(scratchRoot, 'design', 'mocks', 'status.json'), 'utf8'))
 }
 
-describeIfPlugin('mocks-driver.js against the built binary (built dist/) [env: SPEC_PLUGIN_ROOT]', () => {
+describeIfPlugin('mocks-driver.js against the built binary (built .test-dist/, D19) [env: SPEC_PLUGIN_ROOT]', () => {
   let scratchRoot: string
   let appDir: string
 

@@ -1,9 +1,13 @@
-// D10: the `answer` verb — the page's doctrine (Page Notes) says only the page ends a note; this
-// CLI path is the session's half of that conversation, always attributed `by: "session"`.
+// D10/D19(c): the `answer` verb — the page's doctrine (Page Notes) says only the page ends a
+// note; this CLI path is the session's half of that conversation, always attributed
+// `by: "session"`. All validation (target exists, `decisions.json` — if present — parses and
+// validates) happens before any write, so a refusal leaves both `notes.json` and `decisions.json`
+// byte-identical (D19c).
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js'
 import { DecisionsSchema, NotesSchema } from '../schemas/index.js'
-import type { Decisions } from '../schemas/index.js'
+import type { Decisions, ThreadEntry } from '../schemas/index.js'
 import { fail } from './io.js'
 
 export type AnswerFlags = {
@@ -12,6 +16,8 @@ export type AnswerFlags = {
   text: string | undefined
   decision: string | undefined
 }
+
+type ThreadTarget = { status: 'open' | 'answered' | 'approved'; thread: ThreadEntry[] }
 
 export function answerVerb(cwd: string, flags: AnswerFlags): string {
   ensureDesignFiles(cwd)
@@ -28,33 +34,43 @@ export function answerVerb(cwd: string, flags: AnswerFlags): string {
 
   let screenForDecision: string | null = null
   let printedId: string
+  let target: ThreadTarget
 
   if (note !== undefined) {
-    const target = notes.notes.find((n) => n.id === note)
-    if (!target) fail(`no note ${note}`)
-    target.status = 'answered'
-    target.thread.push({ by: 'session', text })
-    screenForDecision = target.screen
+    const found = notes.notes.find((n) => n.id === note)
+    if (!found) fail(`no note ${note}`)
+    screenForDecision = found.screen
     printedId = note
+    target = found
   } else {
     const journeyId = journey as string
-    const target = notes.journeys[journeyId]
-    if (!target) fail(`no conversation for journey ${journeyId}`)
-    target.status = 'answered'
-    target.thread.push({ by: 'session', text })
+    const found = notes.journeys[journeyId]
+    if (!found) fail(`no conversation for journey ${journeyId}`)
     printedId = journeyId
+    target = found
   }
 
-  writeJsonAtomic(notesPath, notes)
-
+  // D19(c): validate `decisions.json` (when present) before mutating or writing anything, so an
+  // invalid file leaves notes.json (and decisions.json) byte-identical.
+  const decisionsPath = path.join(cwd, 'design', 'decisions.json')
+  let decisions: Decisions | undefined
   if (decision !== undefined) {
-    const decisionsPath = path.join(cwd, 'design', 'decisions.json')
-    let decisions: Decisions
-    try {
-      decisions = readJson(decisionsPath, DecisionsSchema)
-    } catch {
+    if (existsSync(decisionsPath)) {
+      try {
+        decisions = readJson(decisionsPath, DecisionsSchema)
+      } catch {
+        fail('design/decisions.json is invalid')
+      }
+    } else {
       decisions = { contractVersion: 1, decisions: [] }
     }
+  }
+
+  target.status = 'answered'
+  target.thread.push({ by: 'session', text })
+  writeJsonAtomic(notesPath, notes)
+
+  if (decision !== undefined && decisions) {
     decisions.decisions.push({ screen: screenForDecision, text: decision, at: new Date().toISOString() })
     writeJsonAtomic(decisionsPath, decisions)
   }

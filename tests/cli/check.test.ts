@@ -89,6 +89,26 @@ describe('mock-review check --json (built dist/)', () => {
     expect(renderFindings).toHaveLength(1)
   })
 
+  it('AC-20260915-01-8: a screen module that throws at import time yields exactly one render finding, "module failed to load: <msg>", and no meta: missing finding (D17/D19)', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-loadfail-')
+    const accountFile = path.join(host, 'src', 'screens', 'account.tsx')
+    writeFileSync(accountFile, `throw new Error('boom-load')\n` + readFileSync(accountFile, 'utf8'))
+
+    const check = runCheck(host)
+
+    const findingsForFile = check.findings.filter((f) => f.file === 'src/screens/account.tsx')
+    const renderFindings = findingsForFile.filter((f) => f.kind === 'render')
+    expect(renderFindings).toEqual([
+      {
+        kind: 'render',
+        severity: 'error',
+        file: 'src/screens/account.tsx',
+        message: 'module failed to load: boom-load',
+      },
+    ])
+    expect(findingsForFile.some((f) => f.message === 'meta: missing')).toBe(false)
+  })
+
   it('AC-20260915-01-9: reports a config finding and a null config on the broken fixture host (mock.config.ts lacks client)', () => {
     const host = copyFixtureHost(brokenHost, 'mock-review-check-broken-')
     const check = runCheck(host)

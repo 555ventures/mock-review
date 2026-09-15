@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { readFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureFixtures, greenHost, repoRoot } from '../setup.js'
-import { copyFixtureHost, run } from '../helpers/cli.js'
+import { buildScratchPackage, copyFixtureHost, run } from '../helpers/cli.js'
 
 describe('mock-review contract (built dist/)', () => {
   beforeAll(async () => {
@@ -34,6 +35,17 @@ describe('mock-review contract (built dist/)', () => {
     expect(r.status).toBe(2)
     expect(r.stdout).toBe('')
     expect(r.stderr.startsWith('mock-review: unknown verb frobnicate')).toBe(true)
+  })
+
+  it('AC-20260915-01-3: contract --json still exits 0 with the exact envelope from a scratch package whose node_modules cannot resolve vite (D2/D19)', () => {
+    const { cliPath: pkgCliPath } = buildScratchPackage(['vite'])
+    const empty = mkdtempSync(path.join(tmpdir(), 'mock-review-empty-'))
+    const version = (JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string }).version
+
+    const r = spawnSync(process.execPath, [pkgCliPath, 'contract', '--json'], { cwd: empty, encoding: 'utf8' })
+    expect(r.status).toBe(0)
+    expect(r.stderr).toBe('')
+    expect(r.stdout).toBe(`{"contractVersion":1,"package":"@555/mock-review","version":"${version}"}\n`)
   })
 
   it('AC-20260915-01-4: check --json on the green fixture host writes stdout that JSON.parse accepts whole, with no leading [vite] line', () => {

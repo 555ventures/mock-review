@@ -1,9 +1,9 @@
 ---
 paths:
-  - "specs/**"
-  - ".claude/**"
-  - "src/**"
-  - "tests/**"
+  - 'specs/**'
+  - '.claude/**'
+  - 'src/**'
+  - 'tests/**'
 ---
 
 # Spec pipeline grounding
@@ -40,3 +40,11 @@ one owner citation (spec path, AC-ID, D-number, ADR, run id).
 Never dates, people, hosts, versions, or prior behavior (/spec:doctor check 16 scans this
 layer). Writers: the review stage's close step and /spec:escape only. /spec:doctor prunes dead
 citations and rolls [plugin] entries up as an upstream bug list. -->
+
+- [host] Vite's `createServer()` registers its own `SIGINT`/`SIGTERM` handlers that exit with 128+signal before any handler registered later runs; a CLI that owns shutdown must remove them right after `createServer()` resolves. — AC-20260915-01-13
+- [host] `server.environments.ssr` is typed as the base `DevEnvironment`; narrow it with vite's `isRunnableDevEnvironment` before touching `.runner`. — D4 of specs/20260915/01-schemas-cli-and-bare-serve.md
+- [host] Tests spawn the gitignored `.test-dist/cli.js`, rebuilt when `src/**` is newer, never the committed `dist/` (a release artifact that can be a stub); a gate that builds into `dist/` dirties release output on every run. — D19 of specs/20260915/01-schemas-cli-and-bare-serve.md
+- [host] A test that runs a host verb in place on a committed fixture creates `design/*.json` inside it and every later scratch copy inherits them; fixture copies exclude `design/{notes,approval,decisions}.json` and `.serve.json`, and in-place runs remove only what they created. — AC-20260915-01-22
+- [host] A whole-command wall-clock bound on `check` measures Vite and TypeScript startup (well over a second), not the unit named in the AC; time the function under test directly. — D18 of specs/20260915/01-schemas-cli-and-bare-serve.md
+- [plugin] `red-check.js` lists files with a walker that treats directory symlinks as files and crashes with `EISDIR`; remove the fixture hosts' `node_modules` links before a red-check run (test runs recreate them). — specs/20260915/01-schemas-cli-and-bare-serve.md build (TESTS→RED_FINDINGS)
+- [plugin] `red-check.js` refuses when any non-tests File Plan path already differs from `diff_base`, so a config edit a test author needs must be reverted before red-check and re-applied in a wave. — D16 of specs/20260915/01-schemas-cli-and-bare-serve.md

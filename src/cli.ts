@@ -1,15 +1,12 @@
 #!/usr/bin/env node
-// D2: `mock-review <verb> [flags]` dispatcher. Every JSON verb writes exactly one JSON line to
-// stdout; every diagnostic (usage, refusal, unexpected error) goes to stderr as
-// `mock-review: <reason>` with exit code 2. `serve` never returns during normal operation — its
-// own signal handlers call `process.exit` directly.
+// D2/D19(b): `mock-review <verb> [flags]` dispatcher. Every JSON verb writes exactly one JSON
+// line to stdout; every diagnostic (usage, refusal, unexpected error) goes to stderr as
+// `mock-review: <reason>` with exit code 2. Each verb module is loaded with a dynamic `import()`
+// inside its own dispatch branch — only `args.js`/`io.js` (no Vite/analysis/server transitively)
+// load statically, so `contract` never pulls in Vite. `serve` never returns during normal
+// operation — its own signal handlers call `process.exit` directly.
 import { parseArgs } from './cli/args.js'
 import { CliError, printJson } from './cli/io.js'
-import { contractVerb } from './cli/contract.js'
-import { checkVerb, formatCheckText } from './cli/check.js'
-import { sweepVerb, formatSweepText } from './cli/sweep.js'
-import { answerVerb } from './cli/answer.js'
-import { serveVerb } from './cli/serve.js'
 
 async function main(argv: string[]): Promise<number> {
   const { verb, json, values, flags } = parseArgs(argv)
@@ -17,11 +14,13 @@ async function main(argv: string[]): Promise<number> {
 
   switch (verb) {
     case 'contract': {
+      const { contractVerb } = await import('./cli/contract.js')
       printJson(contractVerb())
       return 0
     }
 
     case 'check': {
+      const { checkVerb, formatCheckText } = await import('./cli/check.js')
       const check = await checkVerb(cwd, flags.has('look'))
       if (json) printJson(check)
       else process.stdout.write(formatCheckText(check))
@@ -29,6 +28,7 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case 'sweep': {
+      const { sweepVerb, formatSweepText } = await import('./cli/sweep.js')
       const sweep = sweepVerb(cwd)
       if (json) printJson(sweep)
       else process.stdout.write(formatSweepText(sweep))
@@ -36,6 +36,7 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case 'answer': {
+      const { answerVerb } = await import('./cli/answer.js')
       const result = answerVerb(cwd, {
         note: values.note,
         journey: values.journey,
@@ -47,6 +48,7 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case 'serve': {
+      const { serveVerb } = await import('./cli/serve.js')
       // Never resolves during normal operation; the process exits from within `startServe`'s own
       // signal handlers.
       await serveVerb(cwd)

@@ -2,7 +2,7 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 import { cpSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { cliPath, repoRoot } from '../setup.js'
+import { cliPath, repoRoot, testDistDir } from '../setup.js'
 
 export { cliPath, repoRoot }
 
@@ -88,6 +88,31 @@ export function copyFixtureHost(fixtureDir: string, label = 'mock-review-'): str
 export function linkInstalledBin(hostDir: string): void {
   const target = path.join(hostDir, 'node_modules', '.bin', 'mock-review')
   symlinkSync(cliPath, target)
+}
+
+/** Copies `.test-dist/` + the package's own `package.json` into a scratch directory shaped like
+ * an installed package (`<scratch>/package.json`, `<scratch>/dist/cli.js`, same relative depth
+ * `contractVerb()`'s `require('../../package.json')` expects), with an isolated `node_modules`
+ * containing every top-level entry from the package's own `node_modules` except those named in
+ * `exclude`. Used to prove `contract` never needs a package it doesn't import (D2/D19,
+ * AC-20260915-01-3) — e.g. `buildScratchPackage(['vite'])` for "contract works with no vite
+ * resolvable". */
+export function buildScratchPackage(exclude: readonly string[] = []): { dir: string; cliPath: string } {
+  const scratch = mkdtempSync(path.join(tmpdir(), 'mock-review-pkg-'))
+  cpSync(testDistDir, path.join(scratch, 'dist'), { recursive: true })
+  cpSync(path.join(repoRoot, 'package.json'), path.join(scratch, 'package.json'))
+  const target = path.join(scratch, 'node_modules')
+  mkdirSync(target, { recursive: true })
+  const sourceModules = path.join(repoRoot, 'node_modules')
+  for (const entry of readdirSync(sourceModules)) {
+    if (entry === '.bin' || exclude.includes(entry)) continue
+    symlinkSync(
+      path.join(sourceModules, entry),
+      path.join(target, entry),
+      statSync(path.join(sourceModules, entry)).isDirectory() ? 'dir' : 'file',
+    )
+  }
+  return { dir: scratch, cliPath: path.join(scratch, 'dist', 'cli.js') }
 }
 
 export function readJsonFile(file: string): unknown {

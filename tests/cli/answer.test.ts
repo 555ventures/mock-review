@@ -84,6 +84,27 @@ describe('mock-review answer (built dist/)', () => {
     expect(() => new Date(decisions.decisions[0]?.at ?? '').toISOString()).not.toThrow()
   })
 
+  it('AC-20260915-01-17: answer --decision refuses when design/decisions.json exists but fails the decisions schema, leaving both files byte-identical (D19)', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-answer-')
+    seedNotes(
+      host,
+      [{ id: 'N1', screen: 'home', state: 'default', component: null, key: null, snippet: null, status: 'open', thread: [] }],
+      {},
+    )
+    const decisionsPath = path.join(host, 'design', 'decisions.json')
+    const invalidDecisions = JSON.stringify({ contractVersion: 2, decisions: [] })
+    writeFileSync(decisionsPath, invalidDecisions)
+    const notesPath = path.join(host, 'design', 'notes.json')
+    const notesBefore = readFileSync(notesPath, 'utf8')
+
+    const r = run(host, ['answer', '--note', 'N1', '--text', 'x', '--decision', 'd'])
+    expect(r.status).toBe(2)
+    expect(r.stderr.trim()).toBe('mock-review: design/decisions.json is invalid')
+
+    expect(readFileSync(decisionsPath, 'utf8')).toBe(invalidDecisions)
+    expect(readFileSync(notesPath, 'utf8')).toBe(notesBefore)
+  })
+
   it('AC-20260915-01-17: answer on an unknown note id exits 2 with "mock-review: no note NOPE"', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     seedNotes(host, [], {})
