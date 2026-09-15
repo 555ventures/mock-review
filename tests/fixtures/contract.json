@@ -1,0 +1,49 @@
+{
+  "contractVersion": 1,
+  "package": "@555/mock-review",
+  "bin": "mock-review",
+  "verbs": ["contract", "sweep", "answer", "check", "serve"],
+  "host": {
+    "examples": "design/examples/ (outside every glob below)",
+    "config": "mock.config.ts",
+    "screens": "src/screens/*.tsx",
+    "components": "src/components/*.tsx",
+    "shells": "src/shells/*.tsx",
+    "journeys": "src/journeys.ts",
+    "records": "src/records/*.ts",
+    "themes": "src/themes/*.css",
+    "notes": "design/notes.json",
+    "approval": "design/approval.json",
+    "decisions": "design/decisions.json"
+  },
+  "shapes": {
+    "contract": { "required": ["contractVersion", "package", "version"] },
+    "check": {
+      "required": ["contractVersion", "ok", "findings", "screens", "shells", "journeys", "themes", "config", "serve"],
+      "screens[]": ["name", "file", "states", "shell", "hash", "lines"],
+      "shells[]": ["name", "file", "examples"],
+      "journeys[]": ["id", "title", "steps", "edges", "resolved", "unresolved"],
+      "findings[]": ["kind", "severity", "file", "message"],
+      "config": ["name", "port", "targets", "theme", "client"],
+      "serve": ["url"]
+    },
+    "sweep": {
+      "required": ["contractVersion", "inventory", "queue"],
+      "inventory[]": ["name", "kind", "props", "doc", "usedOn"],
+      "queue[]": ["kind", "id", "screen", "state", "file", "line", "last", "reuse"]
+    },
+    "notes": {
+      "required": ["contractVersion", "notes", "journeys"],
+      "notes[]": ["id", "screen", "state", "component", "key", "snippet", "status", "thread"],
+      "thread[]": ["by", "text"],
+      "journeys{}": ["status", "thread"]
+    },
+    "approval": {
+      "required": ["contractVersion", "screens", "journeys"],
+      "screens{}": ["hash", "approvedAt", "states", "viewports", "schemes", "screenshots"],
+      "journeys{}": ["approvedAt", "client"],
+      "theme": "string?"
+    },
+    "decisions": { "required": ["contractVersion", "decisions"], "decisions[]": ["screen", "text", "at"] }
+  }
+}

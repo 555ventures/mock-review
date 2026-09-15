@@ -19,5 +19,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "tests", "vitest.config.ts", "eslint.config.js"]
+  "include": ["src", "tests", "vitest.config.ts", "eslint.config.js"],
+  "exclude": ["tests/fixtures/host/**", "tests/fixtures/host-broken/**"]
 }
