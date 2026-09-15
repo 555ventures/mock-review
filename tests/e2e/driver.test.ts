@@ -2,20 +2,21 @@
 // of the fixture host with the built binary, no stub anywhere (Rationale: "nothing here may be
 // judged green through a stand-in"). SPEC_PLUGIN_ROOT defaults to ~/projects/claude-plugins.
 import { beforeAll, describe, expect, it } from 'vitest'
-import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
-import { copyHostInto, linkInstalledBin, run, DESIGN_STATE_FILES } from '../helpers/cli.js'
+import { copyHostInto, linkInstalledBin, run, spawnWithTimeout, DESIGN_STATE_FILES } from '../helpers/cli.js'
 
 const pluginRoot = process.env.SPEC_PLUGIN_ROOT || path.join(homedir(), 'projects', 'claude-plugins')
 const driverScript = path.join(pluginRoot, 'spec', 'scripts', 'mocks-driver.js')
 const hasPlugin = existsSync(driverScript)
 const describeIfPlugin = hasPlugin ? describe : describe.skip
 
+// D20: mocks-driver.js shells out to the built CLI internally (contractOrDie/checkJson); a hang
+// in that inner spawn would otherwise hang this outer one too, so it carries the same guard.
 function runDriver(scratchRoot: string, args: string[]) {
-  return spawnSync(process.execPath, [driverScript, '--root', scratchRoot, ...args], { encoding: 'utf8' })
+  return spawnWithTimeout(process.execPath, [driverScript, '--root', scratchRoot, ...args])
 }
 
 function statusJson(scratchRoot: string): {

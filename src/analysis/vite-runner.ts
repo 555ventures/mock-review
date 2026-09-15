@@ -18,7 +18,9 @@ export async function withRunner<T>(cwd: string, fn: (runner: Runner) => Promise
     configFile,
     logLevel: 'silent',
     appType: 'custom',
-    server: { middlewareMode: true },
+    // D20 (secondary guard): disable the FS watcher outright — `check`'s runner is one-shot and
+    // the watcher's handles otherwise survive `server.close()` and keep the event loop alive.
+    server: { middlewareMode: true, watch: null },
   })
 
   try {

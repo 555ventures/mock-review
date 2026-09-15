@@ -1,10 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { spawnSync } from 'node:child_process'
 import { readFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureFixtures, greenHost, repoRoot } from '../setup.js'
-import { buildScratchPackage, copyFixtureHost, run } from '../helpers/cli.js'
+import { buildScratchPackage, copyFixtureHost, run, spawnWithTimeout } from '../helpers/cli.js'
 
 describe('mock-review contract (built dist/)', () => {
   beforeAll(async () => {
@@ -42,7 +41,7 @@ describe('mock-review contract (built dist/)', () => {
     const empty = mkdtempSync(path.join(tmpdir(), 'mock-review-empty-'))
     const version = (JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string }).version
 
-    const r = spawnSync(process.execPath, [pkgCliPath, 'contract', '--json'], { cwd: empty, encoding: 'utf8' })
+    const r = spawnWithTimeout(process.execPath, [pkgCliPath, 'contract', '--json'], { cwd: empty })
     expect(r.status).toBe(0)
     expect(r.stderr).toBe('')
     expect(r.stdout).toBe(`{"contractVersion":1,"package":"@555/mock-review","version":"${version}"}\n`)

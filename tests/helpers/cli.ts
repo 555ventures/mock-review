@@ -6,21 +6,74 @@ import { cliPath, repoRoot, testDistDir } from '../setup.js'
 
 export { cliPath, repoRoot }
 
-/** Runs `node dist/cli.js <args>` with the given cwd, capturing stdout/stderr/status. */
+/** D20: a one-shot CLI verb takes ~1.5s; a synchronous spawn that hasn't exited by this bound is
+ * hung, not slow. Every synchronous CLI spawn in tests carries this timeout so a hang fails the
+ * test in seconds with a readable message instead of stalling the whole gate for its full
+ * `vitest`/CI timeout. */
+export const CLI_SPAWN_TIMEOUT_MS = 30_000
+
+/** Throws a readable error naming the argv and cwd when `result` shows the child was killed by
+ * `CLI_SPAWN_TIMEOUT_MS` rather than exiting on its own (`result.error?.code === 'ETIMEDOUT'`, or
+ * `result.signal` set — spawnSync's timeout kill does not always populate `.error`). A normal
+ * `mock-review` exit (0 or 2) never sets `.signal`, so this cannot misfire on an expected refusal. */
+function dieIfTimedOut(result: SpawnSyncReturns<string>, argv: string[], cwd: string): void {
+  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code
+  const timedOut = errorCode === 'ETIMEDOUT' || result.signal != null
+  if (!timedOut) return
+  const reason = result.signal ? `killed by ${result.signal}` : (result.error?.message ?? 'timed out')
+  throw new Error(
+    `CLI spawn hung and was killed after ${CLI_SPAWN_TIMEOUT_MS}ms (${reason}): ${JSON.stringify(argv)} in ${cwd}`,
+  )
+}
+
+/** Runs `node .test-dist/cli.js <args>` with the given cwd, capturing stdout/stderr/status. */
 export function run(cwd: string, args: string[]): SpawnSyncReturns<string> {
-  return spawnSync(process.execPath, [cliPath, ...args], { cwd, encoding: 'utf8' })
+  const argv = [process.execPath, cliPath, ...args]
+  const result = spawnSync(process.execPath, [cliPath, ...args], {
+    cwd,
+    encoding: 'utf8',
+    timeout: CLI_SPAWN_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  })
+  dieIfTimedOut(result, argv, cwd)
+  return result
 }
 
 /** Runs the `mock-review` bin exactly as the plugin's mock-cli.js spawns it: unqualified, with
  * `<cwd>/node_modules/.bin` prepended to PATH, shell disabled. */
 export function runInstalled(cwd: string, args: string[]): SpawnSyncReturns<string> {
   const bin = path.join(cwd, 'node_modules', '.bin')
-  return spawnSync('mock-review', args, {
+  const argv = ['mock-review', ...args]
+  const result = spawnSync('mock-review', args, {
     cwd,
     shell: false,
     encoding: 'utf8',
+    timeout: CLI_SPAWN_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
     env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` },
   })
+  dieIfTimedOut(result, argv, cwd)
+  return result
+}
+
+/** Runs any synchronous child process (not the `mock-review` bin itself, e.g. a scratch package's
+ * copy of the built CLI, or the plugin's mocks-driver.js which shells out to the CLI internally)
+ * with the same D20 hang guard as `run`/`runInstalled`. */
+export function spawnWithTimeout(
+  command: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): SpawnSyncReturns<string> {
+  const cwd = options.cwd ?? process.cwd()
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    timeout: CLI_SPAWN_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+    ...(options.env ? { env: options.env } : {}),
+  })
+  dieIfTimedOut(result, [command, ...args], cwd)
+  return result
 }
 
 /** Builds a real (non-symlinked) `node_modules` under `hostDir`, with one symlink per top-level
