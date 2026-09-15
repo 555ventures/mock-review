@@ -1,11 +1,3 @@
-import type { Plugin } from 'vite'
-
-/**
- * The reviewer's Vite plugin. A no-op placeholder: Spec A mounts the dev-server middleware
- * (`/__mock-review/ping`, the portfile, the reviewer route) here.
- */
-export function mockReview(): Plugin {
-  return { name: 'mock-review' }
-}
-
-export default mockReview
+// D8: `@555/mock-review/vite` — the package's Vite plugin entry point, re-exported from the
+// server layer so a host's `vite.config.ts` can `import { mockReview } from '@555/mock-review/vite'`.
+export { mockReview, default } from './server/plugin.js'

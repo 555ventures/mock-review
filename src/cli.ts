@@ -1,28 +1,70 @@
 #!/usr/bin/env node
-import { createRequire } from 'node:module'
+// D2: `mock-review <verb> [flags]` dispatcher. Every JSON verb writes exactly one JSON line to
+// stdout; every diagnostic (usage, refusal, unexpected error) goes to stderr as
+// `mock-review: <reason>` with exit code 2. `serve` never returns during normal operation — its
+// own signal handlers call `process.exit` directly.
+import { parseArgs } from './cli/args.js'
+import { CliError, printJson } from './cli/io.js'
+import { contractVerb } from './cli/contract.js'
+import { checkVerb, formatCheckText } from './cli/check.js'
+import { sweepVerb, formatSweepText } from './cli/sweep.js'
+import { answerVerb } from './cli/answer.js'
+import { serveVerb } from './cli/serve.js'
 
-const require = createRequire(import.meta.url)
-const pkg = require('../package.json') as { version: string }
+async function main(argv: string[]): Promise<number> {
+  const { verb, json, values, flags } = parseArgs(argv)
+  const cwd = process.cwd()
 
-const CONTRACT_VERSION = 1
-const PACKAGE_NAME = '@555/mock-review'
+  switch (verb) {
+    case 'contract': {
+      printJson(contractVerb())
+      return 0
+    }
 
-function main(argv: string[]): number {
-  const verb = argv[2]
+    case 'check': {
+      const check = await checkVerb(cwd, flags.has('look'))
+      if (json) printJson(check)
+      else process.stdout.write(formatCheckText(check))
+      return 0
+    }
 
-  if (verb === 'contract') {
-    process.stdout.write(
-      JSON.stringify({
-        contractVersion: CONTRACT_VERSION,
-        package: PACKAGE_NAME,
-        version: pkg.version,
-      }) + '\n',
-    )
-    return 0
+    case 'sweep': {
+      const sweep = sweepVerb(cwd)
+      if (json) printJson(sweep)
+      else process.stdout.write(formatSweepText(sweep))
+      return 0
+    }
+
+    case 'answer': {
+      const result = answerVerb(cwd, {
+        note: values.note,
+        journey: values.journey,
+        text: values.text,
+        decision: values.decision,
+      })
+      process.stdout.write(result + '\n')
+      return 0
+    }
+
+    case 'serve': {
+      // Never resolves during normal operation; the process exits from within `startServe`'s own
+      // signal handlers.
+      await serveVerb(cwd)
+      return 0
+    }
+
+    default: {
+      throw new CliError(`unknown verb ${verb ?? '(none)'}`)
+    }
   }
-
-  process.stderr.write(`mock-review: ${verb ?? '(no verb)'} not implemented\n`)
-  return 2
 }
 
-process.exitCode = main(process.argv)
+main(process.argv.slice(2))
+  .then((code) => {
+    process.exitCode = code
+  })
+  .catch((err: unknown) => {
+    const message = err instanceof CliError ? err.message : err instanceof Error ? err.message : String(err)
+    process.stderr.write(`mock-review: ${message}\n`)
+    process.exitCode = 2
+  })

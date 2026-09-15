@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+
+/* nova theme tokens — fixture only, never read for its content by the package (D3: themes are
+   discovered by basename, never parsed). */
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+}
