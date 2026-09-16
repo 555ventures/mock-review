@@ -15,7 +15,7 @@ export type GuideStep = { screen: string; state: string }
 export type GuideResult = { hints: GuideHint[]; ring: string[] }
 
 function findControl(root: HTMLElement, label: string): HTMLElement | null {
-  return root.querySelector<HTMLElement>(`[data-to="${label}"]`)
+  return root.querySelector<HTMLElement>(`[data-to="${CSS.escape(label)}"]`)
 }
 
 const EMPTY_HINTS: GuideHint[] = []
