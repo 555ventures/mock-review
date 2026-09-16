@@ -1,7 +1,8 @@
 /* D8: the reviewer's own Tailwind 4 CSS — the reference's tokens (Geist Variable, --radius:
  * 0.625rem, stock neutral oklch), light-only (§0.3: no scheme toggle in the reviewer chrome). The
  * only custom CSS is the journey guide ring (§8.3). */
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "./";
 @import "tw-animate-css";
 @import "@fontsource-variable/geist";
 

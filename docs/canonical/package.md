@@ -42,17 +42,19 @@ Liveness: `check` reports `serve.url` = the portfile's `url` only when
 
 ## The reviewer page
 
-`serve` mounts the package's Vite plugin on the host's own dev server and serves the reviewer page,
-prebuilt into `dist/page/` and resolved relative to the compiled server module (so a test build in
-`.test-dist/` serves its own page). The mock itself renders in an iframe through the host's Vite
-pipeline: the frame document loads `dist/frame/entry.tsx` over Vite's `/@fs/` route, which is why
-the frame compiles with the host's aliases, CSS and plugins. When either file is missing, `serve`
-logs one line to stderr naming it and the affected route answers 503 rather than a blank 200.
-
-Inside `serve` nothing creates a second Vite server: every host module load goes through the running
-server's own SSR runner. A one-shot verb (`check`, `check --look`) keeps its own short-lived server
-and its own `node_modules/.vite/mock-review-check` cache, so it can never evict the deps `serve` is
-serving.
+`serve` mounts the package's Vite plugin on the host's own dev server. `GET /` — owner,
+`?client=<token>` and `?frame=1` alike — answers one HTML document whose single module script is
+`/@id/__x00__mock-review:entry`; the plugin resolves that virtual id to one import of the package's
+`src/ui/main.tsx`, which loads the reviewer or, when the URL carries `frame`, the mock frame. Both
+compile through the host's own Vite pipeline (aliases, `@vitejs/plugin-react`, `@tailwindcss/vite`),
+so the package ships its reviewer as source (`files` includes `src/ui`) and no prebuilt page. The
+reviewer's stylesheet uses `@import "tailwindcss" source(none)` with `@source "./"`, so its classes
+come from `src/ui/` only and the host's stylesheet never scans the package. The plugin is
+`apply: 'serve'`: a host that lists `mockReview()` in its `vite.config.ts` builds clean, and such a
+host must be an ESM package (`"type": "module"`). Inside `serve` nothing creates a second Vite
+server: every host module load goes through the running server's own SSR runner. A one-shot verb
+(`check`, `check --look`) keeps its own short-lived server and its own
+`node_modules/.vite/mock-review-check` cache, so it can never evict the deps `serve` is serving.
 
 ### Server API
 
@@ -67,7 +69,7 @@ in-process lock.
 | `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'approveJourney'\|'clientOk', id} \| {op:'theme', key}` → the new document                                     |
 | `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                           |
 | `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                           |
-| `/` and `/?frame=1` | GET    | the prebuilt page; the frame document                                                                                                                                |
+| `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                        |
 
 Refusals: 400 for a body that is not JSON, for a patch that fails its schema, for an `add` carrying
 its own `id`, and for approving a screen with no row in the current state (never a written empty
@@ -149,22 +151,20 @@ contains `data-to="<edge.label>"`. Otherwise it lands in `journeys[].unresolved`
 ## Tests and builds
 
 Tests never write the committed `dist/`. `tests/setup.ts` compiles `tsconfig.build.json` into the
-gitignored `.test-dist/`, rebuilding whenever `src/**` is newer, under a lock. Every CLI test spawns
-`.test-dist/cli.js`.
+gitignored `.test-dist/` with `tsc` alone, rebuilding whenever `src/**` is newer, under a lock; the
+reviewer needs no build. Browser tests run both layouts: the linked package (the repo's
+`.test-dist`) and a package materialised under a scratch host's `node_modules/@555/mock-review/`.
 
 ## Release procedure
 
-1. `npm run build` (writes `dist/`: the compiled CLI, `dist/page/` from `vite.page.config.ts`, and a
-   copy of the frame entry at `dist/frame/entry.tsx`).
+1. `npm run build` (writes `dist/`: the compiled CLI and plugin only).
 2. Commit `dist/`. It is committed at release only, never in a build batch.
-3. `npm run release:check` — it must pass. It asserts that every `dist/` entry the plugin serves
-   exists, is git-tracked with a clean `dist/`, that the copied frame entry matches its source, that
-   no commit after the last `dist/` commit touched `src/`, `vite.page.config.ts` or
-   `tsconfig.build.json`, and that the built page references its own asset base. It never runs under
-   `npm run check`, because `dist/` is stale by design between releases.
-4. `git tag -f v1`.
-5. Push the tags.
+3. `git tag -f v1`.
+4. Push the tags.
 
 Hosts install with `npm i -D github:555ventures/mock-review#v1`. There is no `prepare` script. The
 runtime `dependencies` are `zod`, `react-docgen-typescript` and `typescript ~6.0.0`; `vite`, `react`
-and `react-dom` are peers, and `playwright` is an optional peer.
+and `react-dom` are peers, and `playwright` is an optional peer. The runtime `dependencies` also
+carry the reviewer's UI libraries (`radix-ui`, `cmdk`, `lucide-react`, `class-variance-authority`,
+`clsx`, `tailwind-merge`, `react-resizable-panels`, `tw-animate-css`, `@fontsource-variable/geist`);
+`tailwindcss ^4` is a peer; the host provides `@vitejs/plugin-react` and `@tailwindcss/vite`.

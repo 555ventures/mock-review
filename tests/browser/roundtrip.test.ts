@@ -254,7 +254,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
     }
   }, 60_000)
 
-  it('AC-20260915-02-20: Approve screen writes approval.screens.home with the check --json hash, and a new note un-approves it', async () => {
+  it('AC-20260915-03-5 (AC-20260915-02-20): Approve screen writes approval.screens.home with the check --json hash, and a new note un-approves it', async () => {
     serve = await startServe(greenHost)
     const { url: serveUrl, host: serveHost } = serve
     const page = await browser.newPage()

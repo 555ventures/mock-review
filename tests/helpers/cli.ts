@@ -243,6 +243,28 @@ export function buildScratchPackage(exclude: readonly string[] = []): { dir: str
   return { dir: scratch, cliPath: path.join(scratch, 'dist', 'cli.js') }
 }
 
+/** D8 of specs/20260915/03: materialises the package under `<hostDir>/node_modules/@555/mock-review/`
+ * exactly as a real `npm install` would leave it post-collapse — `.test-dist/` (the CLI + plugin,
+ * built by tests/setup.ts's `ensureFixtures`) as that package's own `dist/`, `src/ui/` copied in
+ * verbatim (D7's `files: ["dist", "src/ui"]` — the reviewer ships as source, compiled by the host
+ * at serve time, never by this repo's own build), and the package's own `package.json` (so the
+ * plugin's `pkgRoot` resolution and any `require('../../package.json')`-style read find a real
+ * file at the expected relative depth). `hostDir` must already have its own `node_modules` (see
+ * `linkNodeModulesInto`/`copyFixtureHost`) — this only adds the one scoped package into it, it
+ * never builds a fresh node_modules of its own. Returns the installed `dist/cli.js` path, which a
+ * browser test starts `serve` from to prove the installed layout (JSX physically under
+ * `node_modules`, `@vitejs/plugin-react`'s Fast Refresh exclusion, the D4 `optimizeDeps.include`
+ * cold-start path) actually renders — spec 02's release gap (a package installed from git served
+ * a blank mock) was invisible because every test ran the linked layout only. */
+export function installPackageInto(hostDir: string): string {
+  const pkgDir = path.join(hostDir, 'node_modules', '@555', 'mock-review')
+  mkdirSync(pkgDir, { recursive: true })
+  cpSync(testDistDir, path.join(pkgDir, 'dist'), { recursive: true })
+  cpSync(path.join(repoRoot, 'src', 'ui'), path.join(pkgDir, 'src', 'ui'), { recursive: true })
+  cpSync(path.join(repoRoot, 'package.json'), path.join(pkgDir, 'package.json'))
+  return path.join(pkgDir, 'dist', 'cli.js')
+}
+
 export function readJsonFile(file: string): unknown {
   return JSON.parse(readFileSync(file, 'utf8'))
 }

@@ -1,6 +1,7 @@
 ---
 date: 2026-09-15
-status: hardened
+status: done
+build_base: main
 open_markers: 0
 tier: critical
 area: reviewer-page
@@ -10,6 +11,7 @@ depends_on: [specs/20260915/02-the-reviewer-page.md]
 depended_on_by: []
 brief: n/a
 spiked: 2026-09-15
+diff_base: 5ee095701aada8cd787ce2eb2ba68b21217d4caf
 ---
 
 # Collapse the reviewer onto the host's Vite server
@@ -208,6 +210,20 @@ retired), `.claude/spec-runs/*.jsonl` (ledger history), and untracked build arti
 Pins: AC-5, AC-9, AC-10 and AC-11 are `SHALL CONTINUE TO` pins on behaviours that must outlive this
 spec — approval hash, screenshots, theme, and the driver reaching APPROVED all travel through the
 frame this spec re-plumbs. AC-6's status is settled by spike 4.
+
+Build incidents, folded here rather than generalised as gotchas: `tests/setup.ts`'s D6 edit
+(dropping the page/frame build helpers) was authored at TESTS, reverted to the pre-image before
+red-check per D16 of spec 01, then re-applied unchanged in the implementation wave — removing the
+build ahead of red-check turned AC-5/-9/-10/-11's pins red for an ordering reason, not a content
+one. `tests/server/api.test.ts`'s AC-1 case originally counted every `type="module"` script in
+`GET /`'s body, which is over-broad: Vite's own `devHtmlHook` always injects `/@vite/client`
+alongside the entry script, so the assertion was narrowed to match `ENTRY_URL` specifically,
+leaving the `/@vite/client` containment check untouched — `src/server/plugin.ts` was correct
+throughout. `tests/browser/hmr.test.ts`'s AC-6 edit used a non-global
+`replace('Account', 'Account (edited)')`, which landed on the `data-to="Account"` attribute
+(rendered before the child text) rather than the visible label; re-aimed at the closing
+`>Account</Button>` text node, leaving the attribute — relied on by the journey graph and
+`tests/browser/surfaces.test.ts` — intact.
 
 ## Canonical Delta
 

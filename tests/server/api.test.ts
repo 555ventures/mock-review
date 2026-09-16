@@ -1,12 +1,18 @@
 // AC-20260915-02-8, -9, -10, -13, -14: D6's server API (GET state, POST notes, POST approval,
-// GET events/SSE), D8's frame + prebuilt-page serving, D9's viewport-driven device captions.
+// GET events/SSE), D9's viewport-driven device captions.
+// AC-20260915-03-1, -3, -4, -7: specs/20260915/03's collapse onto one document/one entry — the
+// page/frame-serving and D24-cookie assertions below are rewritten for the single `GET /`
+// template (D1) and the `/@id/__x00__mock-review:entry` virtual module (D1), replacing spec 02's
+// `/__mock-review/page/*` static asset route and the frame's `/@fs/<frame entry>` script tag.
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { ensureFixtures, greenHost, pageDir } from '../setup.js'
-import { copyFixtureHost, run } from '../helpers/cli.js'
+import { ensureFixtures, greenHost } from '../setup.js'
+import { copyFixtureHost, installPackageInto, run } from '../helpers/cli.js'
 import { startServe, startServeIn, stopServe, type Serve } from '../helpers/serve.js'
+
+const ENTRY_URL = '/@id/__x00__mock-review:entry'
 
 let serve: Serve | undefined
 
@@ -34,6 +40,36 @@ describe('mock-review server API (D6)', () => {
   beforeAll(async () => {
     await ensureFixtures()
   }, 180_000)
+
+  it('AC-20260915-03-1: GET / and GET /?frame=1 answer one HTML document through the entry id, with no page/@fs leftovers, and the entry module is one import ending src/ui/main.tsx', async () => {
+    serve = await startServe(greenHost)
+
+    for (const suffix of ['/', '/?frame=1']) {
+      const res = await fetch(`${serve.url}${suffix}`)
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toContain('text/html')
+      const html = await res.text()
+      const scriptMatches = [...html.matchAll(/<script[^>]+type="module"[^>]+src="([^"]+)"/g)]
+      const entryScriptMatches = scriptMatches.filter((match) => match[1] === ENTRY_URL)
+      expect(entryScriptMatches).toHaveLength(1)
+      expect(html).toContain('/@vite/client')
+      expect(html).not.toContain('/__mock-review/page/')
+      expect(html).not.toContain('/@fs/')
+    }
+
+    const entryRes = await fetch(`${serve.url}${ENTRY_URL}`)
+    expect(entryRes.status).toBe(200)
+    expect(entryRes.headers.get('content-type') ?? '').toMatch(/javascript/)
+    const entryBody = (await entryRes.text()).trim()
+    const importLines = entryBody
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .filter((line) => !/^\/\/# sourceMappingURL=/.test(line.trim()))
+      .filter((line) => !/^\/\/# sourceURL=/.test(line.trim()))
+    expect(importLines).toHaveLength(1)
+    expect(importLines[0]).toMatch(/^import\s+["'][^"']+src\/ui\/main\.tsx["']/)
+    expect(importLines[0]).toMatch(/src\/ui\/main\.tsx["']\s*$/)
+  })
 
   it('AC-20260915-02-8: GET state reports screens/journeys/inventory/notes/approval and role owner, client when the mock-review-client cookie matches the config token', async () => {
     serve = await startServe(greenHost)
@@ -164,7 +200,7 @@ describe('mock-review server API (D6)', () => {
     expect(approval.journeys['first-visit']?.client).toBe('ok')
   })
 
-  it('AC-20260915-02-8/-10 (D24): ?client= sets a Set-Cookie, the cookie alone grants client from a forwarded request, and a Referer-only token or a stale cookie is 403', async () => {
+  it('AC-20260915-03-7 (AC-20260915-02-8/-10, D24): ?client= sets a Set-Cookie, the cookie alone grants client from a forwarded request across every gated route including the entry and its module import, and a Referer-only token or a stale/missing cookie is 403 with no file changed', async () => {
     serve = await startServe(greenHost)
     const notesPath = path.join(serve.host, 'design', 'notes.json')
     const before = readFileSync(notesPath, 'utf8')
@@ -173,29 +209,49 @@ describe('mock-review server API (D6)', () => {
     // X-Forwarded-For/Forwarded/Cf-Connecting-Ip present).
     const forwarded = { 'x-forwarded-for': '203.0.113.9' }
 
-    // A ?client= request (even forwarded) that matches the token is `client` and sets the cookie.
+    // A ?client= request (even forwarded) that matches the token is `client`, answers the entry
+    // document, and sets the cookie.
     const setCookieRes = await fetch(`${serve.url}/?client=replace-me`, { headers: forwarded })
     expect(setCookieRes.status).toBe(200)
     expect(setCookieRes.headers.get('set-cookie')).toBe('mock-review-client=replace-me; Path=/; HttpOnly; SameSite=Lax')
+    expect(await setCookieRes.text()).toContain(ENTRY_URL)
 
-    // The cookie alone (no ?client=, still forwarded) is enough for `state`, the frame HTML, and
-    // the frame's own Vite module route — the mechanism a remote client's browser actually uses
-    // once the cookie is set, and the exact case the plugin's earlier Referer-based draft failed
-    // (the frame's sub-requests carry the frame's own URL as Referer, never the token).
+    // The cookie alone (no ?client=, still forwarded) is enough for every gated route the D1
+    // single-document design makes: `/`, `/?frame=1`, the entry module, the module URL that entry
+    // imports, `state` (role: client), and `events` — the mechanism a remote client's browser
+    // actually uses once the cookie is set, and the exact case the plugin's earlier Referer-based
+    // draft failed (the frame's sub-requests carry the frame's own URL as Referer, never the
+    // token).
     const cookieHeaders = { ...forwarded, Cookie: 'mock-review-client=replace-me' }
+
+    const ownerRes = await fetch(`${serve.url}/`, { headers: cookieHeaders })
+    expect(ownerRes.status).toBe(200)
+
+    const frameRes = await fetch(`${serve.url}/?frame=1`, { headers: cookieHeaders })
+    expect(frameRes.status).toBe(200)
+
+    const entryRes = await fetch(`${serve.url}${ENTRY_URL}`, { headers: cookieHeaders })
+    expect(entryRes.status).toBe(200)
+    const entryBody = await entryRes.text()
+    const importMatch = /import\s+["']([^"']+)["']/.exec(entryBody)
+    expect(importMatch).not.toBeNull()
+    const importedModuleUrl = importMatch?.[1] ?? ''
+    const importedModuleRes = await fetch(`${serve.url}${importedModuleUrl}`, { headers: cookieHeaders })
+    expect(importedModuleRes.status).toBe(200)
+
     const cookieStateRes = await fetch(`${serve.url}/__mock-review/state`, { headers: cookieHeaders })
     expect(cookieStateRes.status).toBe(200)
     const cookieState = (await cookieStateRes.json()) as ServerState
     expect(cookieState.role).toBe('client')
 
-    const frameRes = await fetch(`${serve.url}/?frame=1#/home?state=Default`, { headers: cookieHeaders })
-    expect(frameRes.status).toBe(200)
-    const frameHtml = await frameRes.text()
-    const fsMatch = /src="(\/@fs\/[^"]+)"/.exec(frameHtml)
-    expect(fsMatch).not.toBeNull()
-    const frameEntryUrl = fsMatch?.[1] ?? ''
-    const fsRes = await fetch(`${serve.url}${frameEntryUrl}`, { headers: cookieHeaders })
-    expect(fsRes.status).toBe(200)
+    const cookieEventsRes = await fetch(`${serve.url}/__mock-review/events`, { headers: cookieHeaders })
+    expect(cookieEventsRes.status).toBe(200)
+    await cookieEventsRes.body?.cancel()
+
+    // A forwarded request with no cookie and no ?client= is refused for `state`.
+    const noCookieStateRes = await fetch(`${serve.url}/__mock-review/state`, { headers: forwarded })
+    expect(noCookieStateRes.status).toBe(403)
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
 
     // A forwarded request whose only token carrier is the Referer (no cookie, no ?client=) is
     // refused — the Referer is never consulted (D24's rationale: the spike that killed the first
@@ -380,8 +436,8 @@ describe('mock-review server API (D6)', () => {
     freshReader?.cancel()
   }, 20_000)
 
-  describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-13: frame document and prebuilt page [env: SKIP_BROWSER]', () => {
-    it('serves the frame with the shell rendered, no reviewer chrome, and toggles html.dark on &scheme=dark', async () => {
+  describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-03-3/-4: one document, one entry, CSS isolation and production safety [env: SKIP_BROWSER]', () => {
+    it('AC-20260915-03-3: serves the frame with the shell rendered, no reviewer chrome or sidebar CSS, exactly the entry + frame/mount URLs under src/ui/, and toggles html.dark on &scheme=dark', async () => {
       serve = await startServe(greenHost)
       const { chromium } = await import('playwright')
       const browser = await chromium.launch()
@@ -392,6 +448,33 @@ describe('mock-review server API (D6)', () => {
         expect(await page.locator('[data-component="ConsoleShell"] button[data-to="Account"]').count()).toBeGreaterThan(0)
         expect(await page.locator('[data-sidebar]').count()).toBe(0)
 
+        // D2/D3: the frame's own module graph never loads the reviewer's index.css, so no
+        // stylesheet in this document defines the reviewer's `--sidebar-width` token.
+        const hasSidebarWidthRule = await page.evaluate(() => {
+          for (const sheet of Array.from(document.styleSheets)) {
+            try {
+              for (const rule of Array.from(sheet.cssRules)) {
+                if (rule.cssText.includes('--sidebar-width')) return true
+              }
+            } catch {
+              // a cross-origin stylesheet throws on .cssRules; none exist in this document.
+            }
+          }
+          return false
+        })
+        expect(hasSidebarWidthRule).toBe(false)
+
+        // AC-3: resource timing carries exactly one src/ui/main.tsx URL (the entry, loaded once
+        // by the outer reviewer document, visible here because same-origin timing entries include
+        // cross-frame navigations within the same top-level browsing context in this Playwright
+        // page) and one src/ui/frame/mount.tsx URL (D2's frame branch), and no other src/ui/ URL.
+        const srcUiUrls = await page.evaluate(() =>
+          performance.getEntriesByType('resource').map((e) => e.name).filter((name) => name.includes('src/ui/')),
+        )
+        expect(srcUiUrls.filter((u) => u.endsWith('src/ui/main.tsx'))).toHaveLength(1)
+        expect(srcUiUrls.filter((u) => u.endsWith('src/ui/frame/mount.tsx'))).toHaveLength(1)
+        expect(srcUiUrls.filter((u) => !u.endsWith('src/ui/main.tsx') && !u.endsWith('src/ui/frame/mount.tsx'))).toEqual([])
+
         await page.goto(`${serve.url}/?frame=1#/home?state=Default&scheme=dark`, { waitUntil: 'networkidle' })
         const hasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'))
         expect(hasDark).toBe(true)
@@ -400,31 +483,18 @@ describe('mock-review server API (D6)', () => {
       }
     }, 30_000)
 
-    it('serves the prebuilt reviewer page at GET / with a script tag under /__mock-review/page/', async () => {
-      serve = await startServe(greenHost)
-      const res = await fetch(`${serve.url}/`)
-      expect(res.status).toBe(200)
-      const html = await res.text()
-      expect(html).toMatch(/<script[^>]+src="\/__mock-review\/page\//)
-      expect(existsSync(path.join(pageDir, 'index.html'))).toBe(true)
-    })
-
-    it('a production `vite build` of the host emits no chunk containing "mock-review"', () => {
-      // D18: the fixture host ships no index.html (it is only ever loaded through the reviewer's
-      // frame/page routes, never as a standalone Vite app), so a bare `vite build` emits nothing
-      // and this assertion would pass vacuously. Give the *scratch copy only* (never the
-      // committed fixture) a minimal HTML entry pointing at a real host module, so the build is
-      // real and actually exercises the host's own module graph.
-      // This label alone isn't enough to keep "mock-review" out of the build output — a JSX
-      // dev-source annotation embeds the *absolute* scratch path, and that path is
-      // `path.join(tmpdir(), label)`: `tmpdir()` itself comes from TMPDIR, which has twice now
-      // been redirected (once by a prior session, once by a concurrent worker in this same
-      // review round) to a directory under this repo's own checkout — whose path already
-      // contains "mock-review" as this project's own directory name, with no way for this test
-      // to control that. Filtering every literal occurrence of the scratch host's own absolute
-      // path out of each file's content before searching makes the assertion immune to *where*
-      // the OS happens to put temp files, which a label alone can never guarantee.
+    it('AC-20260915-03-4: a host mounting mockReview() in its own vite.config.ts builds clean with no reviewer marker, and serve still answers the entry (double mount)', async () => {
+      // D18/D5: the fixture host ships no package.json or index.html (it is only ever loaded
+      // through the reviewer's own routes, never as a standalone Vite app). Give the *scratch
+      // copy only* (never the committed fixture) an ESM package.json, a minimal HTML entry
+      // pointing at a real host module, and a vite.config.ts that also mounts mockReview() —
+      // exactly D5's documented host requirements and D4's double-mount case.
+      // A JSX dev-source annotation embeds the *absolute* scratch path, which (per this repo's
+      // own directory name) can itself contain the literal "mock-review" — strip every literal
+      // occurrence of the scratch host's own absolute path out of each file's content before
+      // searching, so the assertion is immune to *where* the OS happens to put temp files.
       const host = copyFixtureHost(greenHost, 'reviewer-vitebuild-')
+      writeFileSync(path.join(host, 'package.json'), JSON.stringify({ name: 'app', private: true, type: 'module' }))
       writeFileSync(
         path.join(host, 'index.html'),
         [
@@ -437,6 +507,28 @@ describe('mock-review server API (D6)', () => {
           '',
         ].join('\n'),
       )
+      writeFileSync(
+        path.join(host, 'vite.config.ts'),
+        [
+          "import { defineConfig } from 'vite'",
+          "import react from '@vitejs/plugin-react'",
+          "import tailwindcss from '@tailwindcss/vite'",
+          "import { mockReview } from '@555/mock-review/vite'",
+          '',
+          'export default defineConfig({',
+          '  plugins: [react(), tailwindcss(), mockReview()],',
+          '})',
+          '',
+        ].join('\n'),
+      )
+      // D7/D8: materialises the package under this scratch host's own `node_modules/@555/mock-review/`
+      // exactly as a real install would (`.test-dist/` as `dist/`, `src/ui/` as source, its own
+      // `package.json` so the `exports` map's `"./vite"` entry resolves `@555/mock-review/vite` to
+      // `dist/vite.js`) — the host's `vite.config.ts` above imports it by its real package
+      // specifier, not a hand-rolled path, so this exercises the same resolution a published
+      // install would.
+      installPackageInto(host)
+
       const result = spawnSync('npx', ['vite', 'build', '--outDir', 'dist'], { cwd: host, encoding: 'utf8' })
       expect(result.status).toBe(0)
       const outDir = path.join(host, 'dist')
@@ -445,13 +537,22 @@ describe('mock-review server API (D6)', () => {
       expect(textFiles.length).toBeGreaterThan(0)
       const offending = textFiles.filter((f) => {
         const raw = readFileSync(path.join(outDir, f), 'utf8')
-        // Strip every literal occurrence of the scratch host's own absolute path first (dev-source
-        // annotations embed it) — what's left is the build's actual emitted content, not an
-        // artifact of where the OS put this test's temp files.
         const withoutScratchPath = raw.split(host).join('')
-        return withoutScratchPath.includes('mock-review')
+        return ['data-sidebar', 'Geist', 'mock-review'].some((marker) => withoutScratchPath.includes(marker))
       })
       expect(offending).toEqual([])
+
+      let liveServe: Serve | undefined
+      try {
+        liveServe = await startServeIn(host)
+        const rootRes = await fetch(`${liveServe.url}/`)
+        expect(rootRes.status).toBe(200)
+        expect(await rootRes.text()).toContain(ENTRY_URL)
+        const stateRes = await fetch(`${liveServe.url}/__mock-review/state`)
+        expect(stateRes.status).toBe(200)
+      } finally {
+        await stopServe(liveServe)
+      }
     }, 60_000)
   })
 

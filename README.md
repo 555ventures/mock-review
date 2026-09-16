@@ -45,13 +45,24 @@ design/examples/          # never read by this package
 
 ## The reviewer page
 
-`npx mock-review serve` starts the reviewer page's server and prints its URL. Open it to browse
-screens, shells and journeys, draw notes, and approve screens/journeys/theme.
+`npx mock-review serve` starts the host's own Vite dev server with the package's Vite plugin
+mounted, and prints its URL. Open it to browse screens, shells and journeys, draw notes, and
+approve screens/journeys/theme. The reviewer ships as source (`src/ui/`) and compiles through the
+host's own Vite pipeline (`@vitejs/plugin-react`, `@tailwindcss/vite`) — there is no prebuilt page.
 
 Add `?client=<token>` (matching `mock.config.ts`'s `client.token`) to open the page in the
 **client role**: Search, Components and every Delete/Reject/Approve control are hidden, and each
 journey panel shows a **Confirm journey** button instead. A wrong or missing token renders the
 normal owner page.
+
+### Mounting in a host
+
+A host can mount `mockReview()` from `@555/mock-review/vite` in its own `vite.config.ts` alongside
+`react()` and `tailwindcss()`; the plugin is `apply: 'serve'` so it never affects `vite build`. This
+requires the host to be an ESM package (`"type": "module"` in its `package.json`) because
+`@555/mock-review/vite` is ESM-only and Vite 8 bundles a CJS-typed host config with `require`. The
+host must also provide `@vitejs/plugin-react` and `@tailwindcss/vite` itself — the package relies on
+the host's own instances of both rather than declaring or bundling them.
 
 ### Screenshots (`check --look`)
 
@@ -75,10 +86,14 @@ npm run check   # typecheck, lint, tests
 ## Release
 
 ```sh
-npm run build           # tsc -p tsconfig.build.json, vite build, copy frame entry
+npm run build   # tsc -p tsconfig.build.json && chmod +x dist/cli.js — writes dist/: the compiled CLI and plugin only
 git add dist
 git commit
-npm run release:check   # must pass — verifies dist/ is complete, committed and in sync
 git tag -f v1
 git push --tags
 ```
+
+The runtime `dependencies` also carry the reviewer's UI libraries (`radix-ui`, `cmdk`,
+`lucide-react`, `class-variance-authority`, `clsx`, `tailwind-merge`, `react-resizable-panels`,
+`tw-animate-css`, `@fontsource-variable/geist`); `tailwindcss ^4` is a peer; the host provides
+`@vitejs/plugin-react` and `@tailwindcss/vite`.
