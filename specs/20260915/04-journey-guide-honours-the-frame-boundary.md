@@ -1,6 +1,6 @@
 ---
 date: 2026-09-16
-status: implementing
+status: done
 build_base: main
 tier: standard
 area: reviewer-page
@@ -347,6 +347,12 @@ worktrees under `.claude/worktrees/agent-a0ddc05f406401ad9` and `agent-a47d17514
 copies, removed after the build) and the stale `.test-dist/page/assets/*` bundle (a spec 02 build
 artefact no test reads since spec 03). No `executes` hits; the three `mentions` hits on the paths leg
 are the pinned tests AC-9/-10/-11 name.
+**Build deviation, folded at close (2026-09-16).** Applying D3 made the frame load a third
+`src/ui/` module (`frame/frameRoute.ts`), which broke the spec-03 resource-timing pin carried by
+AC-10; resolved mid-build as D9 (AC-10 amended, test updated) — a one-off planning miss, not a
+recurring class. The first review-legs run went red on unrelated browser timeouts while another
+worktree's full browser suite ran concurrently (load ≈ 22 on 6 cores); the re-run on an idle
+machine was green.
 
 ## Canonical Delta
 
