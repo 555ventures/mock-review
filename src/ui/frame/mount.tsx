@@ -1,10 +1,12 @@
 /// <reference types="vite/client" />
-// D8/D15: the frame entry — copied verbatim into `dist/frame/entry.tsx` (never compiled by the
-// package's own `tsc`, D15) and served through the *host's* Vite dev server (via `/@fs/`, so it
-// runs through the host's own aliases, Tailwind and React plugins exactly like a real host
-// module would). `import.meta.glob`'s root-relative patterns (leading `/`) resolve against the
-// host's project root regardless of where this file physically lives (A2), so this one static
-// source works for every host without the plugin generating anything per-request.
+// D2 of specs/20260915/03: the frame entry — the `?frame` branch of the one entry document.
+// `src/ui/main.tsx` dynamically imports this module when the URL carries `frame`, so the mock's
+// document never loads the reviewer's CSS, store or component libraries. It ships as source and
+// compiles through the *host's* own Vite dev server, running under the host's aliases, Tailwind
+// and React plugins exactly like a real host module would. `import.meta.glob`'s root-relative
+// patterns (leading `/`) resolve against the host's project root regardless of where this file
+// physically lives (A2), so this one static source works for every host without the plugin
+// generating anything per-request.
 //
 // Renders `examples[state]` for `#/<screen>?state=<s>&scheme=<light|dark>` or the
 // component/shell example for `#/__component?name=&example=` into `div.p-4` (D8); no reviewer
