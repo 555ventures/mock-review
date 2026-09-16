@@ -445,19 +445,27 @@ Atlas: `38-journey-step-1-pill-and-guide-ring.png`, `39-journey-pill-closeup.png
 `42-journey-branch-two-hints.png`, `43-journey-end-of-journey.png`,
 `40-journey-guide-off-no-ring.png`.
 
-### 8.3 Guide ring (`src/review/useJourneyGuide.ts`, `src/index.css:131-143`)
+### 8.3 Guide ring (src/ui/journeys/useJourneyGuide.ts, src/ui/frame/DeviceFrames.tsx, src/ui/index.css)
 
-The real control inside the mock gets `data-journey-target`, which renders as
+**Prototype:** The real control inside the mock gets `data-journey-target`, which renders as
 `outline: 2px solid oklch(0.606 0.25 292.7)` with `outline-offset: 2px`, `border-radius: var(--radius)`
 and a 1.4s `journey-ring` pulse (box-shadow 2px → 12px, fading). **Violet is used nowhere else** —
 red/yellow/blue are note states (`src/index.css:131-132`).
+
+**Implementation (specs/20260915/04):** The ring is a `[data-journey-ring]` element drawn in the
+reviewer document, inside the scaled device wrapper, positioned from the control's frame rect on the
+device tick, and styled as the ripple described in §8.3's D6 (fixed outline plus two staggered echo
+rings, rather than the prototype's box-shadow pulse). It is hidden — the element is removed, not
+hidden with CSS — when the control is not visible in the frame's viewport or is clipped by a
+scrolling ancestor. The reviewer never writes into the frame document.
 
 Control lookup (`useJourneyGuide.ts:7-12`): scope to `[data-component="<edge.click.in>"]` when given,
 else the whole mock root; candidates are `a, button, [role=button], [role=tab]`; pick the first whose
 trimmed text contains `edge.click.text`, else the first candidate.
 
 Atlas: `38-journey-step-1-pill-and-guide-ring.png` (one ring), `42-journey-branch-two-hints.png`
-(two rings), `40-journey-guide-off-no-ring.png` (ring suppressed).
+(two rings), `40-journey-guide-off-no-ring.png` (ring suppressed). Images 38/40/42 keep their
+captions; the ring's *look* in 38/42 is the prototype's box-shadow pulse, not the shipped ripple.
 
 ---
 

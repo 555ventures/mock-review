@@ -96,23 +96,55 @@
   }
 }
 
-/* §8.3: a vivid violet pulsing ring on the control that takes the next journey step. Violet is
- * used nowhere else (red/yellow/blue are note states), so it always reads as "click here". */
-[data-journey-target] {
+/* §8.3: the journey ring — drawn in the reviewer document over the frame (specs/20260915/04 D5), never
+ * inside the mock. Violet is used nowhere else (red/yellow/blue are note states), so it always reads
+ * as "click here". A fixed outline plus two echo rings that expand outward and fade, staggered so one
+ * is always travelling. */
+[data-journey-ring] {
   --journey: oklch(0.606 0.25 292.7);
   border-radius: var(--radius);
   outline: 2px solid var(--journey);
   outline-offset: 2px;
-  animation: journey-ring 1.4s ease-out infinite;
 }
-@keyframes journey-ring {
+[data-journey-ring]::before,
+[data-journey-ring]::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--journey);
+  border-radius: calc(var(--radius) + 3px);
+  animation: ripple-out 2.6s cubic-bezier(0.16, 0.7, 0.3, 1) infinite;
+}
+[data-journey-ring]::after {
+  animation-delay: 1.3s;
+}
+@keyframes ripple-out {
   0% {
-    box-shadow: 0 0 0 2px color-mix(in oklch, var(--journey) 70%, transparent);
+    inset: -3px;
+    border-radius: calc(var(--radius) + 3px);
+    opacity: 0;
   }
-  70% {
-    box-shadow: 0 0 0 12px color-mix(in oklch, var(--journey) 0%, transparent);
+  12% {
+    opacity: 0.55;
   }
   100% {
-    box-shadow: 0 0 0 2px color-mix(in oklch, var(--journey) 0%, transparent);
+    inset: -17px;
+    border-radius: calc(var(--radius) + 17px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-journey-ring]::before,
+  [data-journey-ring]::after {
+    animation: none;
+  }
+  [data-journey-ring]::before {
+    inset: -9px;
+    border-radius: calc(var(--radius) + 9px);
+    border-color: color-mix(in oklch, var(--journey) 30%, transparent);
+    opacity: 1;
+  }
+  [data-journey-ring]::after {
+    display: none;
   }
 }

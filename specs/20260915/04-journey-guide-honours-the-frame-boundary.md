@@ -1,6 +1,7 @@
 ---
 date: 2026-09-16
-status: hardened
+status: done
+build_base: main
 tier: standard
 area: reviewer-page
 design: false
@@ -10,6 +11,7 @@ depended_on_by: []
 brief: n/a
 spiked: 2026-09-16
 open_markers: 0
+diff_base: 659ca1e8d792d781530d0b92f0939f9f96c3ef7e
 ---
 
 # Journey guide honours the frame boundary
@@ -40,6 +42,7 @@ and the package build emits exactly one new module under `dist/ui`.
 | D6 | **Ring style: "ripple".** `src/ui/index.css`'s `[data-journey-target]` rule and `@keyframes journey-ring` are replaced by the `[data-journey-ring]` rules in Contracts (verbatim): a fixed `2px solid oklch(0.606 0.25 292.7)` outline with `outline-offset: 2px` and `border-radius: var(--radius)`, plus `::before`/`::after` echo rings that expand from `inset: -3px` to `inset: -17px` while fading, `2.6s cubic-bezier(0.16, 0.7, 0.3, 1) infinite`, the `::after` delayed `1.3s`; under `prefers-reduced-motion: reduce` the echoes stop and one static echo at `inset: -9px` with 30 % alpha remains. Violet stays the only use of that hue. (AC-20260915-04-4) | JJ chose this variant from four rendered in the prototype (halo, ripple, comet, spotlight); ripple gives more pull than the old pulse without dimming the mock (spotlight) or vanishing on small controls (comet). |
 | D7 | **Design reference §8.3 is amended, the atlas is not.** The heading becomes `### 8.3 Guide ring (src/ui/journeys/useJourneyGuide.ts, src/ui/frame/DeviceFrames.tsx, src/ui/index.css)`; the first paragraph is prefixed with **"Prototype:"** and kept verbatim; a new paragraph headed **"Implementation (specs/20260915/04):"** states that the ring is a `[data-journey-ring]` element drawn in the reviewer document inside the scaled device wrapper, positioned from the control's frame rect on the device tick, styled as the ripple in D6, hidden when the control is not visible in the frame's viewport or is clipped by a scrolling ancestor, and that the reviewer never writes into the frame document (D1). Atlas images 38/40/42 keep their captions (one ring, none, two rings); the ring's *look* in 38/42 is the prototype's and the note says so. [no-ac: prose] | The reference is the frozen look; the ring's changed animation is the user's decision recorded here, and the boundary rule needs a home the next session reads. |
 | D8 | **Two waves.** Wave 1 (`analysis`): `src/ui/frame/frameRoute.ts` is created and `src/analysis/look.ts` migrates (both by `package-dev`, the module is DOM-free); AC-1/-2/-3/-7 go green. Wave 2 (`ui`): every reviewer caller migrates, `frameHref.ts` is deleted, the guide and the device ring land, the CSS and the design note change. `npm run build` is green after each wave (wave 1 adds the one `dist/ui/frame/frameRoute.*` emission; wave 2 changes nothing under `dist/`). [no-ac: build ordering] | The build stage batches by layer group in order; `look.ts` (analysis) cannot import a module that only exists in the later `ui` wave, so the module's row carries the `analysis` layer even though it lives under `src/ui/frame/`. |
+| D9 | **The frame's module set gains exactly `frameRoute.ts`.** Applying D3 makes `mount.tsx` import `./frameRoute.js`, which Vite dev serves as its own request, so the spec-03 pin "no other `src/ui/` URL than `main.tsx` and `frame/mount.tsx`" becomes "no other than `main.tsx`, `frame/mount.tsx` and `frame/frameRoute.ts`" (each exactly once). The pin's intent — the frame never loads `index.css`, shadcn, radix, cmdk or the store — is unchanged: `frameRoute.ts` has no imports. AC-20260915-04-10 is amended to state the three-URL set; the `api.test.ts` assertion is updated to match. (AC-20260915-04-10) | Recorded mid-build (wave 2 gate) — a direct consequence of D3 the plan missed; derived from D2's "no imports" and spec 03 D2's rationale, not a product choice. |
 
 ## File Plan
 
@@ -59,7 +62,7 @@ and the package build emits exactly one new module under `dist/ui`.
 | tests/unit/look.test.ts | MODIFY | tests | AC-20260915-04-3 (tag the existing `folds` test's title; assertions unchanged) |
 | tests/package/install.test.ts | MODIFY | tests | AC-20260915-04-7 |
 | tests/browser/surfaces.test.ts | MODIFY | tests | AC-20260915-04-4, AC-20260915-04-5, AC-20260915-04-6, AC-20260915-04-8; AC-20260915-04-9 and AC-20260915-04-11 (tag two existing tests' titles; assertions unchanged) |
-| tests/server/api.test.ts | MODIFY | tests | AC-20260915-04-10 (tag the existing AC-20260915-03-3 test's title; assertions unchanged) |
+| tests/server/api.test.ts | MODIFY | tests | AC-20260915-04-10 (tag the existing AC-20260915-03-3 test's title; its `src/ui/` URL set gains `frame/frameRoute.ts` per D9) |
 
 ## Contracts
 
@@ -266,7 +269,7 @@ module now owns it and the parser accepts what any spec-conformant encoder produ
 - **AC-20260915-04-7**: WHEN the test-time build has run (`.test-dist/`, tests/setup.ts — needs a built dist) THE SYSTEM SHALL have under `.test-dist/ui/` exactly the four files `frame/frameRoute.js`, `frame/frameRoute.js.map`, `frame/frameRoute.d.ts`, `frame/frameRoute.d.ts.map` and nothing else, `.test-dist/analysis/look.js` SHALL import `../ui/frame/frameRoute.js`, and `src/ui/frame/frameHref.ts` SHALL not exist → writes tests/package/install.test.ts
 - **AC-20260915-04-8** `[env: SKIP_BROWSER]`: WHEN, on the AC-4 page with one ring showing, the test wraps the frame's `[data-to="Account"]` in a new `div` styled `overflow:hidden; height:0` THE SYSTEM SHALL within 2 s have zero `[data-journey-ring]` elements; WHEN the test then unwraps it (moves the control back and removes the div) THE SYSTEM SHALL within 2 s show exactly one ring within 1 px of the control; WHEN the test then calls the frame window's `location.replace(pathname + search + '#/account?state=Default')` while the reviewer stays on `#/home?j=first-visit&step=0` THE SYSTEM SHALL within 2 s have zero rings (the device's route guard: the frame no longer shows this device's screen) → writes tests/browser/surfaces.test.ts
 - **AC-20260915-04-9** `[env: SKIP_BROWSER]`: WHEN, on `#/home?j=first-visit&step=0`, the frame's `[data-to="Account"]` is clicked THE SYSTEM SHALL CONTINUE TO navigate the reviewer to `#/account…` carrying `j=first-visit` and `step=1` → reuses tests/browser/surfaces.test.ts :: AC-20260915-02-1 (D4/D21's
-- **AC-20260915-04-10** `[env: SKIP_BROWSER]`: WHEN `GET <url>/?frame=1#/home?state=Default` is loaded in Chromium THE SYSTEM SHALL CONTINUE TO render `[data-component="ConsoleShell"]` containing `<button data-to="Account">` with zero `[data-sidebar]`, and WHEN the hash is `#/home?state=Default&scheme=dark` THE SYSTEM SHALL CONTINUE TO have `html.dark` → reuses tests/server/api.test.ts :: AC-20260915-03-3:
+- **AC-20260915-04-10** `[env: SKIP_BROWSER]`: WHEN `GET <url>/?frame=1#/home?state=Default` is loaded in Chromium THE SYSTEM SHALL CONTINUE TO render `[data-component="ConsoleShell"]` containing `<button data-to="Account">` with zero `[data-sidebar]` and resource timing carrying exactly one URL each ending `src/ui/main.tsx`, `src/ui/frame/mount.tsx` and `src/ui/frame/frameRoute.ts` and no other `src/ui/` URL (D9), and WHEN the hash is `#/home?state=Default&scheme=dark` THE SYSTEM SHALL CONTINUE TO have `html.dark` → reuses tests/server/api.test.ts :: AC-20260915-03-3:
 - **AC-20260915-04-11** `[env: SKIP_BROWSER]`: WHEN `nova` is chosen in the theme Select THE SYSTEM SHALL CONTINUE TO give the catalog preview iframe a `src` carrying `_theme=nova` and a hash starting `#/__component?name=` → reuses tests/browser/surfaces.test.ts :: AC-20260915-03-10
 
 ## Assumptions (escalation triggers)
@@ -344,6 +347,12 @@ worktrees under `.claude/worktrees/agent-a0ddc05f406401ad9` and `agent-a47d17514
 copies, removed after the build) and the stale `.test-dist/page/assets/*` bundle (a spec 02 build
 artefact no test reads since spec 03). No `executes` hits; the three `mentions` hits on the paths leg
 are the pinned tests AC-9/-10/-11 name.
+**Build deviation, folded at close (2026-09-16).** Applying D3 made the frame load a third
+`src/ui/` module (`frame/frameRoute.ts`), which broke the spec-03 resource-timing pin carried by
+AC-10; resolved mid-build as D9 (AC-10 amended, test updated) — a one-off planning miss, not a
+recurring class. The first review-legs run went red on unrelated browser timeouts while another
+worktree's full browser suite ran concurrently (load ≈ 22 on 6 cores); the re-run on an idle
+machine was green.
 
 ## Canonical Delta
 

@@ -6,7 +6,7 @@ import { Card } from '../components/ui/card.js'
 import { Overlay, type VisibleNote } from '../notes/Overlay.js'
 import { anchorFor, resolveBox, resolveGhost, rectOf, type Box, type UiNote, type Viewport } from '../notes/anchor.js'
 import { sameState } from '../store/selectors.js'
-import { frameSrc, replaceFrameHash } from './frameHref.js'
+import { frameSrc, parseFrameHash, replaceFrameHash, sameScreenState } from './frameRoute.js'
 
 export type DeviceSpec = { key: Viewport; width: number; label: string }
 
@@ -35,6 +35,58 @@ function boxesEqual(a: Record<string, Box | null>, b: Record<string, Box | null>
   return true
 }
 
+function boxEq(a: Box, b: Box): boolean {
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height
+}
+
+/** Reference-stable skip for the ring boxes array, same idea as `boxesEqual` above. */
+function ringBoxesEqual(a: Box[], b: Box[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const av = a[i]
+    const bv = b[i]
+    if (!av || !bv || !boxEq(av, bv)) return false
+  }
+  return true
+}
+
+function rectsIntersect(a: { left: number; top: number; right: number; bottom: number }, b: { left: number; top: number; right: number; bottom: number }): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+}
+
+/** D5: the labels of this step's outgoing edges, resolved to frame-viewport boxes for the
+ * `[data-journey-ring]` overlay — a pure read of the frame's DOM, never a write into it. */
+function resolveRing(root: HTMLElement, win: Window, labels: string[], here: { screen: string; state: string }): Box[] {
+  const route = parseFrameHash(win.location.hash)
+  if (!route || !sameScreenState(route, { kind: 'screen', screen: here.screen, state: here.state })) return []
+  const viewport = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight }
+  const boxes: Box[] = []
+  for (const label of labels) {
+    const el = root.querySelector<HTMLElement>(`[data-to="${CSS.escape(label)}"]`)
+    if (!el) continue
+    if (!el.checkVisibility()) continue
+    const r = el.getBoundingClientRect()
+    if (r.width === 0 || r.height === 0) continue
+    if (!rectsIntersect(r, viewport)) continue
+    let clipped = false
+    let ancestor: HTMLElement | null = el.parentElement
+    while (ancestor) {
+      const cs = win.getComputedStyle(ancestor)
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        if (!rectsIntersect(r, ancestor.getBoundingClientRect())) {
+          clipped = true
+          break
+        }
+      }
+      if (ancestor === root) break
+      ancestor = ancestor.parentElement
+    }
+    if (clipped) continue
+    boxes.push({ left: r.left, top: r.top, width: r.width, height: r.height })
+  }
+  return boxes
+}
+
 function Device({
   spec,
   scale,
@@ -47,6 +99,7 @@ function Device({
   showNotes,
   marking,
   draft,
+  ring,
   isolated,
   onFrameLoad,
   onRoot,
@@ -67,6 +120,7 @@ function Device({
   showNotes: boolean
   marking: boolean
   draft: Box | null
+  ring: string[]
   isolated: boolean
   onFrameLoad: () => void
   onRoot: (v: Viewport, root: HTMLElement | null) => void
@@ -82,16 +136,18 @@ function Device({
   const wrapRef = useRef<HTMLDivElement>(null)
   // D10: `theme` is a dependency (not just `screen`) so picking a theme changes `src` and forces
   // a real iframe reload — the frame entry reads `approval.theme` once, at script load.
-  const src = useMemo(() => frameSrc(screen, state, theme), [screen, theme])
+  const src = useMemo(() => frameSrc({ kind: 'screen', screen, state }, theme), [screen, theme])
   const [frameLoad, setFrameLoad] = useState(0)
   const [tick, setTick] = useState(0)
   const [boxes, setBoxes] = useState<Record<string, Box | null>>({})
   const boxesRef = useRef<Record<string, Box | null>>({})
+  const [ringBoxes, setRingBoxes] = useState<Box[]>([])
+  const ringBoxesRef = useRef<Box[]>([])
   const [drag, setDrag] = useState<{ x0: number; y0: number; box: Box } | null>(null)
 
   useEffect(() => {
     const win = frameRef.current?.contentWindow
-    if (win && frameLoad) replaceFrameHash(win, screen, state)
+    if (win && frameLoad) replaceFrameHash(win, { kind: 'screen', screen, state })
   }, [screen, state, frameLoad])
 
   useEffect(() => {
@@ -155,6 +211,15 @@ function Device({
     onBoxes(viewport, next)
   }, [notes, state, tick, scale, h])
 
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    const win = frameRef.current?.contentWindow as (Window & typeof globalThis) | null | undefined
+    const next = root && win ? resolveRing(root, win, ring, { screen, state }) : []
+    if (ringBoxesEqual(ringBoxesRef.current, next)) return
+    ringBoxesRef.current = next
+    setRingBoxes(next)
+  }, [ring, tick, scale, h])
+
   const local = (e: ReactPointerEvent) => {
     const c = wrapRef.current?.getBoundingClientRect()
     if (!c) return { x: 0, y: 0 }
@@ -214,6 +279,9 @@ function Device({
               className="block border-0"
               style={{ width: w, height: h }}
             />
+            {ringBoxes.map((box, i) => (
+              <div key={i} data-journey-ring className="pointer-events-none absolute z-5" style={box} />
+            ))}
             {showNotes && (
               <Overlay
                 viewport={viewport}
@@ -248,6 +316,7 @@ export function DeviceFrames({
   showNotes,
   marking,
   draftByViewport,
+  ring,
   isolated,
   onFrameLoad,
   onRoot,
@@ -268,6 +337,7 @@ export function DeviceFrames({
   showNotes: boolean
   marking: boolean
   draftByViewport: (v: Viewport) => Box | null
+  ring: string[]
   isolated: boolean
   onFrameLoad: () => void
   onRoot: (v: Viewport, root: HTMLElement | null) => void
@@ -293,6 +363,7 @@ export function DeviceFrames({
           showNotes={showNotes}
           marking={marking}
           draft={draftByViewport(spec.key)}
+          ring={ring}
           isolated={isolated}
           onFrameLoad={onFrameLoad}
           onRoot={onRoot}

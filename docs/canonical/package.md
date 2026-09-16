@@ -113,6 +113,25 @@ theme change moves `_theme` in the real query string precisely so the browser do
 the frame reads its theme once from that parameter at load. `scheme=dark` adds `dark` to the frame's
 `<html>`; the reviewer itself is light-only.
 
+One module owns this grammar: `src/ui/frame/frameRoute.ts` (`parseFrameHash`, `buildFrameHash`,
+`sameScreenState`, `frameSrc`, `replaceFrameHash`). Every builder (`DeviceFrames`, the catalog
+`Preview`, `check --look`) and every parser (the frame entry, the journey guide) goes through it;
+values are `encodeURIComponent`-encoded on the way out and read through `URLSearchParams` on the way
+in, so `%20` and `+` both mean a space. `src/analysis/look.ts` importing it is the one sanctioned
+`analysis → ui` import; the package build therefore emits `dist/ui/frame/frameRoute.js` as the only
+compiled file under `dist/ui/`.
+
+### The frame boundary
+
+The reviewer never writes to the frame's document — no attribute, class, inline style, node or
+stylesheet, and no mutation of a host control's style. It reads and measures, listens (capture-phase
+click, scroll, resize and mutation observers built from the frame's realm), and navigates (hash
+replace, `scrollTo`). Anything the reviewer needs to show *on* the mock — note boxes, pins, the
+journey ring — is measured in the frame and drawn in the reviewer document inside the same scaled
+wrapper as the iframe, where the frame's own rects are already in local coordinates. The journey ring
+is `[data-journey-ring]`, one per found control, hidden when the control is not visible in the frame's
+viewport or is clipped by a scrolling ancestor, styled by the reviewer's `index.css`.
+
 ### Approval semantics
 
 `approveScreen` records the screen's current hash, the ISO time, its states, the configured viewports

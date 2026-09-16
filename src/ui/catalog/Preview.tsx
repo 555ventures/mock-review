@@ -2,6 +2,7 @@
 // gets a fixed device box (1440x900) scaled to the pane width; a normal component gets the pane
 // width and auto-height tracked from the frame's `#root`.
 import { useEffect, useRef, useState } from 'react'
+import { frameSrc } from '../frame/frameRoute.js'
 
 const SHELL_W = 1440
 const SHELL_H = 900
@@ -40,8 +41,7 @@ export function Preview({ name, example, shell, theme }: { name: string; example
     return () => ro.disconnect()
   }, [load, shell])
 
-  const themeParam = theme ? `&_theme=${encodeURIComponent(theme)}` : ''
-  const src = `/?frame=1${themeParam}#/__component?name=${encodeURIComponent(name)}&example=${encodeURIComponent(example)}`
+  const src = frameSrc({ kind: 'component', name, example }, theme)
   const scale = shell && paneW ? Math.min(1, paneW / SHELL_W) : 1
 
   return (

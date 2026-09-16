@@ -13,6 +13,7 @@
 // chrome is ever mounted here — this document is the mock alone.
 import { createRoot } from 'react-dom/client'
 import type { ReactNode } from 'react'
+import { parseFrameHash, type FrameRoute } from './frameRoute.js'
 
 type ExampleModule = { examples?: Record<string, ReactNode> }
 
@@ -70,37 +71,24 @@ function applyStyles(): void {
   if (theme) ensureStylesheet(`/src/themes/${theme}.css`)
 }
 
-function currentParams(): { path: string; params: URLSearchParams } {
-  const hash = window.location.hash.slice(1)
-  const queryIndex = hash.indexOf('?')
-  const routePath = queryIndex === -1 ? hash : hash.slice(0, queryIndex)
-  const query = queryIndex === -1 ? '' : hash.slice(queryIndex + 1)
-  return { path: routePath, params: new URLSearchParams(query) }
-}
-
-function applyScheme(params: URLSearchParams): void {
-  document.documentElement.classList.toggle('dark', params.get('scheme') === 'dark')
+function applyScheme(route: FrameRoute | undefined): void {
+  document.documentElement.classList.toggle('dark', route?.scheme === 'dark')
 }
 
 let root: ReturnType<typeof createRoot> | undefined
 
 function render(): void {
-  const { path: routePath, params } = currentParams()
-  applyScheme(params)
+  const route = parseFrameHash(window.location.hash)
+  applyScheme(route)
 
-  const segments = routePath.split('/').filter(Boolean)
-  let node: ReactNode
+  let node: ReactNode = null
 
-  if (segments[0] === '__component') {
-    const name = params.get('name')
-    const example = params.get('example')
-    const mod = name ? (moduleByName(componentModules, name) ?? moduleByName(shellModules, name)) : undefined
-    node = pickExample(mod?.examples, example)
-  } else {
-    const screenName = segments[0]
-    const state = params.get('state')
-    const mod = screenName ? moduleByName(screenModules, screenName) : undefined
-    node = pickExample(mod?.examples, state)
+  if (route?.kind === 'component') {
+    const mod = route.name ? (moduleByName(componentModules, route.name) ?? moduleByName(shellModules, route.name)) : undefined
+    node = pickExample(mod?.examples, route.example ?? null)
+  } else if (route?.kind === 'screen') {
+    const mod = moduleByName(screenModules, route.screen)
+    node = pickExample(mod?.examples, route.state ?? null)
   }
 
   const container = document.getElementById('root')
