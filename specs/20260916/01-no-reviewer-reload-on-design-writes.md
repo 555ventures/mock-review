@@ -1,6 +1,6 @@
 ---
 date: 2026-09-16
-status: hardened
+status: done
 tier: critical
 area: server
 design: false
@@ -10,6 +10,8 @@ depended_on_by: []
 brief: n/a
 spiked: 2026-09-16
 open_markers: 0
+build_base: main
+diff_base: 659ca1e8d792d781530d0b92f0939f9f96c3ef7e
 ---
 
 # No reviewer reload on design writes
@@ -47,6 +49,7 @@ and the `standalone` switch that made the second half `serve`-only is gone.
 | tests/unit/plugin.test.ts | CREATE | tests | AC-20260916-01-1 |
 | tests/server/hot-update.test.ts | CREATE | tests | AC-20260916-01-2, AC-20260916-01-3 |
 | tests/browser/reload.test.ts | CREATE | tests | AC-20260916-01-4, AC-20260916-01-5 |
+| tests/browser/hmr.test.ts | MODIFY | tests | AC-20260916-01-6 — the reused AC-20260915-03-6 titles also carry this AC's ID (review fix: ac-matrix coverage); no assertion changes |
 
 `src/ui/frame/mount.tsx` is deliberately not in the plan: its `mock-review:frame-reload` listener is unchanged, and a concurrent session (journey guide ring) is editing that file.
 
@@ -141,6 +144,10 @@ What is fragile: D7 relies on the Vite client's `.html` path comparison; if a fu
 Two spike facts test authors must not trip over: the reload exists only once a theme is picked (A8 — seed `approval.theme`), and a rewrite of `approval.json` legitimately re-derives the iframe `src` (one child-frame navigation, no HMR involved), so AC-4/5 assert the iframe `src` on a *notes* write only. `design/*.md` files never became Tailwind asset modules in the spike, so their silence is already Vite's; the classifier still covers them for uniformity.
 
 Collision closure (D4 retires `standalone`, the File Plan retires `srcRelativePath`): every literals-leg hit outside the three planned files is waived — the copies under `.claude/worktrees/*` belong to other sessions' checkouts and are never edited from here; `dist/**` is the committed release artifact, regenerated only by the release procedure (queued); `tests/server/api.test.ts:488` uses "standalone" as an English word in a comment about a Vite app, not the option.
+
+Build deviation (2026-09-16, one-off): AC-5's embedded-host `vite.config.ts` also carries the fixture host's `resolve.alias['@']` — without it every screen's `@/…` import 500s and no screen renders; AC-20260915-03-4's embedded host omits it too but never renders a screen.
+
+Review note (2026-09-16): the first two leg runs went red on unrelated browser tests that passed in isolation (`surfaces.test.ts` AC-20260915-02-1 counts tabs once right after `networkidle` instead of polling); the third run was green. Queued as a follow-up.
 
 Regression pins: AC-3 (SSE delivery) and AC-6 (spec 03's frame-only reload under `serve`) are the behaviours a future change must not break; AC-1/2/4/5 expire at close.
 

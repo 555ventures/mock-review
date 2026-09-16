@@ -62,7 +62,9 @@ A host can mount `mockReview()` from `@555/mock-review/vite` in its own `vite.co
 requires the host to be an ESM package (`"type": "module"` in its `package.json`) because
 `@555/mock-review/vite` is ESM-only and Vite 8 bundles a CJS-typed host config with `require`. The
 host must also provide `@vitejs/plugin-react` and `@tailwindcss/vite` itself — the package relies on
-the host's own instances of both rather than declaring or bundling them.
+the host's own instances of both rather than declaring or bundling them. Saving notes or approvals
+never reloads the page; a host may add `@source not "../design";` to its stylesheet to keep
+Tailwind from scanning design files at all, as an optional optimisation, never a requirement.
 
 ### Screenshots (`check --look`)
 

@@ -56,6 +56,20 @@ server: every host module load goes through the running server's own SSR runner.
 (`check`, `check --look`) keeps its own short-lived server and its own
 `node_modules/.vite/mock-review-check` cache, so it can never evict the deps `serve` is serving.
 
+The plugin owns the HMR boundary between the host and the reviewer with one `hotUpdate` hook,
+installed unconditionally and ordered `pre` so it runs ahead of every host plugin in every mount
+(`serve` and a host's own `vite.config.ts` alike). In the client environment, any change under
+`<root>/design/` (the contract files, their `.tmp` siblings, the drivers' `mocks/*`,
+`doctrine.md`, `shell/app.html`, screenshots) returns `[]` and sends nothing, so
+`@tailwindcss/vite`'s automatic source detection — which scans `design/**` whenever the host
+stylesheet imports Tailwind without `source()` — never full-reloads the page on a save; the SSE
+`notes`/`approval` events remain the reviewer's only signal. Any change under `<root>/src/` sends
+the custom `mock-review:frame-reload` event (the frame document alone listens and reloads) and
+returns `[]`. Everything else, and every non-client environment, keeps Vite's default handling;
+Vite's own `full-reload` for an edited `.html` file carries that file's path and is inert for
+documents served at `/`. A host may add `@source not "../design";` to its stylesheet as an
+optimisation; nothing requires it. `mockReview()` takes no options.
+
 ### Server API
 
 All endpoints live under `/__mock-review/`, and every write goes through `writeJsonAtomic` under one
