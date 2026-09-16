@@ -2,11 +2,11 @@
 // reviewer ships as source (`files` includes `src/ui`), `dist/` holds the compiled CLI/plugin
 // only, `release:check` is gone, the reviewer's UI libraries moved from devDependencies into
 // dependencies, and `tailwindcss` is a peer (the reviewer's own index.css imports it).
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
-import { repoRoot } from '../setup.js'
+import { ensureFixtures, repoRoot, testDistDir } from '../setup.js'
 
 type PackageJson = {
   dependencies?: Record<string, string>
@@ -72,4 +72,39 @@ describe('package install shape (D7)', () => {
     expect(paths.some((p) => p.startsWith('dist/page/'))).toBe(false)
     expect(paths.some((p) => p.startsWith('dist/frame/'))).toBe(false)
   }, 60_000)
+})
+
+describe('AC-20260915-04-7 (D3/D8): the frame-route module is the only thing the package build emits under dist/ui/, and look.js imports it', () => {
+  beforeAll(async () => {
+    await ensureFixtures()
+  }, 180_000)
+
+  it('AC-20260915-04-7: .test-dist/ui/ contains exactly frame/frameRoute.js, frame/frameRoute.js.map, frame/frameRoute.d.ts, frame/frameRoute.d.ts.map and nothing else', () => {
+    const uiDir = path.join(testDistDir, 'ui')
+    expect(existsSync(uiDir), '.test-dist/ui/ must exist').toBe(true)
+
+    const found: string[] = []
+    const walk = (dir: string, prefix: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+        if (entry.isDirectory()) walk(path.join(dir, entry.name), rel)
+        else found.push(rel)
+      }
+    }
+    walk(uiDir, '')
+    found.sort()
+
+    expect(found).toEqual(
+      ['frame/frameRoute.d.ts', 'frame/frameRoute.d.ts.map', 'frame/frameRoute.js', 'frame/frameRoute.js.map'].sort(),
+    )
+  })
+
+  it('AC-20260915-04-7: .test-dist/analysis/look.js imports ../ui/frame/frameRoute.js', () => {
+    const lookJs = readFileSync(path.join(testDistDir, 'analysis', 'look.js'), 'utf8')
+    expect(lookJs).toContain('../ui/frame/frameRoute.js')
+  })
+
+  it('AC-20260915-04-7: src/ui/frame/frameHref.ts no longer exists (D3: superseded by frameRoute.ts)', () => {
+    expect(existsSync(path.join(repoRoot, 'src', 'ui', 'frame', 'frameHref.ts'))).toBe(false)
+  })
 })

@@ -79,7 +79,7 @@ const config: Config = {
 }
 
 describe("AC-20260915-02-17 (D22): look()'s _theme URL construction", () => {
-  it('folds approval.theme into the frame URL as _theme=<key> when a theme is passed', async () => {
+  it('AC-20260915-04-3: folds approval.theme into the frame URL as _theme=<key> when a theme is passed', async () => {
     const root = buildFakePlaywrightRoot()
     globalThis.__lookTestGotoUrls = []
 

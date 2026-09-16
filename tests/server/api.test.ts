@@ -437,7 +437,7 @@ describe('mock-review server API (D6)', () => {
   }, 20_000)
 
   describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-03-3/-4: one document, one entry, CSS isolation and production safety [env: SKIP_BROWSER]', () => {
-    it('AC-20260915-03-3: serves the frame with the shell rendered, no reviewer chrome or sidebar CSS, exactly the entry + frame/mount URLs under src/ui/, and toggles html.dark on &scheme=dark', async () => {
+    it('AC-20260915-03-3 / AC-20260915-04-10: serves the frame with the shell rendered, no reviewer chrome or sidebar CSS, exactly the entry + frame/mount URLs under src/ui/, and toggles html.dark on &scheme=dark', async () => {
       serve = await startServe(greenHost)
       const { chromium } = await import('playwright')
       const browser = await chromium.launch()

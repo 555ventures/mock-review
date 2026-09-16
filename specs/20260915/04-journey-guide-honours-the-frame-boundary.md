@@ -1,6 +1,7 @@
 ---
 date: 2026-09-16
-status: hardened
+status: implementing
+build_base: main
 tier: standard
 area: reviewer-page
 design: false
@@ -10,6 +11,7 @@ depended_on_by: []
 brief: n/a
 spiked: 2026-09-16
 open_markers: 0
+diff_base: 659ca1e8d792d781530d0b92f0939f9f96c3ef7e
 ---
 
 # Journey guide honours the frame boundary

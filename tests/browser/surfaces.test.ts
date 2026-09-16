@@ -6,15 +6,105 @@
 // visibility/text/enabled state poll a plain Playwright locator method rather than using
 // Playwright's web-first matchers.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
 import { copyFixtureHost } from '../helpers/cli.js'
 import { startServe, startServeIn, stopServe, type Serve } from '../helpers/serve.js'
-import type { Locator } from 'playwright'
+import type { Locator, Page } from 'playwright'
 
 async function textOf(locator: Locator): Promise<string> {
   return (await locator.first().textContent()) ?? ''
+}
+
+// AC-20260915-04-4/-5/-6/-8 (D1/D5/D6): the journey ring is drawn in the reviewer document, a
+// sibling of the iframe inside the scaled wrapper — never written into the frame's own document
+// (D1). `ringGeometry` reads both documents from the outside (never mutating either) and reports,
+// per iframe/wrapper pair: how many `[data-journey-ring]` elements sit in that wrapper, and (when
+// exactly one is present) how far its rect is from the control's frame-local rect mapped through
+// the wrapper's own scale (AC-4's formula: `iframeRect.left + ctl.left * scale`, `scale =
+// wrapper.getBoundingClientRect().width / wrapper.offsetWidth`).
+type RingGeometry = {
+  count: number
+  deltaLeft: number
+  deltaTop: number
+  deltaWidth: number
+  deltaHeight: number
+  journeyAttrsInFrame: number
+  dataJourneyTargetInFrame: number
+}
+
+async function ringGeometry(page: Page, label = 'Account'): Promise<RingGeometry[]> {
+  return page.evaluate((lbl) => {
+    const iframes = Array.from(document.querySelectorAll('iframe'))
+    return iframes.map((iframe) => {
+      const wrapper = iframe.parentElement as HTMLElement
+      const rings = wrapper.querySelectorAll('[data-journey-ring]')
+      const doc = iframe.contentDocument
+      let journeyAttrsInFrame = 0
+      let dataJourneyTargetInFrame = 0
+      if (doc) {
+        for (const el of Array.from(doc.querySelectorAll('*'))) {
+          for (const attr of Array.from(el.attributes)) {
+            if (attr.name.includes('journey')) journeyAttrsInFrame++
+          }
+        }
+        dataJourneyTargetInFrame = doc.querySelectorAll('[data-journey-target]').length
+      }
+      if (rings.length !== 1) {
+        return {
+          count: rings.length,
+          deltaLeft: Infinity,
+          deltaTop: Infinity,
+          deltaWidth: Infinity,
+          deltaHeight: Infinity,
+          journeyAttrsInFrame,
+          dataJourneyTargetInFrame,
+        }
+      }
+      const ring = rings[0] as HTMLElement
+      const ctlEl = doc?.querySelector(`[data-to="${lbl}"]`) as HTMLElement | null | undefined
+      if (!ctlEl) {
+        return {
+          count: rings.length,
+          deltaLeft: Infinity,
+          deltaTop: Infinity,
+          deltaWidth: Infinity,
+          deltaHeight: Infinity,
+          journeyAttrsInFrame,
+          dataJourneyTargetInFrame,
+        }
+      }
+      const iframeRect = iframe.getBoundingClientRect()
+      const wrapperRect = wrapper.getBoundingClientRect()
+      const scale = wrapperRect.width / wrapper.offsetWidth
+      const ctl = ctlEl.getBoundingClientRect()
+      const expected = {
+        left: iframeRect.left + ctl.left * scale,
+        top: iframeRect.top + ctl.top * scale,
+        width: ctl.width * scale,
+        height: ctl.height * scale,
+      }
+      const actual = ring.getBoundingClientRect()
+      return {
+        count: rings.length,
+        deltaLeft: Math.abs(actual.left - expected.left),
+        deltaTop: Math.abs(actual.top - expected.top),
+        deltaWidth: Math.abs(actual.width - expected.width),
+        deltaHeight: Math.abs(actual.height - expected.height),
+        journeyAttrsInFrame,
+        dataJourneyTargetInFrame,
+      }
+    })
+  }, label)
+}
+
+function expectRingWithinOnePx(g: RingGeometry): void {
+  expect(g.count).toBe(1)
+  expect(g.deltaLeft).toBeLessThanOrEqual(1)
+  expect(g.deltaTop).toBeLessThanOrEqual(1)
+  expect(g.deltaWidth).toBeLessThanOrEqual(1)
+  expect(g.deltaHeight).toBeLessThanOrEqual(1)
 }
 
 // Confirmed by direct reproduction (20 concurrent `serve` processes sharing mock.config.ts's
@@ -190,7 +280,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
-  it("AC-20260915-02-1 (D4/D21's guide): a guided click on [data-to] advances the frame and keeps the journey and step in the hash", async () => {
+  it("AC-20260915-02-1 (D4/D21's guide) / AC-20260915-04-9: a guided click on [data-to] advances the frame and keeps the journey and step in the hash", async () => {
     serve = await startServe(greenHost)
     const page = await browser.newPage()
     try {
@@ -235,7 +325,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
-  it('AC-20260915-03-10 (AC-20260915-02-15): the theme Select appears only when the host has src/themes/*.css, and picking nova applies its stylesheet', async () => {
+  it('AC-20260915-03-10 (AC-20260915-02-15) / AC-20260915-04-11: the theme Select appears only when the host has src/themes/*.css, and picking nova applies its stylesheet', async () => {
     serve = await startServe(greenHost)
     const page = await browser.newPage()
     try {
@@ -355,6 +445,213 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     } finally {
       await page.close()
       await context.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260915-04-4: the journey ring is drawn in the reviewer document over the frame, styled as the D6 ripple, and writes nothing journey-related into the frame', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home?j=first-visit&step=0`, { waitUntil: 'networkidle' })
+
+      const frame = page.locator('iframe').first()
+      await expect.poll(() =>
+        frame.evaluate((el: HTMLIFrameElement) => !!el.contentDocument?.querySelector('[data-to="Account"]')),
+      SLOW_POLL).toBe(true)
+
+      await expect.poll(() => ringGeometry(page).then((gs) => gs[0]), { timeout: 5000 }).toEqual(
+        expect.objectContaining({ count: 1, journeyAttrsInFrame: 0, dataJourneyTargetInFrame: 0 }),
+      )
+      const [g] = await ringGeometry(page)
+      if (!g) throw new Error('no ring geometry reported')
+      expectRingWithinOnePx(g)
+      expect(g.journeyAttrsInFrame).toBe(0)
+      expect(g.dataJourneyTargetInFrame).toBe(0)
+
+      const style = await page.evaluate(() => {
+        const ring = document.querySelector('[data-journey-ring]') as HTMLElement
+        const cs = getComputedStyle(ring)
+        const before = getComputedStyle(ring, '::before')
+        const after = getComputedStyle(ring, '::after')
+        return {
+          outline: cs.outline,
+          outlineOffset: cs.outlineOffset,
+          pointerEvents: cs.pointerEvents,
+          animationName: cs.animationName,
+          beforeAnimationName: before.animationName,
+          beforeAnimationDuration: before.animationDuration,
+          afterAnimationDelay: after.animationDelay,
+        }
+      })
+      expect(style.outline).toBe('oklch(0.606 0.25 292.7) solid 2px')
+      expect(style.outlineOffset).toBe('2px')
+      expect(style.pointerEvents).toBe('none')
+      expect(style.animationName).toBe('none')
+      expect(style.beforeAnimationName).toBe('ripple-out')
+      expect(style.beforeAnimationDuration).toBe('2.6s')
+      expect(style.afterAnimationDelay).toBe('1.3s')
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260915-04-5: the guide matches an encoded frame hash (a state with a space) — pre-image: zero rings and zero hints', async () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-ac5-')
+    const homePath = path.join(host, 'src', 'screens', 'home.tsx')
+    const homeSrc = readFileSync(homePath, 'utf8')
+    const editedHome = homeSrc
+      .replace("states: ['default', 'empty'],", "states: ['Low balance', 'empty'],")
+      .replace('Default: <Home state="default" />,', "'Low balance': <Home state=\"default\" />,")
+    expect(editedHome).not.toBe(homeSrc)
+    writeFileSync(homePath, editedHome)
+
+    const journeysPath = path.join(host, 'src', 'journeys.ts')
+    const journeysSrc = readFileSync(journeysPath, 'utf8')
+    const editedJourneys = journeysSrc.replace(
+      'steps: [{ screen: \'home\' }, { screen: \'account\' }],',
+      'steps: [{ screen: \'home\', state: \'Low balance\' }, { screen: \'account\' }],',
+    )
+    expect(editedJourneys).not.toBe(journeysSrc)
+    writeFileSync(journeysPath, editedJourneys)
+
+    serve = await startServeIn(host)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home?state=Low%20balance&j=first-visit&step=0`, { waitUntil: 'networkidle' })
+
+      const frame = page.locator('iframe').first()
+      await expect.poll(
+        () => frame.evaluate((el: HTMLIFrameElement) => el.contentWindow?.location.hash ?? ''),
+        SLOW_POLL,
+      ).toBe('#/home?state=Low%20balance')
+
+      await expect.poll(() => page.locator('[data-journey-ring]').count(), SLOW_POLL).toBe(1)
+
+      const pillText = await page.locator('[aria-label="Guide"]').locator('xpath=..').textContent()
+      expect(pillText ?? '').toContain('Account')
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260915-04-6: the ring tracks the control through a frame scroll and a reviewer resize, disappears with the Guide toggle, and both-view shows one ring per iframe', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home?j=first-visit&step=0`, { waitUntil: 'networkidle' })
+      const frame = page.locator('iframe').first()
+      await expect.poll(() =>
+        frame.evaluate((el: HTMLIFrameElement) => !!el.contentDocument?.querySelector('[data-to="Account"]')),
+      SLOW_POLL).toBe(true)
+      await expect.poll(() => ringGeometry(page).then((gs) => gs[0]?.count), { timeout: 5000 }).toBe(1)
+
+      // A 1600px spacer prepended to the frame's #root, then scrolling the frame's own window.
+      await frame.evaluate((el: HTMLIFrameElement) => {
+        const doc = el.contentDocument
+        const root = doc?.getElementById('root')
+        if (!doc || !root) return
+        const spacer = doc.createElement('div')
+        spacer.style.height = '1600px'
+        root.insertBefore(spacer, root.firstChild)
+        el.contentWindow?.scrollTo(0, 1400)
+      })
+      await expect.poll(
+        async () => {
+          const [g] = await ringGeometry(page)
+          return g && g.count === 1 && g.deltaLeft <= 1 && g.deltaTop <= 1 && g.deltaWidth <= 1 && g.deltaHeight <= 1
+        },
+        { timeout: 2000 },
+      ).toBe(true)
+
+      // Reviewer resize changes the wrapper's scale.
+      await page.setViewportSize({ width: 900, height: 700 })
+      await expect.poll(
+        async () => {
+          const [g] = await ringGeometry(page)
+          return g && g.count === 1 && g.deltaLeft <= 1 && g.deltaTop <= 1 && g.deltaWidth <= 1 && g.deltaHeight <= 1
+        },
+        { timeout: 2000 },
+      ).toBe(true)
+
+      // Guide toggle removes then restores the ring.
+      await page.locator('[aria-label="Guide"]').click()
+      await expect.poll(() => page.locator('[data-journey-ring]').count(), { timeout: 2000 }).toBe(0)
+      await page.locator('[aria-label="Guide"]').click()
+      await expect.poll(() => page.locator('[data-journey-ring]').count(), { timeout: 2000 }).toBe(1)
+
+      // Both-view, wide reviewer viewport: one ring per iframe after reload.
+      await page.evaluate(() => sessionStorage.setItem('view', 'both'))
+      await page.setViewportSize({ width: 1800, height: 900 })
+      await page.reload({ waitUntil: 'networkidle' })
+      await expect.poll(() => page.locator('iframe').count(), SLOW_POLL).toBe(2)
+      await expect.poll(
+        async () => {
+          const gs = await ringGeometry(page)
+          return gs.length === 2 && gs.every((g) => g.count === 1 && g.deltaLeft <= 1 && g.deltaTop <= 1)
+        },
+        { timeout: 5000 },
+      ).toBe(true)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260915-04-8: the ring hides when the control is clipped by a scrolling ancestor, returns once unclipped, and hides again when the frame leaves this device\'s screen', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home?j=first-visit&step=0`, { waitUntil: 'networkidle' })
+      const frame = page.locator('iframe').first()
+      await expect.poll(() =>
+        frame.evaluate((el: HTMLIFrameElement) => !!el.contentDocument?.querySelector('[data-to="Account"]')),
+      SLOW_POLL).toBe(true)
+      await expect.poll(() => ringGeometry(page).then((gs) => gs[0]?.count), { timeout: 5000 }).toBe(1)
+
+      // Wrap the control in a zero-height overflow:hidden div — clipped, so no ring.
+      await frame.evaluate((el: HTMLIFrameElement) => {
+        const doc = el.contentDocument
+        const ctl = doc?.querySelector('[data-to="Account"]')
+        if (!doc || !ctl?.parentElement) return
+        const wrap = doc.createElement('div')
+        wrap.setAttribute('data-ac8-wrap', '')
+        wrap.style.overflow = 'hidden'
+        wrap.style.height = '0'
+        ctl.parentElement.insertBefore(wrap, ctl)
+        wrap.appendChild(ctl)
+      })
+      await expect.poll(() => page.locator('[data-journey-ring]').count(), { timeout: 2000 }).toBe(0)
+
+      // Unwrap: move the control back out and remove the div — ring returns.
+      await frame.evaluate((el: HTMLIFrameElement) => {
+        const doc = el.contentDocument
+        const wrap = doc?.querySelector('[data-ac8-wrap]')
+        const ctl = wrap?.querySelector('[data-to="Account"]')
+        if (!doc || !wrap?.parentElement || !ctl) return
+        wrap.parentElement.insertBefore(ctl, wrap)
+        wrap.remove()
+      })
+      await expect.poll(
+        async () => {
+          const [g] = await ringGeometry(page)
+          return g && g.count === 1 && g.deltaLeft <= 1 && g.deltaTop <= 1 && g.deltaWidth <= 1 && g.deltaHeight <= 1
+        },
+        { timeout: 2000 },
+      ).toBe(true)
+
+      // The frame navigates away from this device's screen — the route guard drops the ring even
+      // though the reviewer itself stays on #/home?j=first-visit&step=0.
+      await frame.evaluate((el: HTMLIFrameElement) => {
+        const win = el.contentWindow
+        if (!win) return
+        win.location.replace(win.location.pathname + win.location.search + '#/account?state=Default')
+      })
+      await expect.poll(() => page.locator('[data-journey-ring]').count(), { timeout: 2000 }).toBe(0)
+    } finally {
+      await page.close()
       await stop()
     }
   }, 60_000)
