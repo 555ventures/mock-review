@@ -1,8 +1,9 @@
 /**
- * Public entry point for `@555/mock-review`.
- *
- * Spec A fills this in with the zod schemas and the analysis core; for now it carries only the
- * package version so a host can assert what it installed.
+ * Public entry point for `@555/mock-review`: the contract shapes (D1) and the `check` analysis
+ * core (D5-D8), for programmatic use outside the CLI (the reviewer page, spec 02, imports these
+ * directly rather than shelling out).
  */
 export const VERSION = '1.0.0';
+export * from './schemas/index.js';
+export { runCheck } from './analysis/check.js';
 //# sourceMappingURL=index.js.map

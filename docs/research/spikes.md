@@ -249,3 +249,25 @@ host root, its `.test-dist/cli.js` started from the host) and `installed` (`dist
 Known cosmetic residue: `/src/index.css` 404s on a host without one (the fixture) with a MIME
 console line; in the test's symlinked `installed` layout one 403 on the Geist webfont whose realpath
 escapes `fs.allow` through the per-entry symlink (a real install keeps it inside the host root).
+
+---
+
+# Executed micro-spikes (2026-09-16) — reviewer reload on design writes
+
+Run for `specs/20260916/01-no-reviewer-reload-on-design-writes.md` against vite 8.3.0,
+`@tailwindcss/vite` 4.3.3, `@vitejs/plugin-react` 6.1.1, on a scratch copy of `tests/fixtures/host`
+with `design/approval.json` seeded `"theme": "nova"` (without a theme the frame never links the host
+stylesheet, Tailwind never scans, and the reload does not exist). Harness: programmatic
+`createServer` as `serve.ts` builds it, a raw `WebSocket(url, 'vite-hmr')` recording every frame,
+Playwright counting top-level and child-frame navigations plus a `window` marker, an SSE reader.
+
+| run | hook | `design/notes.json` atomic write | `design/shell/app.html` edit | `src/screens/home.tsx` edit |
+|---|---|---|---|---|
+| baseline | none | 1 path-less `full-reload`, top nav 1, marker gone | 2 frames (path-less + `/design/shell/app.html`), top nav 1 | `full-reload` path `*`, top nav 1, text after 1065 ms |
+| patched, plugin last | `{order:'pre'}` | 0 frames, top nav 0, marker kept, `notes` SSE 1 | 1 frame `path: '/design/shell/app.html'`, top nav 0, frame nav 0 | 1 `custom mock-review:frame-reload`, 0 `full-reload`, frame nav 1, text after 198 ms |
+| patched, plugin first | same | identical | identical | identical (184 ms) |
+| plain function, no `order` | same handler | baseline rows | baseline rows | as patched |
+
+`mocks/status.json` behaves like `notes.json`; `mocks/ledger.md` create/delete sent nothing in any
+run. SSR graph: `getModulesByFile` is `undefined` for both the stylesheet and `notes.json` before
+and after an SSR import of a screen; `notes.json` is an `asset` module in the client graph only.
