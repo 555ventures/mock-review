@@ -235,7 +235,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
-  it('AC-20260915-02-15: the theme Select appears only when the host has src/themes/*.css, and picking nova applies its stylesheet', async () => {
+  it('AC-20260915-03-10 (AC-20260915-02-15): the theme Select appears only when the host has src/themes/*.css, and picking nova applies its stylesheet', async () => {
     serve = await startServe(greenHost)
     const page = await browser.newPage()
     try {
@@ -254,10 +254,11 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
 
       // Picking a theme triggers a genuine iframe reload (D18e: the frame entry only reads
       // `approval.theme` once, at script load, so it must reload to pick up the new value) —
-      // server.transformIndexHtml + the /@fs transpile + the state fetch round trip take
-      // roughly 900ms-1.5s under load, and expect.poll's default ~2.5s window is sometimes too
-      // tight for that when running inside the full suite. Widen the window; the assertion
-      // itself is unchanged.
+      // server.transformIndexHtml + the entry module's own transform (specs/20260915/03 D1: the
+      // `/@id/__x00__mock-review:entry` virtual module, not the old `/@fs/` frame entry) + the
+      // state fetch round trip take roughly 900ms-1.5s under load, and expect.poll's default
+      // ~2.5s window is sometimes too tight for that when running inside the full suite. Widen
+      // the window; the assertion itself is unchanged.
       await expect.poll(async () => {
         const hrefs = await page.locator('iframe').first().evaluate((el: HTMLIFrameElement) => {
           const doc = el.contentDocument

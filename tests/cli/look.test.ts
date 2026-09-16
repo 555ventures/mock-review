@@ -15,7 +15,7 @@ describe('AC-20260915-02-17: mock-review check --look (built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
-  it('writes one non-empty PNG per viewport x scheme and prints its path, with serve running and playwright resolvable', async () => {
+  it('AC-20260915-03-9: writes one non-empty PNG per viewport x scheme and prints its path, with serve running and playwright resolvable', async () => {
     let serve: Serve | undefined
     try {
       serve = await startServe(greenHost)

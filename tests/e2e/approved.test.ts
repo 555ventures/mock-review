@@ -101,7 +101,7 @@ describeIfReady('AC-20260915-02-21: mocks-driver.js reaches APPROVED against the
     await browser?.close()
   })
 
-  it('after journey-drawn, browser approvals + theme pick + client confirm let the driver reach APPROVED', async () => {
+  it('AC-20260915-03-11: after journey-drawn, browser approvals + theme pick + client confirm let the driver reach APPROVED', async () => {
     // Confirmed by direct reproduction (20 concurrent `serve` processes sharing
     // mock.config.ts's port 5180) that Vite's own port-fallback + resolvedUrls already isolates
     // every server correctly — no cross-talk. Under the full gate (many Chromium instances +

@@ -41,7 +41,7 @@ export async function startServe(cwd: string): Promise<void> {
     configFile: path.join(cwd, 'vite.config.ts'),
     logLevel: 'silent',
     appType: 'custom',
-    plugins: [mockReview()],
+    plugins: [mockReview({ standalone: true })],
     server: {
       strictPort: false,
       host: '127.0.0.1',

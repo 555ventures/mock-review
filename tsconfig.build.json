@@ -10,5 +10,5 @@
     "moduleResolution": "bundler"
   },
   "include": ["src"],
-  "exclude": ["src/ui/**", "src/frame/**"]
+  "exclude": ["src/ui/**"]
 }

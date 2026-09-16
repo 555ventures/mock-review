@@ -1,6 +1,7 @@
 ---
 date: 2026-09-15
-status: hardened
+status: implementing
+build_base: main
 open_markers: 0
 tier: critical
 area: reviewer-page
@@ -10,6 +11,7 @@ depends_on: [specs/20260915/02-the-reviewer-page.md]
 depended_on_by: []
 brief: n/a
 spiked: 2026-09-15
+diff_base: 5ee095701aada8cd787ce2eb2ba68b21217d4caf
 ---
 
 # Collapse the reviewer onto the host's Vite server

@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isRunnableDevEnvironment, type Connect, type Plugin, type ViteDevServer } from 'vite'
+import { isRunnableDevEnvironment, type Plugin, type ViteDevServer } from 'vite'
 import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js'
 import type { Runner } from '../analysis/vite-runner.js'
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js'
@@ -16,38 +16,41 @@ import { buildState } from './state.js'
 import { buildRegistry } from './registry.js'
 import { watchDesignFiles } from './watch.js'
 
-/** D15: the plain fallback served at `GET /` while the ui wave's prebuilt page doesn't exist yet
- * (or in a host that never ran `npm run build`'s page step) — never a crash. */
-const FALLBACK_HTML = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>mock-review</title>
-  </head>
-  <body>
-    <p>mock-review: reviewer page not built yet (run \`npm run build\` in the package)</p>
-  </body>
-</html>
-`
+/** D1: what `resolveId` receives — a host-relative virtual specifier, never a real file — and what
+ * it resolves to (Rollup's `\0` convention for "don't let any other plugin try to load this as a
+ * file"). The browser-facing URL Vite derives from the resolved id is `/@id/__x00__mock-review:entry`
+ * (`__x00__` is Vite's own encoding of the leading `\0` for a URL), identical whether the package
+ * is linked or installed under `node_modules` — see D1's rationale. */
+const ENTRY_ID = 'mock-review:entry'
+const RESOLVED_ENTRY_ID = '\0mock-review:entry'
+const ENTRY_URL = '/@id/__x00__mock-review:entry'
 
-const CONTENT_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.map': 'application/json; charset=utf-8',
-}
+/** D1: the one HTML document `GET /` (owner, `?client=`, `?frame=1` alike) answers, byte-specified
+ * — passed through `server.transformIndexHtml` so the host's own `@vitejs/plugin-react` injects
+ * `/@vite/client` and its refresh preamble. `main.tsx` (loaded by the one script tag) switches on
+ * `?frame` at runtime (D2), so this same template serves both the reviewer and the frame. */
+const ENTRY_HTML =
+  '<!doctype html><html lang="en"><head><meta charset="utf-8"/><title>mock-review</title></head>' +
+  `<body><div id="root"></div><script type="module" src="${ENTRY_URL}"></script></body></html>`
 
-function contentTypeFor(filePath: string): string {
-  return CONTENT_TYPES[path.extname(filePath)] ?? 'application/octet-stream'
-}
+/** D4: the complete first-load dependency graph (spike 3) — without every one of these, the linked
+ * layout re-optimizes mid-load (a `504 Outdated Optimize Dep` on `react-resizable-panels`) and the
+ * installed layout never mounts (`react-dom/client` served as raw CJS, which Vite's scanner does
+ * not crawl under `node_modules`). Load-bearing and exact; never trimmed or extended per-host. */
+const OPTIMIZE_DEPS_INCLUDE = [
+  'react',
+  'react-dom',
+  'react-dom/client',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  'radix-ui',
+  'class-variance-authority',
+  'clsx',
+  'tailwind-merge',
+  'lucide-react',
+  'cmdk',
+  'react-resizable-panels',
+]
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body)
@@ -106,8 +109,8 @@ function readCookie(req: IncomingMessage, name: string): string | undefined {
  * `owner` only when the socket is loopback with no tunnel header (`isLoopbackOwner`); (5)
  * otherwise `refused`. The cookie is validated against the config on every request — nothing is
  * stored server-side, so it survives a `serve` restart and dies the moment the token changes.
- * `Referer` is never consulted: everything the frame itself loads (`/@vite/client`, `/@fs/`
- * entry, `/@react-refresh`) sends the frame's own URL as Referer with no token, so a Referer
+ * `Referer` is never consulted: everything the frame itself loads (`/@vite/client`, the entry
+ * module, `/@react-refresh`) sends the frame's own URL as Referer with no token, so a Referer
  * check would blank a real remote client's mock instead of admitting it. */
 function roleOf(req: IncomingMessage, res: ServerResponse, config: Config | NullConfig): 'owner' | 'client' | 'refused' {
   if (config.client) {
@@ -452,142 +455,64 @@ async function handleEvents(
   res.on('error', dispose)
 }
 
-function serveStaticAsset(pageDir: string, relUrlPath: string, res: ServerResponse, next: Connect.NextFunction): void {
-  const decoded = decodeURIComponent(relUrlPath)
-  const filePath = path.normalize(path.join(pageDir, decoded))
-  // D23: compare against `pageDir + path.sep` — a bare `startsWith(pageDir)` also accepts a
-  // sibling directory that merely shares `pageDir` as a string prefix (e.g. `pageDir` `.../page`
-  // wrongly containing `.../page-secret`).
-  if (!filePath.startsWith(path.normalize(pageDir) + path.sep)) {
-    res.statusCode = 403
-    res.end()
-    return
-  }
-  if (!existsSync(filePath) || !statSync(filePath).isFile()) {
-    next()
-    return
-  }
-  res.statusCode = 200
-  res.setHeader('content-type', contentTypeFor(filePath))
-  res.end(readFileSync(filePath))
+/** D1: `pkgRoot` of the *compiled* plugin module — both `dist/server/plugin.js` (a real install)
+ * and `.test-dist/server/plugin.js` (this repo's own test build) sit two directories under the
+ * package root, so this one calculation resolves correctly in every layout the package ships in. */
+function packageRoot(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  return path.resolve(here, '..', '..')
 }
 
-/** D25: the fallback (page not built) answers 503, never a blank 200 — a host that installed the
- * package without its `page/` build step gets a diagnosable response, not a silently broken one. */
-function serveIndex(pageDir: string, res: ServerResponse): void {
-  const indexPath = path.join(pageDir, 'index.html')
-  const built = existsSync(indexPath)
-  res.statusCode = built ? 200 : 503
-  res.setHeader('content-type', 'text/html; charset=utf-8')
-  res.end(built ? readFileSync(indexPath) : FALLBACK_HTML)
-}
-
-/** D8/D18(d): the frame HTML — its entry is `src/frame/entry.tsx`, served through the host's own
- * Vite pipeline via `/@fs/<abs path>` (D15 resolves that path relative to the compiled server
- * module, never hard-coded), so it runs through the host's real aliases/Tailwind/React plugin
- * exactly like a host module would. No reviewer chrome is ever emitted onto this document.
- *
- * Run through `server.transformIndexHtml(url, html)` so `@vitejs/plugin-react`'s own
- * `transformIndexHtml` hook injects its dev-refresh preamble ahead of the entry `<script>` —
- * without it, the react plugin's runtime throws "can't detect preamble" the moment any
- * JSX-transformed module (the frame entry itself, or any screen/component it imports) evaluates
- * in this document, and `#root` never renders (D18(d), reproduced directly by the ui wave). */
-async function frameHtml(server: ViteDevServer, requestUrl: string, frameEntryAbsPath: string): Promise<string> {
-  const src = `/@fs${frameEntryAbsPath}`
-  // D19/D23 residual safety net: a `<script type="module">` whose *own* static import fails
-  // (e.g. a transient dependency-optimizer 504) never runs a line of its own code, so entry.tsx
-  // cannot recover from this itself. `document.currentScript.nextElementSibling` never attaches
-  // here — at parse time, when this classic script executes, the HTML parser has not yet reached
-  // (and so not yet inserted) the module `<script>` tag that follows it in source, so
-  // `nextElementSibling` is null and the listener is attached to nothing. Real resource-load
-  // failures (script/img/etc.) don't bubble, but *do* still reach a capture-phase listener on
-  // `window` during the capturing pass, so this listens on `window` in capture phase and matches
-  // the failing element by tag/type instead of by DOM position. Reloads exactly once, guarded by
-  // a `?mrRetried=1` query param on the *outer* frame URL, which entry.tsx never reads — it only
-  // looks at `location.hash` — so this never disturbs routing.
-  const selfHeal = `<script>
-    (function () {
-      window.addEventListener('error', function (event) {
-        var target = event.target
-        if (!target || target.tagName !== 'SCRIPT' || target.getAttribute('type') !== 'module') return
-        var url = new URL(location.href)
-        if (url.searchParams.get('mrRetried') === '1') return
-        url.searchParams.set('mrRetried', '1')
-        location.replace(url.toString())
-      }, true)
-    })()
-  </script>`
-  const html = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>mock-review frame</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    ${selfHeal}
-    <script type="module" src="${src}"></script>
-  </body>
-</html>
-`
-  return server.transformIndexHtml(requestUrl, html)
+/** D9: the root-relative path a `hotUpdate` file lives at, or `undefined` when it's outside
+ * `<root>/src/` (never sent to the frame — see `mockReview`'s `hotUpdate` hook). */
+function srcRelativePath(root: string, file: string): string | undefined {
+  const rel = path.relative(root, file)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return undefined
+  const segments = rel.split(path.sep)
+  if (segments[0] !== 'src') return undefined
+  return rel.split(path.sep).join('/')
 }
 
 /**
- * The reviewer's Vite plugin. Mounts the server API under `/__mock-review/` (D6), the frame
- * document at `GET /?frame=1` (D8), the prebuilt reviewer page at `GET /` (D8/D15), and the
- * in-memory component registry at `GET /r/registry.json` (reference §10) ahead of Vite's own
- * middlewares.
+ * The reviewer's Vite plugin. Mounts the server API under `/__mock-review/` (D6), the in-memory
+ * component registry at `GET /r/registry.json` (reference §10), and `GET /` (owner, `?client=`,
+ * `?frame=1` alike) as the one entry document (D1) ahead of Vite's own middlewares. `resolveId`/
+ * `load` answer the virtual entry module id (D1); `standalone` (set by `serve.ts`, omitted by a
+ * host's own `vite.config.ts` mount) adds D9's `hotUpdate` interception so a host source edit
+ * reloads the frame document, never the reviewer document.
  */
-export function mockReview(): Plugin {
-  const here = path.dirname(fileURLToPath(import.meta.url))
-  const pageDir = path.join(here, '..', 'page')
-  const frameEntryPath = path.join(here, '..', 'frame', 'entry.tsx')
-  const frameDir = path.dirname(frameEntryPath)
+export function mockReview(options: { standalone?: boolean } = {}): Plugin {
+  const pkgRoot = packageRoot()
+  const entryModulePath = path.resolve(pkgRoot, 'src', 'ui', 'main.tsx')
 
-  return {
+  const plugin: Plugin = {
     name: 'mock-review',
-    // D19 (revised — gate round 3): a `config()` hook forcing `optimizeDeps.entries`/`.include`
-    // (the frame entry + screens/components/shells globs, plus react/react-dom/jsx-dev-runtime)
-    // was tried to pre-bundle the frame's dependencies before the first request, on the theory
-    // that the host's missing `index.html` left Vite's startup scan with nothing to crawl.
-    // Diagnosed directly (gate repair round 3, scratch Playwright scripts against fresh scratch
-    // hosts, comparing response/console/frame-navigation timelines with the hook present vs
-    // removed): with the hook, the REVIEWER PAGE embedding the frame in an iframe (the real
-    // browser-test path, `tests/browser/**`) reproducibly 504'd `react-dom_client.js` on the
-    // very first load — 6/6 runs — while the SAME hook loading the bare frame directly
-    // (`/?frame=1` with no reviewer page around it, the `tests/server/api.test.ts` path) never
-    // 504'd once across 12+ runs, including under concurrent load and a concurrently-running
-    // one-shot `check`/`GET state` Vite server on the same root (ruling out a shared
-    // `node_modules/.vite` cache race between the persistent and one-shot servers). Isolating
-    // `entries` alone and `include` alone each reproduced the same embedded-only 504. Removing
-    // the hook entirely rendered cleanly in every scenario tried (bare, embedded, concurrent,
-    // fast-navigation) — 20+/20+ runs, 0 failures, 0 `.vite/deps/*` 504s. The mechanism is not
-    // fully explained (the two colliding responses shared the same `?v=` hash, so it is not a
-    // simple stale-hash-after-re-optimize race), but the evidence that forcing this particular
-    // pre-bundle is the trigger, and that leaving Vite's own lazy per-request dependency
-    // discovery alone is reliable, is conclusive enough to drop it rather than carry a
-    // reproducible regression. `frameHtml` below adds a same-origin, no-op-when-unneeded
-    // self-heal reload as the residual safety net for whatever transient 504 still occurs (the
-    // original motivation for D19) instead of pre-bundling.
+    apply: 'serve',
+
+    config() {
+      return {
+        optimizeDeps: { include: OPTIMIZE_DEPS_INCLUDE },
+        resolve: { dedupe: ['react', 'react-dom'] },
+      }
+    },
+
+    resolveId(id) {
+      if (id === ENTRY_ID) return RESOLVED_ENTRY_ID
+      return undefined
+    },
+
+    load(id) {
+      if (id === RESOLVED_ENTRY_ID) return `import ${JSON.stringify(entryModulePath)}\n`
+      return undefined
+    },
+
     configureServer(server) {
       const cwd = server.config.root
 
-      // D25/review-2: log once at startup when either build step never ran (a host installing
-      // this package straight from a `dist/` missing `page/` and/or `frame/entry.tsx`) — the
-      // fallback responses (`serveIndex`'s 503 below, and the frame route's 503 further down)
-      // are now diagnosable instead of a blank 200/404, and this is the one place that explains
-      // why for each file independently (a package can ship one without the other).
-      if (!existsSync(path.join(pageDir, 'index.html'))) {
-        console.error('mock-review: dist/page/index.html missing — package built without the page step')
-      }
-      if (!existsSync(frameEntryPath)) {
-        console.error('mock-review: dist/frame/entry.tsx missing — package built without the frame step')
-      }
-
-      // D15: the frame entry lives outside the host's project root (it ships inside this
-      // package), so it needs an explicit allow-list entry for Vite to serve it via `/@fs/`.
-      server.config.server.fs.allow.push(frameDir)
+      // D1: `src/ui/main.tsx` (and everything it imports) lives outside the host's project root
+      // when the package is linked, so it needs an explicit allow-list entry for Vite to serve it
+      // via `/@fs/`. Harmless to push twice (D4's double-mount case).
+      server.config.server.fs.allow.push(pkgRoot)
 
       server.middlewares.use((req, res, next) => {
         void (async () => {
@@ -624,17 +549,6 @@ export function mockReview(): Plugin {
             return
           }
 
-          // D24: `ping` and every static asset under the prebuilt page stay open — neither leaks
-          // anything the client role's gate is meant to hide (a build artifact, or a liveness
-          // check with no host data in it). Vite's own module routes (`/@vite/client`, `/@fs/*`,
-          // `/src/*`, `/node_modules/*`) are never intercepted by this middleware at all — they
-          // fall through to `next()` below untouched, so gating never turns one into a blank
-          // frame or a Vite error overlay.
-          if (req.method === 'GET' && pathname.startsWith('/__mock-review/page/')) {
-            serveStaticAsset(pageDir, pathname.slice('/__mock-review/page/'.length), res, next)
-            return
-          }
-
           if (req.method === 'GET' && pathname === '/r/registry.json') {
             const config = await configFor(cwd, getRunner(server))
             if (roleOf(req, res, config) === 'refused') {
@@ -646,6 +560,11 @@ export function mockReview(): Plugin {
             return
           }
 
+          // D1: `GET /` answers the one entry document for the owner, `?client=` and `?frame=1`
+          // alike — `main.tsx` (loaded by the one script tag) picks the frame branch at runtime
+          // when the URL carries `frame` (D2). Vite's own module routes (`/@vite/client`,
+          // `/@id/*`, `/@fs/*`, `/src/*`, `/node_modules/*`) are never intercepted by this
+          // middleware at all — they fall through to `next()` below untouched.
           if (req.method === 'GET' && pathname === '/') {
             const config = await configFor(cwd, getRunner(server))
             const isFrame = url.searchParams.get('frame') === '1'
@@ -664,25 +583,10 @@ export function mockReview(): Plugin {
               return
             }
 
-            if (isFrame) {
-              // D25/review-2: without the frame entry file, `frameHtml` would still emit a
-              // `<script src="/@fs/...">` pointing at nothing — Vite's own file server then
-              // answers a bare 404 for that request with no explanation, and the mock is just
-              // blank. Answer the same diagnosable 503 `serveIndex` uses for the missing page,
-              // instead of ever building that broken document.
-              if (!existsSync(frameEntryPath)) {
-                res.statusCode = 503
-                res.setHeader('content-type', 'text/html; charset=utf-8')
-                res.end(FALLBACK_HTML)
-                return
-              }
-              const html = await frameHtml(server, req.url ?? '/', frameEntryPath)
-              res.statusCode = 200
-              res.setHeader('content-type', 'text/html; charset=utf-8')
-              res.end(html)
-              return
-            }
-            serveIndex(pageDir, res)
+            const html = await server.transformIndexHtml(req.url ?? '/', ENTRY_HTML)
+            res.statusCode = 200
+            res.setHeader('content-type', 'text/html; charset=utf-8')
+            res.end(html)
             return
           }
 
@@ -691,6 +595,25 @@ export function mockReview(): Plugin {
       })
     },
   }
+
+  if (options.standalone) {
+    // D9: a host source edit must reload the frame document, never the reviewer document — with
+    // plain HMR, `@vitejs/plugin-react` finds every mock screen an invalid refresh boundary (it
+    // exports `meta`/`examples` alongside its component) and Vite broadcasts a `full-reload` to
+    // every connected client, the reviewer document included (spike 4). Returning `[]` here is
+    // the documented way to take over an update: nothing about the reviewer's own state (open
+    // dialog, draft, marking mode, scroll) is disturbed, and the frame's own listener
+    // (`src/ui/frame/mount.tsx`) is the only thing that reloads.
+    plugin.hotUpdate = function hotUpdate(options) {
+      if (this.environment.name !== 'client') return undefined
+      const file = srcRelativePath(options.server.config.root, options.file)
+      if (file === undefined) return undefined
+      this.environment.hot.send('mock-review:frame-reload', { file })
+      return []
+    }
+  }
+
+  return plugin
 }
 
 export default mockReview
