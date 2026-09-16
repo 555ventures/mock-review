@@ -226,7 +226,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   }
 
   const isolated = (draft?.open ?? false) || (cardOpen && !!selected)
-  const guideHints = useJourneyGuide({
+  const { hints: guideHints, ring: guideRing } = useJourneyGuide({
     rootsRef,
     count: ui.view === 'both' ? 2 : 1,
     steps: journeySteps,
@@ -325,6 +325,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             showNotes={showNotes && !journey}
             marking={marking && !journey}
             draftByViewport={(v) => (draft && draft.viewport === v && !draft.whole ? draft.box : null)}
+            ring={guideRing}
             isolated={isolated}
             onFrameLoad={onFrameLoad}
             onRoot={onRoot}

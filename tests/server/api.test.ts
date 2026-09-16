@@ -467,13 +467,17 @@ describe('mock-review server API (D6)', () => {
         // AC-3: resource timing carries exactly one src/ui/main.tsx URL (the entry, loaded once
         // by the outer reviewer document, visible here because same-origin timing entries include
         // cross-frame navigations within the same top-level browsing context in this Playwright
-        // page) and one src/ui/frame/mount.tsx URL (D2's frame branch), and no other src/ui/ URL.
+        // page), one src/ui/frame/mount.tsx URL (D2's frame branch) and — since specs/20260915/04
+        // D9 — one src/ui/frame/frameRoute.ts URL (the import-free hash grammar mount.tsx parses
+        // with), and no other src/ui/ URL.
         const srcUiUrls = await page.evaluate(() =>
           performance.getEntriesByType('resource').map((e) => e.name).filter((name) => name.includes('src/ui/')),
         )
+        const allowed = ['src/ui/main.tsx', 'src/ui/frame/mount.tsx', 'src/ui/frame/frameRoute.ts']
         expect(srcUiUrls.filter((u) => u.endsWith('src/ui/main.tsx'))).toHaveLength(1)
         expect(srcUiUrls.filter((u) => u.endsWith('src/ui/frame/mount.tsx'))).toHaveLength(1)
-        expect(srcUiUrls.filter((u) => !u.endsWith('src/ui/main.tsx') && !u.endsWith('src/ui/frame/mount.tsx'))).toEqual([])
+        expect(srcUiUrls.filter((u) => u.endsWith('src/ui/frame/frameRoute.ts'))).toHaveLength(1)
+        expect(srcUiUrls.filter((u) => !allowed.some((a) => u.endsWith(a)))).toEqual([])
 
         await page.goto(`${serve.url}/?frame=1#/home?state=Default&scheme=dark`, { waitUntil: 'networkidle' })
         const hasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'))
