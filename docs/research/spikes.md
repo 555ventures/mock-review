@@ -224,3 +224,28 @@ after  9a5d1b485851dd5c    # after changing "Default" to "default" — one chara
    `configLoader: 'native'` will not support it. Harmless today; the package must not assume the host
    config loads under the native loader.
 6. **`resolvedUrls.local[0]` has a trailing slash** — the contract forbids one on `serve.url`.
+
+---
+
+# Spec 03 spikes (2026-09-15) — collapsing the reviewer onto the host's Vite server
+
+Six spikes from `docs/research/spec-03-collapse-brief.md` §3, run against a working prototype of the
+collapse in an isolated worktree, each in **both** package layouts: `linked` (the package outside the
+host root, its `.test-dist/cli.js` started from the host) and `installed` (`dist/`, `src/ui/` and
+`package.json` materialised under `<host>/node_modules/@555/mock-review/`). Scratch (disposable):
+`/tmp/claude-1000/-home-jj-projects-mock-review/477e2897-1422-4206-a64d-f06b63f225aa/scratchpad/spike03/`
+(`report-A.md`, `out-spike*.txt`, `spike*.mjs`, `mk-host*.mjs`). Versions: vite 8.3.0,
+@vitejs/plugin-react 6.1.1, tailwindcss + @tailwindcss/vite 4.3.3, react 19.3.0, playwright 1.63.
+
+| # | Claim | Result |
+|---|---|---|
+| 1 | JSX through the host server: a `\0mock-review:entry` virtual id that only `import`s `<pkg>/src/ui/main.tsx` | PASS both layouts. `GET /@id/__x00__mock-review:entry` → 200; served `reviewer.tsx`/`frame/mount.tsx` contain `jsxDEV(` and no raw JSX **even from under `node_modules`** (plugin-react's `node_modules` exclusion governs Fast Refresh wrapping only); sidebar 255 px; iframe renders `ConsoleShell`; no preamble error; frame document has no stylesheet defining `--sidebar`. |
+| 2 | CSS leak: `apply: 'serve'` + `@import "tailwindcss" source(none); @source "./"` | PASS. Host build with `[react(), tailwindcss(), mockReview()]`: `dist/index.html` + one JS asset, zero `data-sidebar`/`Geist`/`mock-review` hits after path stripping. Served reviewer CSS 116,931 bytes with `--sidebar-width`. 2b: host-only utilities injected into a screen never reach the reviewer CSS. Double mount (host config + `serve`) benign. **Host must be `"type": "module"`** or Vite bundles its config as CJS and fails to load the ESM-only `@555/mock-review/vite`. |
+| 3 | Optimizer, 20 cold starts per cell (`rm -rf node_modules/.vite`) | linked/include 0 504s, 0 reloads, median 2.28 s; installed/include 0/0, 2.28 s. linked/no-include: 15/20 with `504 Outdated Optimize Dep` on `react-resizable-panels`, 20/20 one full reload. installed/no-include: 0/20 rendered (`react-dom/client … does not provide an export named 'createRoot'`, raw CJS; 4 optimized entries instead of 12). `optimizeDeps.include` is load-bearing and exactly sufficient. |
+| 4 | HMR: edit a host screen with a pin visible | Pre-image linked: 114 ms, 0 reviewer reloads. Prototype (plain HMR): edited text in 1.2–1.7 s but **the reviewer document full-reloads on every edit** (plugin-react invalidates every screen — `examples` is not a component export — and Vite broadcasts `full-reload` to every client). 4b with a `hotUpdate` hook returning `[]` for host `src/**` in the client environment plus a `mock-review:frame-reload` custom event the frame alone listens to: 149/135 ms (linked), 124/121 ms (installed), 0 reviewer reloads, 1 frame reload, 1 `files` event and a changed hash per edit, pin kept, iframe `src` unchanged. `mock.config.ts` edits get no HMR payload at all (SSR graph only); the `files` SSE is their only signal. Pre-image **installed** layout never renders the frame at all (same CJS `createRoot` failure). |
+| 5 | Remote client (every request `X-Forwarded-For`) | PASS both layouts: `GET /` → 403 text; `?client=replace-me` → 200 + `Set-Cookie`; cookie alone → `/`, `/?frame=1`, the entry, its import, `state` (`role: client`), `events` all 200; no/stale cookie → 403; Playwright with the header renders the reviewer, the mock and `Confirm journey`; `?client=wrong` clears the cookie (the carrying request itself still answers 200; the 403 starts on the next). |
+| 6 | One React (installed, `resolve.dedupe` on/off) | PASS both ways: one `react-dom_client.js` URL, no Invalid hook call, 0 504s. Dedupe is inert insurance (single realpath); toggling it only changes the optimizer hash. |
+
+Known cosmetic residue: `/src/index.css` 404s on a host without one (the fixture) with a MIME
+console line; in the test's symlinked `installed` layout one 403 on the Geist webfont whose realpath
+escapes `fs.allow` through the per-entry symlink (a real install keeps it inside the host root).
