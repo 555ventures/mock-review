@@ -118,7 +118,11 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-03-6: a host edit
       expect(srcAfter).toBe(srcBefore)
 
       expect(await page.evaluate(() => (window as unknown as { __spec03?: string }).__spec03)).toBe('alive')
-      expect(await pin.count()).toBeGreaterThan(0)
+      // The pin overlay re-anchors only after the reloaded frame's `load` event (a double-rAF
+      // `tick` then a layout effect), so the edited text is painted a few tens of ms before the
+      // pin is back. Poll it exactly as the initial pin wait above does — a bare snapshot here
+      // races that re-anchor and makes this test intermittently red.
+      await expect.poll(() => pin.count(), { timeout: 5_000 }).toBeGreaterThan(0)
 
       // Give the single expected `files` SSE event a moment to arrive, then stop reading.
       await new Promise((resolve) => setTimeout(resolve, 500))
