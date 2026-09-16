@@ -49,6 +49,7 @@ and the `standalone` switch that made the second half `serve`-only is gone.
 | tests/unit/plugin.test.ts | CREATE | tests | AC-20260916-01-1 |
 | tests/server/hot-update.test.ts | CREATE | tests | AC-20260916-01-2, AC-20260916-01-3 |
 | tests/browser/reload.test.ts | CREATE | tests | AC-20260916-01-4, AC-20260916-01-5 |
+| tests/browser/hmr.test.ts | MODIFY | tests | AC-20260916-01-6 — the reused AC-20260915-03-6 titles also carry this AC's ID (review fix: ac-matrix coverage); no assertion changes |
 
 `src/ui/frame/mount.tsx` is deliberately not in the plan: its `mock-review:frame-reload` listener is unchanged, and a concurrent session (journey guide ring) is editing that file.
 

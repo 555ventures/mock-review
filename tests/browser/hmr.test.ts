@@ -1,4 +1,4 @@
-// AC-20260915-03-6 [env: SKIP_BROWSER]: D9's `hotUpdate` interception — a host source edit
+// AC-20260915-03-6, AC-20260916-01-6 [env: SKIP_BROWSER]: D9's `hotUpdate` interception — a host source edit
 // reloads the frame document alone, never the reviewer document, while every reviewer-side state
 // (here, the drawn pin and a marker planted on `window`) survives untouched. Playwright is only
 // ever imported dynamically, inside this skipIf-gated describe (see tests/browser/surfaces.test.ts's
@@ -17,7 +17,7 @@ it.skipIf(process.env.SKIP_BROWSER !== '1')(
   },
 )
 
-describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-03-6: a host edit reloads the frame, never the reviewer document [env: SKIP_BROWSER]', () => {
+describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-03-6, AC-20260916-01-6: a host edit reloads the frame, never the reviewer document [env: SKIP_BROWSER]', () => {
   let browser: import('playwright').Browser
   let serve: Serve | undefined
 
@@ -36,7 +36,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-03-6: a host edit
     serve = undefined
   })
 
-  it('AC-20260915-03-6: an edited screen shows up inside the iframe within 2s, with the iframe src unchanged, the reviewer document not reloaded, the pin kept, one files SSE event, and a changed screens[home].hash', async () => {
+  it('AC-20260915-03-6, AC-20260916-01-6: an edited screen shows up inside the iframe within 2s, with the iframe src unchanged, the reviewer document not reloaded, the pin kept, one files SSE event, and a changed screens[home].hash', async () => {
     serve = await startServe(greenHost)
     const { url: serveUrl, host: serveHost } = serve
 
