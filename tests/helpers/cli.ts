@@ -1,10 +1,75 @@
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
-import { cpSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { afterAll } from 'vitest'
 import { cliPath, repoRoot, testDistDir } from '../setup.js'
 
 export { cliPath, repoRoot }
+
+/** Item 3 (leak fix): every scratch directory this helper module creates (`copyFixtureHost`,
+ * `buildScratchPackage`) is tracked here and removed once this test file's own suite finishes, so
+ * a run never leaves scratch hosts behind under the system temp dir — the prior behavior (never
+ * removed) leaked 15+ copies per run and eventually starved this machine's /tmp of inodes (4,645
+ * of them), which made the browser suite fail with ENOSPC rather than a real assertion failure.
+ *
+ * Cleanup is registered two ways: vitest's own `afterAll` (the reliable path — this module is
+ * re-evaluated fresh per test file under vitest's default file isolation, so calling `afterAll`
+ * here at module scope registers it against that file's own root suite, and it always runs as
+ * part of vitest's normal lifecycle) *and* `process.once('exit', ...)` as a belt-and-braces
+ * fallback for anything vitest's own teardown doesn't reach. The `afterAll` path turned out to be
+ * the one that actually matters: a worker pool that tears down its processes with `terminate()`/a
+ * hard kill rather than a graceful exit never fires Node's `'exit'` event at all, which is
+ * exactly why an `'exit'`-only version of this still left roughly 150 directories behind after a
+ * full two-run verification (confirmed by direct reproduction — this repo's default vitest pool
+ * doesn't reach `process.on('exit')` reliably; the mechanism the `'exit'` handler assumed simply
+ * doesn't fire in every case). Exported so a test file that creates its own scratch root directly
+ * (e.g. tests/e2e's own `mkdtempSync`, not through one of the copy helpers here) can opt in too.
+ * `removeScratchDir` is the eager path (tests/helpers/serve.ts's `stopServe` uses it for a host
+ * `startServe` created itself); this file-scoped cleanup is the safety net for everything else,
+ * including a test that fails before reaching its own cleanup. */
+const scratchDirs = new Set<string>()
+
+function cleanupAllScratchDirs(): void {
+  for (const dir of scratchDirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // Best-effort: a directory a still-running child (e.g. a `serve` process this same
+      // teardown is also in the middle of killing) has open file handles under is left for the
+      // OS's own temp-dir GC rather than risking a half-completed delete racing that child.
+    }
+  }
+  scratchDirs.clear()
+}
+
+// Registered unconditionally, once, at module-collection time — `registerScratchDir` itself is
+// typically first called later, from inside a running `beforeAll`/`it` body (well after
+// collection), and vitest's global hooks (`afterAll` included) must be called during collection
+// to attach to a suite; calling `afterAll` lazily from inside an already-running test does not
+// reliably register it. Every test file that (transitively) imports this module re-evaluates it
+// fresh (vitest's default per-file isolation), so this runs exactly once per file, at the right
+// time, whether or not that file ever ends up calling `registerScratchDir` at all.
+afterAll(cleanupAllScratchDirs)
+process.once('exit', cleanupAllScratchDirs)
+
+export function registerScratchDir(dir: string): void {
+  scratchDirs.add(dir)
+}
+
+/** Removes one scratch directory immediately (used once its owner is done with it, e.g.
+ * `stopServe`) rather than waiting for process exit — cheaper on inode-constrained machines when
+ * a suite creates many of these in one run. Safe to call on a directory nothing else references;
+ * never call it on a directory another still-running part of the same test may reuse (e.g. a
+ * `startServeIn` host a test restarts `serve` on after stopping it once). */
+export function removeScratchDir(dir: string): void {
+  scratchDirs.delete(dir)
+  try {
+    rmSync(dir, { recursive: true, force: true })
+  } catch {
+    // best-effort; nothing else to do if this races a child process still exiting.
+  }
+}
 
 /** D20: a one-shot CLI verb takes ~1.5s; a synchronous spawn that hasn't exited by this bound is
  * hung, not slow. Every synchronous CLI spawn in tests carries this timeout so a hang fails the
@@ -79,13 +144,21 @@ export function spawnWithTimeout(
 /** Builds a real (non-symlinked) `node_modules` under `hostDir`, with one symlink per top-level
  * entry back into the package's own `node_modules` (including scoped `@foo` dirs) and one per
  * `.bin` entry. Never writes through to the shared repo `node_modules` — adding
- * `node_modules/.bin/mock-review` afterwards is then a local, isolated symlink. */
+ * `node_modules/.bin/mock-review` afterwards is then a local, isolated symlink.
+ *
+ * D20: every dot-directory except `.bin` is skipped (never symlinked) — most importantly
+ * `.vite`, Vite's dep-optimizer cache. Symlinking `.vite` would make every scratch host's `serve`
+ * share one cache keyed by a different config hash (no `mock-review` plugin in the repo's own
+ * node_modules-adjacent config), so each server's optimizer start deletes the others'
+ * `deps` directory mid-flight — the "blank frame" flake (a stale module request then 404s/504s
+ * with no re-optimize). Each scratch host must get its own real `node_modules/.vite`, created by
+ * its own Vite instance on first run. */
 export function linkNodeModulesInto(hostDir: string): void {
   const target = path.join(hostDir, 'node_modules')
   mkdirSync(target, { recursive: true })
   const sourceModules = path.join(repoRoot, 'node_modules')
   for (const entry of readdirSync(sourceModules)) {
-    if (entry === '.bin') continue
+    if (entry === '.bin' || entry.startsWith('.')) continue
     symlinkSync(
       path.join(sourceModules, entry),
       path.join(target, entry),
@@ -132,6 +205,7 @@ export function copyHostInto(fixtureDir: string, dest: string): string {
  * checked-in fixture or the shared repo node_modules. */
 export function copyFixtureHost(fixtureDir: string, label = 'mock-review-'): string {
   const scratch = mkdtempSync(path.join(tmpdir(), label))
+  registerScratchDir(scratch)
   return copyHostInto(fixtureDir, path.join(scratch, 'app'))
 }
 
@@ -152,6 +226,7 @@ export function linkInstalledBin(hostDir: string): void {
  * resolvable". */
 export function buildScratchPackage(exclude: readonly string[] = []): { dir: string; cliPath: string } {
   const scratch = mkdtempSync(path.join(tmpdir(), 'mock-review-pkg-'))
+  registerScratchDir(scratch)
   cpSync(testDistDir, path.join(scratch, 'dist'), { recursive: true })
   cpSync(path.join(repoRoot, 'package.json'), path.join(scratch, 'package.json'))
   const target = path.join(scratch, 'node_modules')

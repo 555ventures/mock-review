@@ -1,8 +1,15 @@
 @import 'tailwindcss';
 
 /* nova theme tokens — fixture only, never read for its content by the package (D3: themes are
-   discovered by basename, never parsed). */
+   discovered by basename, never parsed). AC-20260915-02-15: `body { background-color }` is a
+   visible token distinct from the default host CSS's white background, so a browser test can
+   prove the picked theme's stylesheet is actually applied to the frame document (not just
+   linked). */
 :root {
-  --background: #ffffff;
+  --background: #f5f1ff;
   --foreground: #0a0a0a;
+}
+
+body {
+  background-color: #f5f1ff;
 }

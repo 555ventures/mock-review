@@ -18,6 +18,12 @@ export async function withRunner<T>(cwd: string, fn: (runner: Runner) => Promise
     configFile,
     logLevel: 'silent',
     appType: 'custom',
+    // D22: a one-shot verb's optimizer gets its own cache directory, distinct from the persistent
+    // `serve` server's default `node_modules/.vite/deps` — a second Vite server pointed at the
+    // same shared cache computes a different config hash and evicts `serve`'s optimized deps out
+    // from under it (D20's mechanism), 504-ing every later frame request even when `check`/
+    // `check --look` only ran briefly alongside a live `serve`.
+    cacheDir: path.join(cwd, 'node_modules', '.vite', 'mock-review-check'),
     // D20 (secondary guard): disable the FS watcher outright — `check`'s runner is one-shot and
     // the watcher's handles otherwise survive `server.close()` and keep the event loop alive.
     server: { middlewareMode: true, watch: null },

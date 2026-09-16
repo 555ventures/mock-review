@@ -57,7 +57,7 @@ describe('mock-review serve (built dist/)', () => {
 
     const page = await fetch(`${url}/`)
     expect(page.status).toBe(200)
-    expect(await page.text()).toContain('reviewer page lands in spec 02')
+    expect(page.headers.get('content-type')).toContain('text/html')
 
     proc.kill('SIGTERM')
     const exitCode = await new Promise((resolve) => proc.once('exit', resolve))

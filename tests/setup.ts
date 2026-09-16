@@ -7,6 +7,7 @@
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -25,6 +26,16 @@ export const cliPath = path.join(testDistDir, 'cli.js')
 export const fixturesDir = path.join(repoRoot, 'tests', 'fixtures')
 export const greenHost = path.join(fixturesDir, 'host')
 export const brokenHost = path.join(fixturesDir, 'host-broken')
+
+// D15: the prebuilt reviewer page and the frame entry source, built into `.test-dist/` (never
+// the committed `dist/`) exactly like the release build's `dist/page/` + `dist/frame/entry.tsx`,
+// just redirected. Skipped entirely while `vite.page.config.ts` doesn't exist yet (spec 02's ui
+// wave adds it) so this file stays a no-op red-safe modification until then.
+export const pageDir = path.join(testDistDir, 'page')
+export const frameDir = path.join(testDistDir, 'frame')
+export const frameEntryPath = path.join(frameDir, 'entry.tsx')
+const vitePageConfigPath = path.join(repoRoot, 'vite.page.config.ts')
+const frameEntrySrc = path.join(repoRoot, 'src', 'frame', 'entry.tsx')
 
 let ready: Promise<void> | null = null
 
@@ -89,9 +100,39 @@ async function sleep(ms: number): Promise<void> {
  * file): the loser polls until either the winner's build satisfies `testDistIsStale() === false`
  * or the lock looks abandoned (`lockIsStale()`, ~2 min), in which case it reclaims the lock itself
  * rather than waiting forever on a crashed holder. The committed `dist/` is never written here. */
+/** D15: true once `vite.page.config.ts` exists and either the page or the frame entry copy is
+ * missing or older than the newest `src/**` file. Always false (a deliberate no-op) while
+ * `vite.page.config.ts` is absent — the page/frame build steps land in a later wave. */
+function pageBuildIsStale(): boolean {
+  if (!existsSync(vitePageConfigPath)) return false
+  const indexHtml = path.join(pageDir, 'index.html')
+  const newestSrc = newestSrcMtimeMs()
+  if (!existsSync(indexHtml) || newestSrc > statSync(indexHtml).mtimeMs) return true
+  if (!existsSync(frameEntrySrc)) return false
+  if (!existsSync(frameEntryPath) || statSync(frameEntrySrc).mtimeMs > statSync(frameEntryPath).mtimeMs) return true
+  return false
+}
+
+/** D15: `vite build -c vite.page.config.ts` into `.test-dist/page`, then a plain copy of
+ * `src/frame/entry.tsx` into `.test-dist/frame/entry.tsx` (the frame entry is never compiled —
+ * it is imported as source by the host's own Vite pipeline, D8). Skipped while
+ * `vite.page.config.ts` doesn't exist yet. */
+function buildPageAndFrame(): void {
+  if (!existsSync(vitePageConfigPath)) return
+  execFileSync(
+    'npx',
+    ['vite', 'build', '-c', 'vite.page.config.ts', '--outDir', pageDir, '--emptyOutDir'],
+    { cwd: repoRoot, stdio: 'inherit' },
+  )
+  if (existsSync(frameEntrySrc)) {
+    mkdirSync(frameDir, { recursive: true })
+    copyFileSync(frameEntrySrc, frameEntryPath)
+  }
+}
+
 async function buildTestDist(): Promise<void> {
   for (;;) {
-    if (!testDistIsStale()) return
+    if (!testDistIsStale() && !pageBuildIsStale()) return
 
     if (tryAcquireLock()) {
       try {
@@ -101,6 +142,9 @@ async function buildTestDist(): Promise<void> {
             stdio: 'inherit',
           })
           chmodSync(cliPath, 0o755)
+        }
+        if (pageBuildIsStale()) {
+          buildPageAndFrame()
         }
       } finally {
         rmSync(lockDir, { recursive: true, force: true })

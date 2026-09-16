@@ -24,7 +24,9 @@ async function main(argv: string[]): Promise<number> {
 
     case 'check': {
       const { checkVerb, formatCheckText } = await import('./cli/check.js')
-      const check = await checkVerb(cwd, flags.has('look'))
+      // D23: `--look` with no screen name (`flags.has('look')` but no `values.look`, e.g. a bare
+      // trailing `--look`) is a distinct refusal from `check` never having named `--look` at all.
+      const check = await checkVerb(cwd, values.look, values.state, flags.has('look') || values.look !== undefined)
       if (json) await printJson(check)
       else await writeFlushed(process.stdout, formatCheckText(check))
       return 0

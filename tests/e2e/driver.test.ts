@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
-import { copyHostInto, linkInstalledBin, run, spawnWithTimeout, DESIGN_STATE_FILES } from '../helpers/cli.js'
+import { copyHostInto, linkInstalledBin, registerScratchDir, run, spawnWithTimeout, DESIGN_STATE_FILES } from '../helpers/cli.js'
 
 const pluginRoot = process.env.SPEC_PLUGIN_ROOT || path.join(homedir(), 'projects', 'claude-plugins')
 const driverScript = path.join(pluginRoot, 'spec', 'scripts', 'mocks-driver.js')
@@ -36,6 +36,9 @@ describeIfPlugin('mocks-driver.js against the built binary (built .test-dist/, D
 
   function setupScratch() {
     scratchRoot = mkdtempSync(path.join(tmpdir(), 'mock-review-e2e-'))
+    // Item 3: this file creates its own scratch root directly, so it registers it itself for the
+    // shared exit-time cleanup (tests/helpers/cli.ts) rather than leaking it.
+    registerScratchDir(scratchRoot)
     appDir = path.join(scratchRoot, 'app')
     copyHostInto(greenHost, appDir)
     linkInstalledBin(appDir)

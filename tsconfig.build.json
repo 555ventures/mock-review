@@ -9,5 +9,6 @@
     "rootDir": "src",
     "moduleResolution": "bundler"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/ui/**", "src/frame/**"]
 }

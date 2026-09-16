@@ -19,6 +19,10 @@ export type ScreenReportResult = {
   specifiersByScreen: Map<string, string[]>
   /** Screen name -> example key -> its rendered HTML (successful renders only). */
   htmlByScreen: Map<string, Record<string, string>>
+  /** D21: screen name -> `Object.keys(examples)` (every declared example, render success or not;
+   * `[]` for a screen whose module cannot be imported at all). Feeds `ServerScreenSchema.examples`
+   * — the page's state list source (D3/D21), distinct from `htmlByScreen`'s render-only keys. */
+  examplesByScreen: Map<string, string[]>
 }
 
 /**
@@ -42,6 +46,7 @@ export async function screenReport(
   const screens: Screen[] = []
   const specifiersByScreen = new Map<string, string[]>()
   const htmlByScreen = new Map<string, Record<string, string>>()
+  const examplesByScreen = new Map<string, string[]>()
 
   for (const d of discovered) {
     const abs = path.join(cwd, d.file)
@@ -63,18 +68,21 @@ export async function screenReport(
     }
 
     if (importFailed) {
+      examplesByScreen.set(d.name, [])
       screens.push({ name: d.name, file: d.file, states: [], shell, hash, lines })
       continue
     }
 
     if (!mod || !mod.meta) {
       findings.push({ kind: 'render', severity: 'error', file: d.file, message: 'meta: missing' })
+      examplesByScreen.set(d.name, Object.keys(mod?.examples ?? {}))
       screens.push({ name: d.name, file: d.file, states: [], shell, hash, lines })
       continue
     }
 
     const states = mod.meta.states ?? []
     const examples = mod.examples ?? {}
+    examplesByScreen.set(d.name, Object.keys(examples))
     const html: Record<string, string> = {}
 
     for (const [stateName, node] of Object.entries(examples)) {
@@ -101,7 +109,7 @@ export async function screenReport(
     screens.push({ name: d.name, file: d.file, states, shell, hash, lines })
   }
 
-  return { screens, findings, specifiersByScreen, htmlByScreen }
+  return { screens, findings, specifiersByScreen, htmlByScreen, examplesByScreen }
 }
 
 /**
