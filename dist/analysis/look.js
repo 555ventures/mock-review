@@ -5,9 +5,9 @@
 // running" refusal is the CLI wave's job (src/analysis/liveness.ts's `serveUrl` already owns that
 // probe) — this module only ever receives an already-live `serveUrl`.
 import { mkdirSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveHostModule } from './host-modules.js';
 import { frameSrc } from '../ui/frame/frameRoute.js';
 /** Thrown when `playwright` cannot be resolved from the host root. The message is exactly the
  * remedy text the dispatcher (src/cli.ts) prints after its `mock-review: ` prefix. */
@@ -16,10 +16,9 @@ export class PlaywrightUnresolvedError extends Error {
 /** Resolves `playwright` from `root` (the host, not this package) via `createRequire`, then loads
  * it with a dynamic `import()` so the package itself never statically depends on it. */
 async function resolvePlaywright(root) {
-    const require = createRequire(path.join(root, 'package.json'));
     let resolved;
     try {
-        resolved = require.resolve('playwright');
+        resolved = resolveHostModule(root, 'playwright');
     }
     catch {
         throw new PlaywrightUnresolvedError('--look needs playwright — remedy: npm i -D playwright');

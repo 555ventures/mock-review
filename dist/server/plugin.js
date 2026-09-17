@@ -1,8 +1,8 @@
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isRunnableDevEnvironment } from 'vite';
 import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js';
+import { runnerOf } from '../analysis/vite-runner.js';
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js';
 import { discoverHost } from '../analysis/discover.js';
 import { ApprovalSchema, NotesSchema } from '../schemas/index.js';
@@ -131,15 +131,14 @@ async function configFor(cwd, runner) {
         return NULL_CONFIG;
     }
 }
-/** D20: narrows the persistent `serve` server's own SSR environment into the `Runner` shape
- * `analysis/*` already expects (mirrors `analysis/vite-runner.ts`'s `withRunner`, minus the
- * `createServer`/`close` lifecycle — this environment lives for the whole `serve` process). */
-function getRunner(server) {
-    const ssrEnv = server.environments.ssr;
-    if (!isRunnableDevEnvironment(ssrEnv)) {
-        throw new Error('the ssr environment is not runnable (no module runner)');
-    }
-    return { import: (absPath) => ssrEnv.runner.import(absPath) };
+/** D20/D1 (specs/20260916/02): narrows the persistent `serve` server's own SSR environment into
+ * the `Runner` shape `analysis/*` already expects (mirrors `analysis/vite-runner.ts`'s
+ * `withRunner`, minus the `createServer`/`close` lifecycle — this environment lives for the whole
+ * `serve` process) — by shape (`runnerOf`), never vite's `isRunnableDevEnvironment` `instanceof`
+ * guard, which is false whenever the host's Vite is a different physical copy than the
+ * package's (D2 of specs/20260916/02). */
+function getRunner(server, viteVersion) {
+    return runnerOf(server.environments.ssr, { root: server.config.root, viteVersion });
 }
 function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -471,6 +470,10 @@ export function mockReview() {
             },
         },
         configureServer(server) {
+            // D1 (specs/20260916/02): captured once here — this hook's `this` is a `PluginContext`
+            // with `meta.viteVersion`; the middleware closure below reads the captured string rather
+            // than re-reading `this`, which is unavailable inside the closure.
+            const viteVersion = this.meta.viteVersion;
             const cwd = server.config.root;
             // D1: `src/ui/main.tsx` (and everything it imports) lives outside the host's project root
             // when the package is linked, so it needs an explicit allow-list entry for Vite to serve it
@@ -489,23 +492,23 @@ export function mockReview() {
                         return;
                     }
                     if (req.method === 'GET' && pathname === '/__mock-review/state') {
-                        await handleGetState(req, res, cwd, getRunner(server));
+                        await handleGetState(req, res, cwd, getRunner(server, viteVersion));
                         return;
                     }
                     if (req.method === 'POST' && pathname === '/__mock-review/notes') {
-                        await handlePostNotes(req, res, cwd, getRunner(server));
+                        await handlePostNotes(req, res, cwd, getRunner(server, viteVersion));
                         return;
                     }
                     if (req.method === 'POST' && pathname === '/__mock-review/approval') {
-                        await handlePostApproval(req, res, cwd, getRunner(server));
+                        await handlePostApproval(req, res, cwd, getRunner(server, viteVersion));
                         return;
                     }
                     if (req.method === 'GET' && pathname === '/__mock-review/events') {
-                        await handleEvents(req, res, server, cwd, getRunner(server));
+                        await handleEvents(req, res, server, cwd, getRunner(server, viteVersion));
                         return;
                     }
                     if (req.method === 'GET' && pathname === '/r/registry.json') {
-                        const config = await configFor(cwd, getRunner(server));
+                        const config = await configFor(cwd, getRunner(server, viteVersion));
                         if (roleOf(req, res, config) === 'refused') {
                             sendRefused(res);
                             return;
@@ -520,7 +523,7 @@ export function mockReview() {
                     // `/@id/*`, `/@fs/*`, `/src/*`, `/node_modules/*`) are never intercepted by this
                     // middleware at all — they fall through to `next()` below untouched.
                     if (req.method === 'GET' && pathname === '/') {
-                        const config = await configFor(cwd, getRunner(server));
+                        const config = await configFor(cwd, getRunner(server, viteVersion));
                         const isFrame = url.searchParams.get('frame') === '1';
                         if (roleOf(req, res, config) === 'refused') {
                             // D24: `GET /` (the plain reviewer link a browser opens directly) answers plain

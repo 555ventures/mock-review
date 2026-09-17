@@ -1,4 +1,4 @@
-import { type Plugin } from 'vite';
+import type { Plugin } from 'vite';
 /**
  * The reviewer's Vite plugin. Mounts the server API under `/__mock-review/` (D6), the in-memory
  * component registry at `GET /r/registry.json` (reference §10), and `GET /` (owner, `?client=`,
