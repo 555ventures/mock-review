@@ -1,6 +1,6 @@
 ---
 date: 2026-09-17
-status: implementing
+status: done
 build_base: main
 tier: critical
 area: schemas
@@ -155,6 +155,8 @@ Existing persisted state **is** affected, and only in one field. A host's `desig
 The number had to move before anything else could: the plugin compares one integer and refuses on mismatch, so every later piece of the story work is blocked behind this. The split between produced and read-back shapes is the whole design. What this package *prints* is a statement about itself and must be exact, so those three stay `z.literal`. What it *reads back* is a file a host wrote earlier, possibly under v1, and refusing it would be a silent catastrophe rather than a loud one: `buildState` catches a parse failure and falls back to empty documents, so the page would render a clean, empty review — nothing pending, nothing approved — and only fail at the client's first write, with a message about a file they never touched. Migrate-on-write keeps every existing host readable and upgrades it the moment it is written, with no migration command to forget. Rejected: a `--migrate` verb (a step that exists only to be skipped); accepting any integer (then a v3 document written by a future build would be read as if it were understood); bumping only the trio the plugin reads (the repo's own rule ties the package major to the contract, and a half-bump is a lie). The e2e skew guard is the one piece that exists purely for ordering: the plugin's template is still at 1 today, so without it this repo's suite goes red for a fact about another repo. It is written as a skip with both numbers in the reason, not a silent pass, and it disappears on its own once the plugin's spec is built. Fragile: the two copies of `contract.json`, which nothing keeps in sync; if they drift again, the conformance test is what catches it.
 
 Collision-closure waives (literals leg, run at lock over `#v1`, `contract v1`, `contractVersion 1`): `docs/research/plugin-requirements.md`, `docs/research/fable-rulings.md` and `docs/research/spikes.md` are dated research records of what was executed and ruled at the time — they are evidence, not live grounding, and are never rewritten when the thing they recorded moves; the rule they established (package major equals the contract version) is honoured by D4 rather than re-stated. Every other hit is a File Plan row.
+
+Folded from this build's deviations sidecar (one-off, no recurrence): `package-lock.json` was not in the original File Plan, but `package.json`'s bump to `2.0.0` leaves the lockfile's own `version` fields stale, so the `other` worker synced it through `npm install --package-lock-only` rather than by hand. Besides the root and self `version` fields npm also wrote six nested `"inBundle": true` entries under `node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules` (@emnapi/core 1.11.1, @emnapi/runtime 1.11.1, @emnapi/wasi-threads 1.2.2, @napi-rs/wasm-runtime 1.1.4, @tybys/wasm-util 0.10.2, tslib 2.8.1); no top-level dependency version moved. The review's reconcile leg caught it as out of plan and the fix folded it in as a File Plan row — the lesson for the next version bump is that the lockfile is part of the bump's file set, not a side effect.
 
 ## Canonical Delta
 
