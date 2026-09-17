@@ -56,6 +56,8 @@ server: every host module load goes through the running server's own SSR runner.
 (`check`, `check --look`) keeps its own short-lived server and its own
 `node_modules/.vite/mock-review-check` cache, so it can never evict the deps `serve` is serving.
 
+The package never loads its own copy of Vite. `src/analysis/host-modules.ts` resolves `vite` from the host root (`createRequire(<root>/package.json)`) and imports it dynamically; `check`'s one-shot server and `serve` both use that copy. A host whose vite major is not 8 is refused (`mock-review needs vite 8 in the host; found vite <v> at <dir>`); a host with no vite at all gets the package's own copy plus a stderr warning. The SSR environment is narrowed by shape (`runner.import` is a function, `runnerOf` in `src/analysis/vite-runner.ts`), never with vite's `isRunnableDevEnvironment`, which is an `instanceof` against one copy's class. `serve` probes the runner once before it listens: a runtime that cannot supply a module runner exits 2 with one stderr line and no URL. `serve` still never refuses to start over a bad `mock.config.ts` — that stays a `config` finding / `NULL_CONFIG`.
+
 The plugin owns the HMR boundary between the host and the reviewer with one `hotUpdate` hook,
 installed unconditionally and ordered `pre` so it runs ahead of every host plugin in every mount
 (`serve` and a host's own `vite.config.ts` alike). In the client environment, any change under
@@ -126,7 +128,7 @@ compiled file under `dist/ui/`.
 The reviewer never writes to the frame's document — no attribute, class, inline style, node or
 stylesheet, and no mutation of a host control's style. It reads and measures, listens (capture-phase
 click, scroll, resize and mutation observers built from the frame's realm), and navigates (hash
-replace, `scrollTo`). Anything the reviewer needs to show *on* the mock — note boxes, pins, the
+replace, `scrollTo`). Anything the reviewer needs to show _on_ the mock — note boxes, pins, the
 journey ring — is measured in the frame and drawn in the reviewer document inside the same scaled
 wrapper as the iframe, where the frame's own rects are already in local coordinates. The journey ring
 is `[data-journey-ring]`, one per found control, hidden when the control is not visible in the frame's
@@ -187,6 +189,8 @@ Tests never write the committed `dist/`. `tests/setup.ts` compiles `tsconfig.bui
 gitignored `.test-dist/` with `tsc` alone, rebuilding whenever `src/**` is newer, under a lock; the
 reviewer needs no build. Browser tests run both layouts: the linked package (the repo's
 `.test-dist`) and a package materialised under a scratch host's `node_modules/@555/mock-review/`.
+
+`tests/package/two-vite-copies.test.ts` runs the host's own `vite` binary with `mockReview()` mounted from `.test-dist/vite.js`, plus `check` and `serve` from the bin, against a scratch host whose `node_modules/vite` is a physical copy of the repo's (a different realpath — the `npm link` layout without the network), and runs `serve`/`check` against a fake vite 9. Spawn `node_modules/vite/bin/vite.js` directly there: `node_modules/.bin/vite` in a per-entry-symlinked host points back at the repo's copy. `tests/package/vite-imports.test.ts` bans runtime `vite` imports under `src/` outside `src/analysis/host-modules.ts`.
 
 ## Release procedure
 
