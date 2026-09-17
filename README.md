@@ -1,12 +1,12 @@
 # @555-ventures/mock-review
 
 The mock reviewer for the spec pipeline's mock app: the `mock-review` CLI and the served
-reviewer page, satisfying contract v1 (`~/projects/claude-plugins/spec/templates/mock/contract.json`).
+reviewer page, satisfying contract v2 (`~/projects/claude-plugins/spec/templates/mock/contract.json`).
 
 ## Install
 
 ```sh
-npm i -D github:555ventures/mock-review#v1
+npm i -D github:555ventures/mock-review#v2
 ```
 
 `dist/` is committed to the tag, so no build runs on the host.

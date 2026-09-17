@@ -10,7 +10,7 @@ describe('mock-review contract (built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
-  it('AC-20260915-01-3: contract --json in an empty directory prints the exact envelope on stdout, exit 0, empty stderr', () => {
+  it('AC-20260917-01-1 (rewrites AC-20260915-01-3): contract --json in an empty directory prints the exact envelope on stdout, exit 0, empty stderr', () => {
     const empty = mkdtempSync(path.join(tmpdir(), 'mock-review-empty-'))
     registerScratchDir(empty)
     const version = (JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string }).version
@@ -18,7 +18,7 @@ describe('mock-review contract (built dist/)', () => {
     const r = run(empty, ['contract', '--json'])
     expect(r.status).toBe(0)
     expect(r.stderr).toBe('')
-    expect(r.stdout).toBe(`{"contractVersion":1,"package":"@555-ventures/mock-review","version":"${version}"}\n`)
+    expect(r.stdout).toBe(`{"contractVersion":2,"package":"@555-ventures/mock-review","version":"${version}"}\n`)
   })
 
   it('AC-20260915-01-3: --json contract (flag first) prints the same envelope', () => {
@@ -39,7 +39,7 @@ describe('mock-review contract (built dist/)', () => {
     expect(r.stderr.startsWith('mock-review: unknown verb frobnicate')).toBe(true)
   })
 
-  it('AC-20260915-01-3: contract --json still exits 0 with the exact envelope from a scratch package whose node_modules cannot resolve vite (D2/D19)', () => {
+  it('AC-20260917-01-1 (rewrites AC-20260915-01-3): contract --json still exits 0 with the exact envelope from a scratch package whose node_modules cannot resolve vite (D2/D19)', () => {
     const { cliPath: pkgCliPath } = buildScratchPackage(['vite'])
     const empty = mkdtempSync(path.join(tmpdir(), 'mock-review-empty-'))
     registerScratchDir(empty)
@@ -48,7 +48,7 @@ describe('mock-review contract (built dist/)', () => {
     const r = spawnWithTimeout(process.execPath, [pkgCliPath, 'contract', '--json'], { cwd: empty })
     expect(r.status).toBe(0)
     expect(r.stderr).toBe('')
-    expect(r.stdout).toBe(`{"contractVersion":1,"package":"@555-ventures/mock-review","version":"${version}"}\n`)
+    expect(r.stdout).toBe(`{"contractVersion":2,"package":"@555-ventures/mock-review","version":"${version}"}\n`)
   })
 
   it('AC-20260915-01-4: check --json on the green fixture host writes stdout that JSON.parse accepts whole, with no leading [vite] line', () => {

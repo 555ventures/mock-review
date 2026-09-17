@@ -1,7 +1,7 @@
 // D2: `contract` — the first call on every driver mark. Never imports Vite, never reads the host;
 // reads only the package's own version next to `dist/`.
 import { createRequire } from 'node:module'
-import { ContractSchema } from '../schemas/index.js'
+import { CONTRACT_VERSION, ContractSchema } from '../schemas/index.js'
 import type { Contract } from '../schemas/index.js'
 
 const require = createRequire(import.meta.url)
@@ -13,7 +13,7 @@ export function contractVerb(): Contract {
   // two levels up from dist/cli/.
   const pkg = require('../../package.json') as { version: string }
   const contract: Contract = {
-    contractVersion: 1,
+    contractVersion: CONTRACT_VERSION,
     package: PACKAGE_NAME,
     version: pkg.version,
   }

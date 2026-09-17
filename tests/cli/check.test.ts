@@ -7,6 +7,7 @@ import { copyFixtureHost, run } from '../helpers/cli.js'
 
 type Finding = { kind: string; severity: string; file: string; message: string }
 type Check = {
+  contractVersion: number
   ok: boolean
   findings: Finding[]
   screens: Array<{ name: string; file: string; states: string[]; shell: string | null; hash: string; lines: number }>
@@ -25,6 +26,16 @@ describe('mock-review check --json (built dist/)', () => {
   beforeAll(async () => {
     await ensureFixtures()
   }, 180_000)
+
+  it('AC-20260917-01-2 (rewrites AC-20260915-01-5): reports contractVersion: 2 on the green fixture host, with screens/shells/themes content otherwise unchanged', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-')
+    const check = runCheck(host)
+
+    expect(check.contractVersion).toBe(2)
+    expect(check.screens.map((s) => s.name).sort()).toEqual(['account', 'home'])
+    expect(check.shells.map((s) => s.name)).toEqual(['ConsoleShell'])
+    expect(check.themes).toEqual(['nova'])
+  })
 
   it('AC-20260915-01-5: reports screens/shells/themes for the green fixture host, excluding design/examples and components/ui', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-check-')

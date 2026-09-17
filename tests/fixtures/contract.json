@@ -1,5 +1,5 @@
 {
-  "contractVersion": 1,
+  "contractVersion": 2,
   "package": "@555-ventures/mock-review",
   "bin": "mock-review",
   "verbs": ["contract", "sweep", "answer", "check", "serve"],

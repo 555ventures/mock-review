@@ -9,12 +9,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
-import { copyHostInto, linkInstalledBin, registerScratchDir, spawnWithTimeout } from '../helpers/cli.js'
+import { contractSkew, copyHostInto, linkInstalledBin, registerScratchDir, spawnWithTimeout } from '../helpers/cli.js'
 import { startServeIn, stopServe, type Serve } from '../helpers/serve.js'
+import { CONTRACT_VERSION } from '../../src/schemas/version.js'
 
 const pluginRoot = process.env.SPEC_PLUGIN_ROOT || path.join(homedir(), 'projects', 'claude-plugins')
 const driverScript = path.join(pluginRoot, 'spec', 'scripts', 'mocks-driver.js')
 const hasPlugin = existsSync(driverScript)
+// D9: this is the second driver-running e2e test D6 missed — same contractSkew helper, same
+// pluginRoot-derived template path, reused verbatim (no new mechanism).
+const pluginContractTemplate = path.join(pluginRoot, 'spec', 'templates', 'mock', 'contract.json')
 const skipBrowser = process.env.SKIP_BROWSER === '1'
 const describeIfReady = hasPlugin && !skipBrowser ? describe : describe.skip
 
@@ -52,8 +56,15 @@ describeIfReady('AC-20260915-02-21: mocks-driver.js reaches APPROVED against the
   let appDir: string
   let serve: Serve | undefined
   let browser: import('playwright').Browser
+  // D9: set once in beforeAll, consulted by the it body's own ctx.skip — beforeAll's own context
+  // has no `.skip` of its own, so the driver marks below are simply not run when skewed, and the
+  // it body is what actually reports the skip with its reason.
+  let skewReason: string | null = null
 
   beforeAll(async () => {
+    skewReason = contractSkew(pluginContractTemplate, CONTRACT_VERSION)
+    if (skewReason) return
+
     await ensureFixtures()
     const { chromium } = await import('playwright')
     browser = await chromium.launch()
@@ -101,7 +112,8 @@ describeIfReady('AC-20260915-02-21: mocks-driver.js reaches APPROVED against the
     await browser?.close()
   })
 
-  it('AC-20260915-03-11: after journey-drawn, browser approvals + theme pick + client confirm let the driver reach APPROVED', async () => {
+  it('AC-20260915-03-11: after journey-drawn, browser approvals + theme pick + client confirm let the driver reach APPROVED', async (ctx) => {
+    if (skewReason) ctx.skip(skewReason)
     // Confirmed by direct reproduction (20 concurrent `serve` processes sharing
     // mock.config.ts's port 5180) that Vite's own port-fallback + resolvedUrls already isolates
     // every server correctly — no cross-talk. Under the full gate (many Chromium instances +

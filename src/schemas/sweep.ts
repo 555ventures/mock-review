@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CONTRACT_VERSION } from './version.js'
 
 /** D11: one row per component/shell from the single docgen parse. */
 export const InventoryRowSchema = z
@@ -32,7 +33,7 @@ export type QueueItem = z.infer<typeof QueueItemSchema>
 
 export const SweepSchema = z
   .object({
-    contractVersion: z.literal(1),
+    contractVersion: z.literal(CONTRACT_VERSION),
     inventory: z.array(InventoryRowSchema),
     queue: z.array(QueueItemSchema),
   })

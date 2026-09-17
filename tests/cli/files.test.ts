@@ -9,26 +9,26 @@ describe('mock-review file layer (D9, built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
-  it('AC-20260915-01-15: check --json creates design/notes.json and design/approval.json with the empty defaults on a scratch host with no design/ directory', () => {
+  it('AC-20260917-01-6 (rewrites AC-20260915-01-15: check creates): check --json creates design/notes.json and design/approval.json at contractVersion 2 on a scratch host with no design/ directory', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-files-')
     expect(existsSync(path.join(host, 'design', 'notes.json'))).toBe(false)
 
     run(host, ['check', '--json'])
 
     expect(JSON.parse(readFileSync(path.join(host, 'design', 'notes.json'), 'utf8'))).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       notes: [],
       journeys: {},
     })
     expect(JSON.parse(readFileSync(path.join(host, 'design', 'approval.json'), 'utf8'))).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       screens: {},
       journeys: {},
       theme: null,
     })
   })
 
-  it('AC-20260915-01-15: an edited approval.json is left byte-identical by a second run', () => {
+  it('AC-20260917-01-10 (reuses AC-20260915-01-15: an edited approval.json...): a read-only check leaves a v1 approval.json byte-identical, including its contractVersion', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-files-')
     const first = run(host, ['check', '--json'])
     expect(first.status).toBe(0)

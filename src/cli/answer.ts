@@ -6,7 +6,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js'
-import { DecisionsSchema, NotesSchema } from '../schemas/index.js'
+import { CONTRACT_VERSION, DecisionsSchema, NotesSchema } from '../schemas/index.js'
 import type { Decisions, ThreadEntry } from '../schemas/index.js'
 import { fail } from './io.js'
 
@@ -62,17 +62,17 @@ export function answerVerb(cwd: string, flags: AnswerFlags): string {
         fail('design/decisions.json is invalid')
       }
     } else {
-      decisions = { contractVersion: 1, decisions: [] }
+      decisions = { contractVersion: CONTRACT_VERSION, decisions: [] }
     }
   }
 
   target.status = 'answered'
   target.thread.push({ by: 'session', text })
-  writeJsonAtomic(notesPath, notes)
+  writeJsonAtomic(notesPath, { ...notes, contractVersion: CONTRACT_VERSION })
 
   if (decision !== undefined && decisions) {
     decisions.decisions.push({ screen: screenForDecision, text: decision, at: new Date().toISOString() })
-    writeJsonAtomic(decisionsPath, decisions)
+    writeJsonAtomic(decisionsPath, { ...decisions, contractVersion: CONTRACT_VERSION })
   }
 
   return `answered ${printedId}`

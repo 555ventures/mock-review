@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CONTRACT_VERSION } from './version.js'
 
 /** D1: one reply in a note's or journey's thread. `by` is a free-form attribution string
  * (`"session"` for `answer`, `"client"` for the page's client role — spec 02). */
@@ -42,7 +43,7 @@ export type JourneyConversation = z.infer<typeof JourneyConversationSchema>
 
 export const NotesSchema = z
   .object({
-    contractVersion: z.literal(1),
+    contractVersion: z.union([z.literal(1), z.literal(CONTRACT_VERSION)]),
     notes: z.array(NoteSchema),
     journeys: z.record(z.string(), JourneyConversationSchema),
   })

@@ -4,9 +4,9 @@ import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
 import { copyFixtureHost, run } from '../helpers/cli.js'
 
-function seedNotes(host: string, notes: unknown, journeys: unknown) {
+function seedNotes(host: string, notes: unknown, journeys: unknown, contractVersion = 1) {
   mkdirSync(path.join(host, 'design'), { recursive: true })
-  writeFileSync(path.join(host, 'design', 'notes.json'), JSON.stringify({ contractVersion: 1, notes, journeys }))
+  writeFileSync(path.join(host, 'design', 'notes.json'), JSON.stringify({ contractVersion, notes, journeys }))
 }
 
 describe('mock-review answer (built dist/)', () => {
@@ -48,6 +48,30 @@ describe('mock-review answer (built dist/)', () => {
     expect(notes.notes.find((n) => n.id === 'N2')).toEqual(otherNote)
   })
 
+  it('AC-20260917-01-4: answer --note on a v1 notes.json exits 0, rewrites contractVersion to 2, and leaves every other key as expected', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-answer-')
+    seedNotes(
+      host,
+      [{ id: 'N1', screen: 'home', state: 'default', component: null, key: null, snippet: null, status: 'open', thread: [] }],
+      {},
+      1,
+    )
+
+    const r = run(host, ['answer', '--note', 'N1', '--text', 'use the card'])
+    expect(r.status).toBe(0)
+
+    const notes = JSON.parse(readFileSync(path.join(host, 'design', 'notes.json'), 'utf8')) as {
+      contractVersion: number
+      notes: Array<{ id: string; status: string; thread: Array<{ by: string; text: string }> }>
+      journeys: Record<string, unknown>
+    }
+    expect(notes.contractVersion).toBe(2)
+    const n1 = notes.notes.find((n) => n.id === 'N1')
+    expect(n1?.status).toBe('answered')
+    expect(n1?.thread).toEqual([{ by: 'session', text: 'use the card' }])
+    expect(notes.journeys).toEqual({})
+  })
+
   it('AC-20260915-01-16: answer --journey flips an open journey conversation to answered', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     seedNotes(host, [], { 'first-visit': { status: 'open', thread: [] } })
@@ -61,7 +85,7 @@ describe('mock-review answer (built dist/)', () => {
     expect(notes.journeys['first-visit']).toEqual({ status: 'answered', thread: [{ by: 'session', text: 'ok' }] })
   })
 
-  it('AC-20260915-01-17: answer --decision appends to design/decisions.json, creating it if absent', () => {
+  it('AC-20260917-01-11 (rewrites AC-20260915-01-17: answer --decision appends): creates design/decisions.json at contractVersion 2 with the appended decision, when absent', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     seedNotes(
       host,
@@ -70,21 +94,21 @@ describe('mock-review answer (built dist/)', () => {
     )
     expect(existsSync(path.join(host, 'design', 'decisions.json'))).toBe(false)
 
-    const r = run(host, ['answer', '--note', 'N1', '--text', 'use the card', '--decision', 'cards, not tables'])
+    const r = run(host, ['answer', '--note', 'N1', '--text', 'x', '--decision', 'cards, not tables'])
     expect(r.status).toBe(0)
 
     const decisions = JSON.parse(readFileSync(path.join(host, 'design', 'decisions.json'), 'utf8')) as {
       contractVersion: number
       decisions: Array<{ screen: string | null; text: string; at: string }>
     }
-    expect(decisions.contractVersion).toBe(1)
-    expect(decisions.decisions).toHaveLength(1)
-    expect(decisions.decisions[0]?.screen).toBe('home')
-    expect(decisions.decisions[0]?.text).toBe('cards, not tables')
+    expect(decisions).toEqual({
+      contractVersion: 2,
+      decisions: [{ screen: 'home', text: 'cards, not tables', at: decisions.decisions[0]?.at }],
+    })
     expect(() => new Date(decisions.decisions[0]?.at ?? '').toISOString()).not.toThrow()
   })
 
-  it('AC-20260915-01-17: answer --decision refuses when design/decisions.json exists but fails the decisions schema, leaving both files byte-identical (D19)', () => {
+  it('AC-20260917-01-5 (rewrites AC-20260915-01-17: answer --decision refuses): refuses an unknown contractVersion 3, leaving both files byte-identical', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     seedNotes(
       host,
@@ -92,7 +116,7 @@ describe('mock-review answer (built dist/)', () => {
       {},
     )
     const decisionsPath = path.join(host, 'design', 'decisions.json')
-    const invalidDecisions = JSON.stringify({ contractVersion: 2, decisions: [] })
+    const invalidDecisions = JSON.stringify({ contractVersion: 3, decisions: [] })
     writeFileSync(decisionsPath, invalidDecisions)
     const notesPath = path.join(host, 'design', 'notes.json')
     const notesBefore = readFileSync(notesPath, 'utf8')
@@ -104,6 +128,31 @@ describe('mock-review answer (built dist/)', () => {
     expect(readFileSync(decisionsPath, 'utf8')).toBe(invalidDecisions)
     expect(readFileSync(notesPath, 'utf8')).toBe(notesBefore)
   })
+
+  it.each([1, 2])(
+    'AC-20260917-01-5: answer --decision exits 0 and writes the appended decision at contractVersion 2 when decisions.json reads contractVersion %i',
+    (existingVersion) => {
+      const host = copyFixtureHost(greenHost, 'mock-review-answer-')
+      seedNotes(
+        host,
+        [{ id: 'N1', screen: 'home', state: 'default', component: null, key: null, snippet: null, status: 'open', thread: [] }],
+        {},
+      )
+      const decisionsPath = path.join(host, 'design', 'decisions.json')
+      writeFileSync(decisionsPath, JSON.stringify({ contractVersion: existingVersion, decisions: [] }))
+
+      const r = run(host, ['answer', '--note', 'N1', '--text', 'x', '--decision', 'cards, not tables'])
+      expect(r.status).toBe(0)
+
+      const decisions = JSON.parse(readFileSync(decisionsPath, 'utf8')) as {
+        contractVersion: number
+        decisions: Array<{ screen: string | null; text: string; at: string }>
+      }
+      expect(decisions.contractVersion).toBe(2)
+      expect(decisions.decisions).toHaveLength(1)
+      expect(decisions.decisions[0]?.text).toBe('cards, not tables')
+    },
+  )
 
   it('AC-20260915-01-17: answer on an unknown note id exits 2 with "mock-review: no note NOPE"', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
