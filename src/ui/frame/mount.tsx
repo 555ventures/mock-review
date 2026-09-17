@@ -14,6 +14,7 @@
 import { createRoot } from 'react-dom/client'
 import type { ReactNode } from 'react'
 import { parseFrameHash, type FrameRoute } from './frameRoute.js'
+import { resolveState } from './stateKey.js'
 
 type ExampleModule = { examples?: Record<string, ReactNode> }
 
@@ -33,18 +34,15 @@ function moduleByName(modules: Record<string, ExampleModule>, name: string): Exa
   return undefined
 }
 
-/** D3's fallback (an unknown/missing state falls back to the first): exact match, then a
- * case-insensitive one, then the first declared example. */
+/** D10's fallback (an unknown/missing state falls back to the first): the D4 rule in
+ * `resolveState` (exact match, then a unique normalised match; ambiguous or unmatched falls
+ * through), then the first declared example. */
 function pickExample(examples: Record<string, ReactNode> | undefined, requested: string | null): ReactNode {
   if (!examples) return null
-  if (requested && requested in examples) return examples[requested] ?? null
   const keys = Object.keys(examples)
-  if (requested) {
-    const ci = keys.find((k) => k.toLowerCase() === requested.toLowerCase())
-    if (ci) return examples[ci] ?? null
-  }
-  const first = keys[0]
-  return first ? (examples[first] ?? null) : null
+  const key = requested ? resolveState(keys, requested) : undefined
+  const chosen = key ?? keys[0]
+  return chosen ? (examples[chosen] ?? null) : null
 }
 
 function ensureStylesheet(href: string): void {

@@ -79,7 +79,7 @@ describe('AC-20260915-04-7 (D3/D8): the frame-route module is the only thing the
     await ensureFixtures()
   }, 180_000)
 
-  it('AC-20260915-04-7: .test-dist/ui/ contains exactly frame/frameRoute.js, frame/frameRoute.js.map, frame/frameRoute.d.ts, frame/frameRoute.d.ts.map and nothing else', () => {
+  it('AC-20260916-03-12: .test-dist/ui/ contains exactly the frameRoute and stateKey compiled outputs and nothing else', () => {
     const uiDir = path.join(testDistDir, 'ui')
     expect(existsSync(uiDir), '.test-dist/ui/ must exist').toBe(true)
 
@@ -95,7 +95,16 @@ describe('AC-20260915-04-7 (D3/D8): the frame-route module is the only thing the
     found.sort()
 
     expect(found).toEqual(
-      ['frame/frameRoute.d.ts', 'frame/frameRoute.d.ts.map', 'frame/frameRoute.js', 'frame/frameRoute.js.map'].sort(),
+      [
+        'frame/frameRoute.d.ts',
+        'frame/frameRoute.d.ts.map',
+        'frame/frameRoute.js',
+        'frame/frameRoute.js.map',
+        'frame/stateKey.d.ts',
+        'frame/stateKey.d.ts.map',
+        'frame/stateKey.js',
+        'frame/stateKey.js.map',
+      ].sort(),
     )
   })
 

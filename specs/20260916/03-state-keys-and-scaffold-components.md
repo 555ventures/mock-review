@@ -1,6 +1,6 @@
 ---
 date: 2026-09-16
-status: hardened
+status: implementing
 tier: critical
 area: analysis
 design: false
@@ -8,8 +8,10 @@ breaking: false
 depends_on: []
 depended_on_by: []
 brief: n/a
+build_base: main
 spiked: 2026-09-16
 open_markers: 0
+diff_base: 1eda7c25eddb14584294388b7f3a9279c83182a7
 ---
 
 # State keys resolve one way everywhere; the shadcn scaffold's own component is exempt

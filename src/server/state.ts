@@ -8,6 +8,7 @@ import type { Runner } from '../analysis/vite-runner.js'
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js'
 import { screenReport, pickDefaultHtml } from '../analysis/screens.js'
 import { shellReport } from '../analysis/shells.js'
+import { resolveState } from '../ui/frame/stateKey.js'
 import { journeyReport, type JourneyInput } from '../analysis/journeys.js'
 import { inventory } from '../analysis/inventory.js'
 import { ensureDesignFiles, readJson } from '../files/json.js'
@@ -35,13 +36,12 @@ async function moduleExamplesMap(
   return map
 }
 
-/** D21: a journey `Step.state` is written in `meta.states` casing (D4); this normalises it once,
- * server-side, to its case-matched `examples` key (D3's actual state-list source), so no page or
- * plugin consumer ever needs to compare states case-insensitively again. A state with no matching
- * example key (an unresolved journey step) passes through unchanged. */
+/** D21: a journey `Step.state` is written in `meta.states` spelling; it is resolved once,
+ * server-side, to its example key by `resolveStates`' rule (exact, then unique normalised — spec
+ * 03 D4/D8), so no page or plugin consumer ever needs to compare states case-insensitively again.
+ * An unresolved or ambiguous state passes through unchanged. */
 function normaliseStepState(exampleKeys: readonly string[], state: string): string {
-  const match = exampleKeys.find((key) => key.toLowerCase() === state.toLowerCase())
-  return match ?? state
+  return resolveState(exampleKeys, state) ?? state
 }
 
 /** D4: the optional fields the plugin's `journeys.ts` template gains on top of the analysis

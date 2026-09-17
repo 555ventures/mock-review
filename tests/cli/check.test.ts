@@ -200,4 +200,64 @@ describe('mock-review check --json (built dist/)', () => {
     expect(check.ok).toBe(true)
     expect(check.findings.some((f) => f.kind === 'twin' || JSON.stringify(f).includes('unresolved'))).toBe(false)
   })
+
+  it('AC-20260916-03-6: a scaffold-owned src/components/theme-provider.tsx is invisible to check (D1) — ok:true, no doc findings for it', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-scaffold-')
+    writeFileSync(
+      path.join(host, 'src', 'components', 'theme-provider.tsx'),
+      'import * as React from "react"\nexport function ThemeProvider({ children }: { children: React.ReactNode }) {\n  return <>{children}</>\n}\n',
+    )
+
+    const check = runCheck(host)
+
+    expect(check.ok).toBe(true)
+    expect(check.findings.some((f) => f.file === 'src/components/theme-provider.tsx')).toBe(false)
+  })
+
+  it('AC-20260916-03-7: a state spelled differently than its example key resolves cleanly (D4/D6) — no states finding, states unchanged', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-nophone-')
+    const accountFile = path.join(host, 'src', 'screens', 'account.tsx')
+    const source = readFileSync(accountFile, 'utf8')
+    writeFileSync(
+      accountFile,
+      source
+        .replace(`states: ['default'],`, `states: ['default', 'no-phone'],`)
+        .replace('export const examples = {\n  Default: <Account />,\n}', 'export const examples = {\n  Default: <Account />,\n  NoPhone: <Account />,\n}'),
+    )
+
+    const check = runCheck(host)
+
+    expect(check.ok).toBe(true)
+    expect(check.findings.some((f) => f.file === 'src/screens/account.tsx')).toBe(false)
+    const account = check.screens.find((s) => s.name === 'account')
+    expect(account?.states).toEqual(['default', 'no-phone'])
+  })
+
+  it('AC-20260916-03-8: two normalised-only candidates for one state yields exactly one "matches several examples" warn, ok:true', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-ambiguous-')
+    const accountFile = path.join(host, 'src', 'screens', 'account.tsx')
+    const source = readFileSync(accountFile, 'utf8')
+    writeFileSync(
+      accountFile,
+      source
+        .replace(`states: ['default'],`, `states: ['default', 'no-phone'],`)
+        .replace(
+          'export const examples = {\n  Default: <Account />,\n}',
+          'export const examples = {\n  Default: <Account />,\n  NoPhone: <Account />,\n  no_phone: <Account />,\n}',
+        ),
+    )
+
+    const check = runCheck(host)
+
+    const findingsForFile = check.findings.filter((f) => f.file === 'src/screens/account.tsx')
+    expect(findingsForFile).toEqual([
+      {
+        kind: 'states',
+        severity: 'warn',
+        file: 'src/screens/account.tsx',
+        message: 'state no-phone matches several examples: NoPhone, no_phone',
+      },
+    ])
+    expect(check.ok).toBe(true)
+  })
 })

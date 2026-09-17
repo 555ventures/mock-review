@@ -2,6 +2,7 @@
 // assertions anywhere in this module (AC-20260915-02-4 greps for the operator, spelled out here
 // as "bang dot" so this very comment does not trip the check).
 import type { Approval, JourneyConversation, Note } from '../../schemas/index.js'
+import { resolveStates } from '../../ui/frame/stateKey.js'
 
 export type Tone = 'open' | 'answered' | 'approved'
 
@@ -51,15 +52,18 @@ export function notesRest(screen: string, notes: readonly Note[]): Note[] {
 }
 
 /** D3/D16: the duck-typed screen-module shape (`meta.states` + `examples`) — `Object.keys(examples)`
- * ordered `meta.states` first (case-matched), any example key not named in `meta.states` after. */
+ * ordered `meta.states` first (resolved by the D4 rule in `resolveStates`: exact match, then a
+ * unique normalised match; an ambiguous state contributes nothing here), any example key not
+ * claimed by a state after, in declaration order. */
 export function statesOf(screen: { meta?: { states?: string[] }; examples?: Record<string, unknown> }): string[] {
   const metaStates = screen.meta?.states ?? []
   const exampleKeys = Object.keys(screen.examples ?? {})
+  const { byState } = resolveStates(metaStates, exampleKeys)
   const ordered: string[] = []
   const used = new Set<string>()
   for (const m of metaStates) {
-    const match = exampleKeys.find((k) => k.toLowerCase() === m.toLowerCase() && !used.has(k))
-    if (match) {
+    const match = byState.get(m)
+    if (match && !used.has(match)) {
       ordered.push(match)
       used.add(match)
     }
