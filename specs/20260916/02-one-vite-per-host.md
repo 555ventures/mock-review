@@ -1,6 +1,7 @@
 ---
 date: 2026-09-16
-status: hardened
+status: implementing
+build_base: main
 tier: critical
 area: server
 design: false
@@ -10,6 +11,7 @@ depended_on_by: []
 brief: n/a
 spiked: 2026-09-16
 open_markers: 0
+diff_base: e0c4d7d152f8c1ff2dcfa56bf52540c2e62b5f3c
 ---
 
 # One Vite per host: the package never loads its own copy of Vite

@@ -5,10 +5,10 @@
 // running" refusal is the CLI wave's job (src/analysis/liveness.ts's `serveUrl` already owns that
 // probe) — this module only ever receives an already-live `serveUrl`.
 import { mkdirSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Config } from '../schemas/index.js'
+import { resolveHostModule } from './host-modules.js'
 import { frameSrc } from '../ui/frame/frameRoute.js'
 
 /** Thrown when `playwright` cannot be resolved from the host root. The message is exactly the
@@ -44,10 +44,9 @@ type PlaywrightImport = Partial<PlaywrightModule> & { default?: PlaywrightModule
 /** Resolves `playwright` from `root` (the host, not this package) via `createRequire`, then loads
  * it with a dynamic `import()` so the package itself never statically depends on it. */
 async function resolvePlaywright(root: string): Promise<PlaywrightModule> {
-  const require = createRequire(path.join(root, 'package.json'))
   let resolved: string
   try {
-    resolved = require.resolve('playwright')
+    resolved = resolveHostModule(root, 'playwright')
   } catch {
     throw new PlaywrightUnresolvedError('--look needs playwright — remedy: npm i -D playwright')
   }

@@ -1,5 +1,5 @@
-import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
-import { cpSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync, rmSync } from 'node:fs'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams, type SpawnSyncReturns } from 'node:child_process'
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll } from 'vitest'
@@ -263,6 +263,118 @@ export function installPackageInto(hostDir: string): string {
   cpSync(path.join(repoRoot, 'src', 'ui'), path.join(pkgDir, 'src', 'ui'), { recursive: true })
   cpSync(path.join(repoRoot, 'package.json'), path.join(pkgDir, 'package.json'))
   return path.join(pkgDir, 'dist', 'cli.js')
+}
+
+/** D9: builds the "npm link"/nested-install reproduction without the network — a fixture host
+ * whose own `node_modules/vite` is a *physical copy* of the repo's (a different realpath, never a
+ * symlink) and whose `vite.config.ts` mounts `mockReview()` imported by absolute path from
+ * `<repoRoot>/.test-dist/vite.js`, i.e. from OUTSIDE the host, exactly like a linked package. The
+ * plugin's own bare `import 'vite'` (pre-fix) resolves relative to the package's files, i.e. the
+ * repo's copy, while the HOST's own `vite` binary/`createServer` is the physical copy — two
+ * distinct realpaths, reproducing spike S7's failure. */
+export function copyFixtureHostWithOwnVite(fixtureDir: string, label = 'mock-review-ownvite-'): string {
+  const host = copyFixtureHost(fixtureDir, label)
+
+  const hostVite = path.join(host, 'node_modules', 'vite')
+  rmSync(hostVite, { recursive: true, force: true })
+  cpSync(path.join(repoRoot, 'node_modules', 'vite'), hostVite, { recursive: true, dereference: true })
+
+  const configPath = path.join(host, 'vite.config.ts')
+  const original = readFileSync(configPath, 'utf8')
+  const pluginEntry = path.join(repoRoot, '.test-dist', 'vite.js')
+  const importLine = `import { mockReview } from ${JSON.stringify(pluginEntry)}\n`
+  const withPlugin = original.replace(
+    /plugins:\s*\[([^\]]*)\]/,
+    (_match, inner: string) => `plugins: [${inner}, mockReview()]`,
+  )
+  if (withPlugin === original) {
+    throw new Error(`copyFixtureHostWithOwnVite: could not find a "plugins: [...]" array in ${configPath}`)
+  }
+  writeFileSync(configPath, importLine + withPlugin)
+
+  return host
+}
+
+/** D9: spawns the HOST's own `vite` binary directly (`node_modules/vite/bin/vite.js`, never
+ * `node_modules/.bin/vite` — in a per-entry-symlinked host that `.bin` link points back at the
+ * repo's copy, spike S7) against `host`, with `mockReview()` mounted from the host's own
+ * `vite.config.ts` (see `copyFixtureHostWithOwnVite`). Resolves once `GET /__mock-review/ping`
+ * answers 200 (polled, 20s bound) with the running child for the caller to `SIGTERM`; rejects if
+ * the child exits first or the bound is hit. */
+export function startHostVite(host: string, port: number): Promise<ChildProcessWithoutNullStreams> {
+  return new Promise((resolve, reject) => {
+    const binPath = path.join(host, 'node_modules', 'vite', 'bin', 'vite.js')
+    // `--host 127.0.0.1` is forced (not in D9's literal argv): without it, this vite's default
+    // `localhost` binding accepted the fixture's own `@vitejs/plugin-react` HMR client fine but
+    // refused a direct IPv4 `127.0.0.1` connection outright (confirmed by a manual repro — `curl
+    // http://localhost:<port>` and `--host 127.0.0.1` both worked, a bare `127.0.0.1` did not),
+    // and every caller of this helper (and the AC text itself) targets `127.0.0.1` explicitly.
+    const child = spawn(
+      process.execPath,
+      [binPath, '--port', String(port), '--strictPort', '--host', '127.0.0.1'],
+      { cwd: host },
+    )
+
+    let settled = false
+    const deadline = Date.now() + 20_000
+
+    const fail = (err: Error) => {
+      if (settled) return
+      settled = true
+      reject(err)
+    }
+
+    child.once('error', fail)
+    child.once('exit', (code, signal) => {
+      fail(new Error(`host vite exited before answering ping (code ${code}, signal ${signal})`))
+    })
+
+    const poll = () => {
+      if (settled) return
+      if (Date.now() > deadline) {
+        fail(new Error(`host vite did not answer GET /__mock-review/ping within 20s on port ${port}`))
+        return
+      }
+      fetch(`http://127.0.0.1:${port}/__mock-review/ping`)
+        .then((res) => {
+          if (settled) return
+          if (res.status === 200) {
+            settled = true
+            resolve(child)
+          } else {
+            setTimeout(poll, 200)
+          }
+        })
+        .catch(() => {
+          setTimeout(poll, 200)
+        })
+    }
+    poll()
+  })
+}
+
+/** D9: a fixture host whose `node_modules/vite` is replaced with a minimal fake package at
+ * `version` — `package.json` naming only `createServer` in its `exports`, and an `index.js` whose
+ * `createServer` always throws. Used to exercise D3's major-version refusal (`loadHostVite`
+ * rejects any host vite whose major isn't 8) without installing a real vite 7/9. */
+export function makeFakeViteHost(fixtureDir: string, version: string, label = 'mock-review-fakevite-'): string {
+  const host = copyFixtureHost(fixtureDir, label)
+
+  const viteDir = path.join(host, 'node_modules', 'vite')
+  rmSync(viteDir, { recursive: true, force: true })
+  mkdirSync(viteDir, { recursive: true })
+  writeFileSync(
+    path.join(viteDir, 'package.json'),
+    JSON.stringify({
+      name: 'vite',
+      version,
+      type: 'module',
+      exports: { '.': './index.js', './package.json': './package.json' },
+    }),
+  )
+  writeFileSync(path.join(viteDir, 'index.js'), "export const createServer = () => { throw new Error('fake vite') }\n")
+
+  return host
 }
 
 export function readJsonFile(file: string): unknown {
