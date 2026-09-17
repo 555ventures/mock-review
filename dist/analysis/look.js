@@ -8,6 +8,7 @@ import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { frameSrc } from '../ui/frame/frameRoute.js';
 /** Thrown when `playwright` cannot be resolved from the host root. The message is exactly the
  * remedy text the dispatcher (src/cli.ts) prints after its `mock-review: ` prefix. */
 export class PlaywrightUnresolvedError extends Error {
@@ -61,8 +62,7 @@ export async function look(options) {
                         // D20/D22: `_theme` is the frame's own top-level search param (the frame entry reads
                         // it directly and never fetches `GET state`), distinct from the hash route's
                         // `state`/`scheme` query.
-                        const themeParam = theme !== undefined ? `&_theme=${encodeURIComponent(theme)}` : '';
-                        const url = `${serveUrl}/?frame=1${themeParam}#/${screen}?state=${encodeURIComponent(s)}&scheme=${encodeURIComponent(scheme)}`;
+                        const url = `${serveUrl}${frameSrc({ kind: 'screen', screen, state: s, scheme }, theme ?? null)}`;
                         await page.goto(url, { waitUntil: 'networkidle' });
                         const rel = `design/screenshots/${screen}-${s}-${viewport}-${scheme}.png`;
                         await page.screenshot({ path: path.join(root, rel) });

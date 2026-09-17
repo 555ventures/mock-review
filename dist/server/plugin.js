@@ -405,14 +405,12 @@ function packageRoot() {
     const here = path.dirname(fileURLToPath(import.meta.url));
     return path.resolve(here, '..', '..');
 }
-/** D9: the root-relative path a `hotUpdate` file lives at, or `undefined` when it's outside
- * `<root>/src/` (never sent to the frame — see `mockReview`'s `hotUpdate` hook). */
-function srcRelativePath(root, file) {
+/** D1/D3 (specs/20260916/01): the root-relative posix path a `hotUpdate` file lives at, or
+ * `undefined` when `file` is outside `root` (mirrors the old `srcRelativePath` minus its `src`
+ * check — that check now lives in the handler itself, which also classifies `design`). */
+function rootRelative(root, file) {
     const rel = path.relative(root, file);
     if (rel.startsWith('..') || path.isAbsolute(rel))
-        return undefined;
-    const segments = rel.split(path.sep);
-    if (segments[0] !== 'src')
         return undefined;
     return rel.split(path.sep).join('/');
 }
@@ -420,11 +418,15 @@ function srcRelativePath(root, file) {
  * The reviewer's Vite plugin. Mounts the server API under `/__mock-review/` (D6), the in-memory
  * component registry at `GET /r/registry.json` (reference §10), and `GET /` (owner, `?client=`,
  * `?frame=1` alike) as the one entry document (D1) ahead of Vite's own middlewares. `resolveId`/
- * `load` answer the virtual entry module id (D1); `standalone` (set by `serve.ts`, omitted by a
- * host's own `vite.config.ts` mount) adds D9's `hotUpdate` interception so a host source edit
- * reloads the frame document, never the reviewer document.
+ * `load` answer the virtual entry module id (D1). An unconditional, object-form `order: 'pre'`
+ * `hotUpdate` hook (specs/20260916/01 D1-D3) runs ahead of every host plugin in both mounts
+ * (`serve` and a host's own `vite.config.ts`): in the client environment, any file under
+ * `<root>/design/` is silenced (`[]`, nothing sent) so the host's Tailwind scan never full-reloads
+ * the reviewer on a design write, and any file under `<root>/src/` sends the frame-only
+ * `mock-review:frame-reload` custom event and returns `[]`; every other file, and every
+ * non-client environment, gets Vite's default handling (`undefined`).
  */
-export function mockReview(options = {}) {
+export function mockReview() {
     const pkgRoot = packageRoot();
     const entryModulePath = path.resolve(pkgRoot, 'src', 'ui', 'main.tsx');
     const plugin = {
@@ -445,6 +447,28 @@ export function mockReview(options = {}) {
             if (id === RESOLVED_ENTRY_ID)
                 return `import ${JSON.stringify(entryModulePath)}\n`;
             return undefined;
+        },
+        // specs/20260916/01 D1-D3: object-form `order: 'pre'` is load-bearing (Vite sorts
+        // `hotUpdate` hooks by the hook object's own `order`, never by plugin `enforce`) — it splices
+        // this handler ahead of every host plugin (Tailwind, plugin-react) regardless of where the
+        // host lists `mockReview()`, so its `[]` empties `modules` before they ever see the file.
+        hotUpdate: {
+            order: 'pre',
+            handler(options) {
+                if (this.environment.name !== 'client')
+                    return undefined;
+                const rel = rootRelative(options.server.config.root, options.file);
+                if (rel === undefined)
+                    return undefined;
+                const top = rel.split('/')[0];
+                if (top === 'design')
+                    return [];
+                if (top === 'src') {
+                    this.environment.hot.send('mock-review:frame-reload', { file: rel });
+                    return [];
+                }
+                return undefined;
+            },
         },
         configureServer(server) {
             const cwd = server.config.root;
@@ -524,24 +548,6 @@ export function mockReview(options = {}) {
             });
         },
     };
-    if (options.standalone) {
-        // D9: a host source edit must reload the frame document, never the reviewer document — with
-        // plain HMR, `@vitejs/plugin-react` finds every mock screen an invalid refresh boundary (it
-        // exports `meta`/`examples` alongside its component) and Vite broadcasts a `full-reload` to
-        // every connected client, the reviewer document included (spike 4). Returning `[]` here is
-        // the documented way to take over an update: nothing about the reviewer's own state (open
-        // dialog, draft, marking mode, scroll) is disturbed, and the frame's own listener
-        // (`src/ui/frame/mount.tsx`) is the only thing that reloads.
-        plugin.hotUpdate = function hotUpdate(options) {
-            if (this.environment.name !== 'client')
-                return undefined;
-            const file = srcRelativePath(options.server.config.root, options.file);
-            if (file === undefined)
-                return undefined;
-            this.environment.hot.send('mock-review:frame-reload', { file });
-            return [];
-        };
-    }
     return plugin;
 }
 export default mockReview;
