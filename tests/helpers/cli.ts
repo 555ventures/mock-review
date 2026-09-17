@@ -1,9 +1,10 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams, type SpawnSyncReturns } from 'node:child_process'
-import { cpSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll } from 'vitest'
 import { cliPath, repoRoot, testDistDir } from '../setup.js'
+import { JourneySchema } from '../../src/schemas/check.js'
 
 export { cliPath, repoRoot }
 
@@ -375,6 +376,94 @@ export function makeFakeViteHost(fixtureDir: string, version: string, label = 'm
   writeFileSync(path.join(viteDir, 'index.js'), "export const createServer = () => { throw new Error('fake vite') }\n")
 
   return host
+}
+
+/** D10: the check journey schema's three levels, and the `fields` block key each one's
+ * declared-field list lives under. Processed in this array's order (journey, then step, then
+ * edge), each key's own field-name array left to right — that fixed order is what makes "first
+ * refused field wins" deterministic, independent of the live template's own key ordering. */
+const JOURNEY_FIELD_LEVELS = [
+  { templateKey: 'check.journeys[]', level: 'journey' as const },
+  { templateKey: 'check.journeys[].steps[]', level: 'step' as const },
+  { templateKey: 'check.journeys[].edges[]', level: 'edge' as const },
+]
+
+/** A minimal, otherwise-valid check journey (one step, no edges) with a single field spliced in
+ * at the given level, for probing this package's `.strict()` JourneySchema/StepSchema/EdgeSchema —
+ * the probe value's own type never matters, only whether the key is recognized at all. A field
+ * that already names one of this level's own base keys (`id`/`steps`/… at journey level,
+ * `screen` at step level, `from`/`to` at edge level) is left as the base's own correctly-typed
+ * value rather than overwritten with a bogus string, which would fail for being the wrong type
+ * instead of for being unrecognized — the two are different refusals and only the latter means
+ * this field is actually undeclared by the current schema. */
+function minimalJourneyWithField(level: 'journey' | 'step' | 'edge', field: string): unknown {
+  const base = {
+    id: 'probe',
+    title: 'probe',
+    steps: [{ screen: 'probe' }],
+    edges: [] as unknown[],
+    resolved: true,
+    unresolved: [] as unknown[],
+  }
+  if (level === 'journey') {
+    if (field in base) return base
+    return { ...base, [field]: 'x' }
+  }
+
+  const step = { screen: 'probe' }
+  if (level === 'step') {
+    if (field in step) return { ...base, steps: [step] }
+    return { ...base, steps: [{ ...step, [field]: 'x' }] }
+  }
+
+  const edge = { from: 0, to: 1 }
+  if (field in edge) return { ...base, edges: [edge] }
+  return { ...base, edges: [{ ...edge, [field]: 'x' }] }
+}
+
+/** D10: the declared-journey-field half of `contractSkew` — reads the template's `fields` block
+ * generically (no hardcoded field-name list) and returns the reason string for the first declared
+ * journey/step/edge field this package's own `JourneySchema` refuses, or `null` once every
+ * declared field has been probed and accepted. A missing/non-object `fields` block is `null` (D6's
+ * fixtures predate `fields` entirely — a template without it is not skew, just old-shaped). */
+function refusedJourneyField(fields: unknown): string | null {
+  if (!fields || typeof fields !== 'object') return null
+  const fieldsRecord = fields as Record<string, unknown>
+
+  for (const { templateKey, level } of JOURNEY_FIELD_LEVELS) {
+    const declared = fieldsRecord[templateKey]
+    if (!Array.isArray(declared)) continue
+    for (const raw of declared) {
+      if (typeof raw !== 'string') continue
+      const field = raw.endsWith('?') ? raw.slice(0, -1) : raw
+      const candidate = minimalJourneyWithField(level, field)
+      if (!JourneySchema.safeParse(candidate).success) {
+        return `plugin template declares journey field ${field} this package's contract does not accept — build mock-review specs/20260917/02-the-story-travels first`
+      }
+    }
+  }
+
+  return null
+}
+
+/** D6/D10/AC-20260917-01-9: a pure skew check between the installed spec plugin's copy of
+ * `spec/templates/mock/contract.json` and this package's own contract. Returns `null` when the
+ * template does not exist at all (a host without the plugin installed is not skew — only a
+ * *present* template reporting something this package doesn't accept is), the version-mismatch
+ * reason when `contractVersion` disagrees with `packageVersion` (checked first — a version-skew
+ * template's `fields` block is never probed), and otherwise the first declared-journey-field
+ * refusal from `refusedJourneyField` (D10) or `null` when every declared field parses. Never
+ * touches the filesystem beyond a single read of `templatePath`, never spawns a process. */
+export function contractSkew(templatePath: string, packageVersion: number): string | null {
+  if (!existsSync(templatePath)) return null
+  const template = JSON.parse(readFileSync(templatePath, 'utf8')) as {
+    contractVersion: number
+    fields?: unknown
+  }
+  if (template.contractVersion !== packageVersion) {
+    return `plugin template contract ${template.contractVersion} ≠ package contract ${packageVersion} — build claude-plugins specs/20260917/01 first`
+  }
+  return refusedJourneyField(template.fields)
 }
 
 export function readJsonFile(file: string): unknown {

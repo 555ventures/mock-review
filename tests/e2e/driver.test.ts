@@ -6,10 +6,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
-import { copyHostInto, linkInstalledBin, registerScratchDir, run, spawnWithTimeout, DESIGN_STATE_FILES } from '../helpers/cli.js'
+import { contractSkew, copyHostInto, linkInstalledBin, registerScratchDir, run, spawnWithTimeout, DESIGN_STATE_FILES } from '../helpers/cli.js'
+import { CONTRACT_VERSION } from '../../src/schemas/version.js'
 
 const pluginRoot = process.env.SPEC_PLUGIN_ROOT || path.join(homedir(), 'projects', 'claude-plugins')
 const driverScript = path.join(pluginRoot, 'spec', 'scripts', 'mocks-driver.js')
+// D6: the plugin's own template contract still reports 1 (verified 2026-09-17) until claude-plugins
+// specs/20260917/01 is built; contractSkew is the falsifiable surface (AC-20260917-01-9, its own
+// unit suite) — only the driver-running test below consults it.
+const pluginContractTemplate = path.join(pluginRoot, 'spec', 'templates', 'mock', 'contract.json')
 const hasPlugin = existsSync(driverScript)
 const describeIfPlugin = hasPlugin ? describe : describe.skip
 
@@ -93,7 +98,9 @@ describeIfPlugin('mocks-driver.js against the built binary (built .test-dist/, D
     }
   })
 
-  it('AC-20260915-01-23: seed-done, shell-drawn and journey-drawn each exit 0 and record their mark in status.json', () => {
+  it('AC-20260915-01-23: seed-done, shell-drawn and journey-drawn each exit 0 and record their mark in status.json', (ctx) => {
+    const skewReason = contractSkew(pluginContractTemplate, CONTRACT_VERSION)
+    if (skewReason) ctx.skip(skewReason)
     setupScratch()
 
     const seedDone = runDriver(scratchRoot, ['--mark', 'seed-done'])

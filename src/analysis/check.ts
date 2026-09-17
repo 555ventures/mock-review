@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { CheckSchema } from '../schemas/index.js'
+import { CheckSchema, CONTRACT_VERSION } from '../schemas/index.js'
 import type { Check, Finding, Journey, Screen, Shell } from '../schemas/index.js'
 import { ensureDesignFiles } from '../files/json.js'
 import { discoverHost } from './discover.js'
@@ -80,7 +80,7 @@ export async function runCheck(cwd: string): Promise<Check> {
   const serve = { url: await serveUrl(cwd) }
 
   const check: Check = {
-    contractVersion: 1,
+    contractVersion: CONTRACT_VERSION,
     ok: !findings.some((f) => f.severity === 'error'),
     findings,
     screens,

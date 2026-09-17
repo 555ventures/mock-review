@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ConfigSchema, NullConfigSchema } from './config.js'
+import { CONTRACT_VERSION } from './version.js'
 
 /** D5: the five error-severity finding kinds and the two warn-severity kinds (`twin` is stubbed
  * per D5 and never emitted in this spec, but the shape stays discriminable for a future waive). */
@@ -99,7 +100,7 @@ export type ServeStatus = z.infer<typeof ServeStatusSchema>
  * all-null placeholder (D6). */
 export const CheckSchema = z
   .object({
-    contractVersion: z.literal(1),
+    contractVersion: z.literal(CONTRACT_VERSION),
     ok: z.boolean(),
     findings: z.array(FindingSchema),
     screens: z.array(ScreenSchema),

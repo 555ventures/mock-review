@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CONTRACT_VERSION } from './version.js'
 
 /** D1/D10: `design/decisions.json`'s `decisions[]` entries, appended by `answer --decision`. */
 export const DecisionEntrySchema = z
@@ -13,7 +14,7 @@ export type DecisionEntry = z.infer<typeof DecisionEntrySchema>
 
 export const DecisionsSchema = z
   .object({
-    contractVersion: z.literal(1),
+    contractVersion: z.union([z.literal(1), z.literal(CONTRACT_VERSION)]),
     decisions: z.array(DecisionEntrySchema),
   })
   .strict()

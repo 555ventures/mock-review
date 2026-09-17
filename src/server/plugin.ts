@@ -7,7 +7,7 @@ import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js'
 import { runnerOf, type Runner } from '../analysis/vite-runner.js'
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js'
 import { discoverHost } from '../analysis/discover.js'
-import { ApprovalSchema, NotesSchema } from '../schemas/index.js'
+import { ApprovalSchema, CONTRACT_VERSION, NotesSchema } from '../schemas/index.js'
 import type { Approval, Config, NullConfig, Notes, ThreadEntry } from '../schemas/index.js'
 import { ApprovalPatchSchema, NotesPatchSchema } from '../schemas/patches.js'
 import type { ApprovalPatch, NotesPatch, ServerState } from '../schemas/patches.js'
@@ -346,12 +346,17 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
 
     const result = applyNotesPatch(notes, appliedPatch, approval)
 
-    writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), result.notes)
+    // D2: stamped at the write site, not in the pure `applyNotesPatch` reducer — stamping inside
+    // it would break `unapproveScreen`'s no-op identity check and rewrite `approval.json` on
+    // every note patch.
+    const stampedNotes: Notes = { ...result.notes, contractVersion: CONTRACT_VERSION }
+    writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), stampedNotes)
     if (result.approval !== approval) {
-      writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), result.approval)
+      const stampedApproval: Approval = { ...result.approval, contractVersion: CONTRACT_VERSION }
+      writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedApproval)
     }
 
-    sendJson(res, 200, result.notes)
+    sendJson(res, 200, stampedNotes)
   })
 }
 
@@ -415,9 +420,11 @@ async function handlePostApproval(
     }
     const next = applyApprovalPatch(approval, appliedPatch, ctxFromState(cwd, state))
 
-    writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), next)
+    // D2: stamped at the write site, not inside the pure `applyApprovalPatch` reducer.
+    const stampedNext: Approval = { ...next, contractVersion: CONTRACT_VERSION }
+    writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedNext)
 
-    sendJson(res, 200, next)
+    sendJson(res, 200, stampedNext)
   })
 }
 

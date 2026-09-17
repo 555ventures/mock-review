@@ -6,7 +6,7 @@ import { discoverHost } from '../analysis/discover.js'
 import { importsOf } from '../analysis/imports.js'
 import { inventory } from '../analysis/inventory.js'
 import { ensureDesignFiles, readJson } from '../files/json.js'
-import { NotesSchema } from '../schemas/index.js'
+import { CONTRACT_VERSION, NotesSchema } from '../schemas/index.js'
 import type { InventoryRow, QueueItem, Sweep } from '../schemas/index.js'
 
 /** The 1-based line of the first line containing `needle`, or `1` when the file is missing or the
@@ -70,7 +70,7 @@ export function sweepVerb(cwd: string): Sweep {
     })
     .sort(byFileThenId)
 
-  return { contractVersion: 1, inventory: inv, queue: [...journeyItems, ...noteItems] }
+  return { contractVersion: CONTRACT_VERSION, inventory: inv, queue: [...journeyItems, ...noteItems] }
 }
 
 /** File Plan: text form. One line per queue item, and the queue empty case is one exact line. */

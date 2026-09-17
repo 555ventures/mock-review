@@ -14,7 +14,7 @@ paths:
 
 ## Planning
 
-Ground every claim in `~/projects/claude-plugins/spec/templates/mock/contract.json` (the binding contract, contractVersion 1) and `docs/research/plugin-requirements.md` (what the plugin actually reads, cited). The reviewer page's look and behaviour are frozen in `docs/design/design-reference.md` + `docs/design/atlas/` — a visible change is a user decision, never a planning choice. Third-party shapes (Vite Environment API, react-docgen-typescript, TypeScript compiler API, zod v4, Playwright) are spiked before they enter a Decision; `docs/research/spikes.md` holds the executed evidence and the installed versions.
+Ground every claim in `~/projects/claude-plugins/spec/templates/mock/contract.json` (the binding contract, contractVersion 2) and `docs/research/plugin-requirements.md` (what the plugin actually reads, cited). The reviewer page's look and behaviour are frozen in `docs/design/design-reference.md` + `docs/design/atlas/` — a visible change is a user decision, never a planning choice. Third-party shapes (Vite Environment API, react-docgen-typescript, TypeScript compiler API, zod v4, Playwright) are spiked before they enter a Decision; `docs/research/spikes.md` holds the executed evidence and the installed versions.
 
 ## Build
 

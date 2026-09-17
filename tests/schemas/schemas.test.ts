@@ -41,17 +41,24 @@ describe('schemas', () => {
     }
   })
 
-  it('AC-20260915-01-2: contract --json, check --json and sweep --json each satisfy tests/fixtures/contract.json required-key lists on the green fixture', () => {
+  it('AC-20260917-01-7 (rewrites AC-20260915-01-2: contract): tests/fixtures/contract.json itself reports contractVersion 2', () => {
+    expect(contract).toMatchObject({ contractVersion: 2 })
+  })
+
+  it('AC-20260917-01-7 (rewrites AC-20260915-01-2: contract): contract --json, check --json and sweep --json each report contractVersion 2 and satisfy tests/fixtures/contract.json required-key lists on the green fixture', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-schemas-')
 
-    const contractResult = run(host, ['contract', '--json'])
-    expect(missingContractKeys(contract, 'contract', JSON.parse(contractResult.stdout))).toEqual([])
+    const contractJson = JSON.parse(run(host, ['contract', '--json']).stdout) as { contractVersion: number }
+    expect(contractJson.contractVersion).toBe(2)
+    expect(missingContractKeys(contract, 'contract', contractJson)).toEqual([])
 
-    const checkResult = run(host, ['check', '--json'])
-    expect(missingContractKeys(contract, 'check', JSON.parse(checkResult.stdout))).toEqual([])
+    const checkJson = JSON.parse(run(host, ['check', '--json']).stdout) as { contractVersion: number }
+    expect(checkJson.contractVersion).toBe(2)
+    expect(missingContractKeys(contract, 'check', checkJson)).toEqual([])
 
-    const sweepResult = run(host, ['sweep', '--json'])
-    expect(missingContractKeys(contract, 'sweep', JSON.parse(sweepResult.stdout))).toEqual([])
+    const sweepJson = JSON.parse(run(host, ['sweep', '--json']).stdout) as { contractVersion: number }
+    expect(sweepJson.contractVersion).toBe(2)
+    expect(missingContractKeys(contract, 'sweep', sweepJson)).toEqual([])
   })
 
   it('AC-20260915-01-2: notes.json, approval.json and decisions.json satisfy their contract shapes after answer --decision', () => {

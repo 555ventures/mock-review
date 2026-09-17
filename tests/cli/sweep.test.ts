@@ -19,6 +19,17 @@ describe('mock-review sweep (built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
+  it('AC-20260917-01-3 (rewrites AC-20260915-01-18): --json reports contractVersion: 2 with the same inventory and queue it reports today', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-sweep-')
+    const sweep = JSON.parse(run(host, ['sweep', '--json']).stdout) as Sweep
+
+    expect(sweep.contractVersion).toBe(2)
+    expect(sweep.inventory).toContainEqual(
+      expect.objectContaining({ name: 'ConsoleShell', kind: 'shell' }),
+    )
+    expect(Array.isArray(sweep.queue)).toBe(true)
+  })
+
   it('AC-20260915-01-18: --json inventory contains ConsoleShell and WalletSummary with their doc lines and usedOn, in under 5s', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-sweep-')
 
