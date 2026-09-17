@@ -210,7 +210,7 @@ export function copyFixtureHost(fixtureDir: string, label = 'mock-review-'): str
 }
 
 /** Adds `<hostDir>/node_modules/.bin/mock-review` pointing at the built dist/cli.js, exactly as
- * an `npm i -D @555/mock-review` install would produce. `hostDir` must already have an isolated
+ * an `npm i -D @555-ventures/mock-review` install would produce. `hostDir` must already have an isolated
  * node_modules (see copyFixtureHost). */
 export function linkInstalledBin(hostDir: string): void {
   const target = path.join(hostDir, 'node_modules', '.bin', 'mock-review')
@@ -243,7 +243,7 @@ export function buildScratchPackage(exclude: readonly string[] = []): { dir: str
   return { dir: scratch, cliPath: path.join(scratch, 'dist', 'cli.js') }
 }
 
-/** D8 of specs/20260915/03: materialises the package under `<hostDir>/node_modules/@555/mock-review/`
+/** D8 of specs/20260915/03: materialises the package under `<hostDir>/node_modules/@555-ventures/mock-review/`
  * exactly as a real `npm install` would leave it post-collapse — `.test-dist/` (the CLI + plugin,
  * built by tests/setup.ts's `ensureFixtures`) as that package's own `dist/`, `src/ui/` copied in
  * verbatim (D7's `files: ["dist", "src/ui"]` — the reviewer ships as source, compiled by the host
@@ -257,7 +257,7 @@ export function buildScratchPackage(exclude: readonly string[] = []): { dir: str
  * cold-start path) actually renders — spec 02's release gap (a package installed from git served
  * a blank mock) was invisible because every test ran the linked layout only. */
 export function installPackageInto(hostDir: string): string {
-  const pkgDir = path.join(hostDir, 'node_modules', '@555', 'mock-review')
+  const pkgDir = path.join(hostDir, 'node_modules', '@555-ventures', 'mock-review')
   mkdirSync(pkgDir, { recursive: true })
   cpSync(testDistDir, path.join(pkgDir, 'dist'), { recursive: true })
   cpSync(path.join(repoRoot, 'src', 'ui'), path.join(pkgDir, 'src', 'ui'), { recursive: true })

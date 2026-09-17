@@ -1,5 +1,5 @@
 // AC-20260915-03-2 [env: SKIP_BROWSER]: D8's first-class installed-layout target — the package
-// materialised under a scratch host's own `node_modules/@555/mock-review/` (never the linked
+// materialised under a scratch host's own `node_modules/@555-ventures/mock-review/` (never the linked
 // repo checkout every other browser test uses), served from that installed `dist/cli.js`, with no
 // `node_modules/.vite` yet (a genuinely cold dependency-optimizer start, A7's exact scenario).
 // Playwright is only ever imported dynamically, inside this skipIf-gated describe (see

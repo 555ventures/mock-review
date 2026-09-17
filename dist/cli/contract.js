@@ -3,7 +3,7 @@
 import { createRequire } from 'node:module';
 import { ContractSchema } from '../schemas/index.js';
 const require = createRequire(import.meta.url);
-const PACKAGE_NAME = '@555/mock-review';
+const PACKAGE_NAME = '@555-ventures/mock-review';
 export function contractVerb() {
     // Compiled to dist/cli/contract.js; the package.json this reads is the one at the repo root,
     // two levels up from dist/cli/.

@@ -199,7 +199,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260916-01-4/-5: a design
           "import { defineConfig } from 'vite'",
           "import react from '@vitejs/plugin-react'",
           "import tailwindcss from '@tailwindcss/vite'",
-          "import { mockReview } from '@555/mock-review/vite'",
+          "import { mockReview } from '@555-ventures/mock-review/vite'",
           '',
           "const dirname = path.dirname(fileURLToPath(import.meta.url))",
           '',
