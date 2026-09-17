@@ -467,16 +467,24 @@ describe('mock-review server API (D6)', () => {
         // AC-3: resource timing carries exactly one src/ui/main.tsx URL (the entry, loaded once
         // by the outer reviewer document, visible here because same-origin timing entries include
         // cross-frame navigations within the same top-level browsing context in this Playwright
-        // page), one src/ui/frame/mount.tsx URL (D2's frame branch) and — since specs/20260915/04
-        // D9 — one src/ui/frame/frameRoute.ts URL (the import-free hash grammar mount.tsx parses
-        // with), and no other src/ui/ URL.
+        // page), one src/ui/frame/mount.tsx URL (D2's frame branch), one src/ui/frame/frameRoute.ts
+        // URL (specs/20260915/04 D9 — the import-free hash grammar mount.tsx parses with) and —
+        // since specs/20260916/03 D10 — one src/ui/frame/stateKey.ts URL (mount.tsx's `pickExample`
+        // now resolves through the shared `resolveState`, so the frame's module graph legitimately
+        // pulls in the state-key resolver too), and no other src/ui/ URL.
         const srcUiUrls = await page.evaluate(() =>
           performance.getEntriesByType('resource').map((e) => e.name).filter((name) => name.includes('src/ui/')),
         )
-        const allowed = ['src/ui/main.tsx', 'src/ui/frame/mount.tsx', 'src/ui/frame/frameRoute.ts']
+        const allowed = [
+          'src/ui/main.tsx',
+          'src/ui/frame/mount.tsx',
+          'src/ui/frame/frameRoute.ts',
+          'src/ui/frame/stateKey.ts',
+        ]
         expect(srcUiUrls.filter((u) => u.endsWith('src/ui/main.tsx'))).toHaveLength(1)
         expect(srcUiUrls.filter((u) => u.endsWith('src/ui/frame/mount.tsx'))).toHaveLength(1)
         expect(srcUiUrls.filter((u) => u.endsWith('src/ui/frame/frameRoute.ts'))).toHaveLength(1)
+        expect(srcUiUrls.filter((u) => u.endsWith('src/ui/frame/stateKey.ts'))).toHaveLength(1)
         expect(srcUiUrls.filter((u) => !allowed.some((a) => u.endsWith(a)))).toEqual([])
 
         await page.goto(`${serve.url}/?frame=1#/home?state=Default&scheme=dark`, { waitUntil: 'networkidle' })
@@ -558,6 +566,56 @@ describe('mock-review server API (D6)', () => {
         await stopServe(liveServe)
       }
     }, 60_000)
+  })
+
+  it('AC-20260916-03-10: a journey step state written in meta.states spelling resolves to its example key server-side (D8), no "has no example" violation', async () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-serve-nophone-')
+    const accountFile = path.join(host, 'src', 'screens', 'account.tsx')
+    const accountSource = readFileSync(accountFile, 'utf8')
+    writeFileSync(
+      accountFile,
+      accountSource
+        .replace(`states: ['default'],`, `states: ['default', 'no-phone'],`)
+        .replace(
+          'export const examples = {\n  Default: <Account />,\n}',
+          'export const examples = {\n  Default: <Account />,\n  NoPhone: <Account />,\n}',
+        ),
+    )
+    const journeysFile = path.join(host, 'src', 'journeys.ts')
+    writeFileSync(
+      journeysFile,
+      readFileSync(journeysFile, 'utf8').replace(
+        `steps: [{ screen: 'home' }, { screen: 'account' }]`,
+        `steps: [{ screen: 'home' }, { screen: 'account', state: 'no-phone' }]`,
+      ),
+    )
+
+    serve = await startServeIn(host)
+    const res = await fetch(`${serve.url}/__mock-review/state`)
+    expect(res.status).toBe(200)
+    const state = (await res.json()) as {
+      journeys: { id: string; steps: { screen: string; state?: string }[] }[]
+      violations: string[]
+    }
+
+    expect(state.journeys[0]?.steps[1]?.state).toBe('NoPhone')
+    expect(state.violations).not.toContain('state no-phone has no example')
+  })
+
+  it('AC-20260916-03-11: a scaffold-owned src/components/theme-provider.tsx is invisible to the state endpoint inventory (D1), WalletSummary stays', async () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-serve-scaffold-')
+    writeFileSync(
+      path.join(host, 'src', 'components', 'theme-provider.tsx'),
+      'import * as React from "react"\nexport function ThemeProvider({ children }: { children: React.ReactNode }) {\n  return <>{children}</>\n}\n',
+    )
+
+    serve = await startServeIn(host)
+    const res = await fetch(`${serve.url}/__mock-review/state`)
+    expect(res.status).toBe(200)
+    const state = (await res.json()) as { inventory: { name: string; examples: string[] }[] }
+
+    expect(state.inventory.some((row) => row.name === 'ThemeProvider')).toBe(false)
+    expect(state.inventory.some((row) => row.name === 'WalletSummary')).toBe(true)
   })
 
   describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-14: viewport-driven device captions (D9) [env: SKIP_BROWSER]', () => {

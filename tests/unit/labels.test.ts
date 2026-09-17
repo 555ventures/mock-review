@@ -28,4 +28,13 @@ describe('AC-20260915-02-5: screen/state/step labels and state ordering', () => 
     }
     expect(statesOf(screen)).toEqual(['Default', 'Empty'])
   })
+
+  it('AC-20260916-03-9: statesOf orders resolved keys by meta.states, then the rest in declaration order (D9, resolveStates)', () => {
+    const screen = {
+      meta: { states: ['default', 'no-phone'] },
+      examples: { Extra: {}, NoPhone: {}, Default: {} },
+    }
+    expect(statesOf(screen)).toEqual(['Default', 'NoPhone', 'Extra'])
+  })
+
 })

@@ -6,6 +6,7 @@ import type { Finding, Screen } from '../schemas/index.js'
 import { importsOf, shellOf } from './imports.js'
 import type { Runner } from './vite-runner.js'
 import type { DiscoveredFile } from './discover.js'
+import { resolveState, resolveStates } from '../ui/frame/stateKey.js'
 
 type ScreenModule = {
   meta?: { name?: string; states?: string[] }
@@ -30,7 +31,9 @@ export type ScreenReportResult = {
  * `meta`/`examples` loaded through the Vite runner, a `render` finding per throwing example
  * (`message: "<examples key>: <error.message>"` per D17's ruling on D5 vs the former AC-8
  * literal), a `size` warning over 150 lines, and a `states` warning per `meta.states` entry with
- * no case-insensitively matching `examples` key. A screen whose module import itself throws
+ * no matching `examples` key under the `resolveStates` rule (spec 03 D4: exact match first, then
+ * a unique normalised match; an ambiguous match is refused and reported too). A screen whose
+ * module import itself throws
  * (not per-example) reports exactly one `render` finding, `"module failed to load:
  * <error.message>"` (D17), and skips meta/examples processing entirely — no `meta: missing`
  * follow-on finding (D19(d)). A screen whose module *loads* but has no `meta` still reports
@@ -99,11 +102,17 @@ export async function screenReport(
       findings.push({ kind: 'size', severity: 'warn', file: d.file, message: `${lines} lines` })
     }
 
-    for (const state of states) {
-      const hasExample = Object.keys(examples).some((k) => k.toLowerCase() === state.toLowerCase())
-      if (!hasExample) {
-        findings.push({ kind: 'states', severity: 'warn', file: d.file, message: `state ${state} has no example` })
-      }
+    const { unmatched, ambiguous } = resolveStates(states, Object.keys(examples))
+    for (const state of unmatched) {
+      findings.push({ kind: 'states', severity: 'warn', file: d.file, message: `state ${state} has no example` })
+    }
+    for (const { state, keys } of ambiguous) {
+      findings.push({
+        kind: 'states',
+        severity: 'warn',
+        file: d.file,
+        message: `state ${state} matches several examples: ${keys.join(', ')}`,
+      })
     }
 
     screens.push({ name: d.name, file: d.file, states, shell, hash, lines })
@@ -113,8 +122,8 @@ export async function screenReport(
 }
 
 /**
- * D7: the default example for journey resolution — the one named like `meta.states[0]`
- * (case-insensitively), or failing that the first `examples` entry.
+ * D7: the default example for journey resolution — the one named like `meta.states[0]` under the
+ * `resolveState` rule (spec 03 D4/D5), or failing that the first `examples` entry.
  */
 export function pickDefaultHtml(screen: Screen, htmlByScreen: Map<string, Record<string, string>>): string | undefined {
   const html = htmlByScreen.get(screen.name)
@@ -122,10 +131,8 @@ export function pickDefaultHtml(screen: Screen, htmlByScreen: Map<string, Record
 
   const keys = Object.keys(html)
   const firstState = screen.states[0]
-  if (firstState) {
-    const match = keys.find((k) => k.toLowerCase() === firstState.toLowerCase())
-    if (match) return html[match]
-  }
+  const match = firstState ? resolveState(keys, firstState) : undefined
+  if (match) return html[match]
   const first = keys[0]
   return first ? html[first] : undefined
 }

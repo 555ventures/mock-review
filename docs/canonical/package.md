@@ -15,7 +15,7 @@ loaded lazily, so `contract` never loads Vite or reads the host.
 
 | Verb           | Argv                                                                 | stdout                                                                                                                                                                             | Exit                                                                                                                                       |
 | -------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `contract`     | `contract --json`                                                    | `{"contractVersion":1,"package":"@555-ventures/mock-review","version":"<package.json version>"}`                                                                                            | 0                                                                                                                                          |
+| `contract`     | `contract --json`                                                    | `{"contractVersion":1,"package":"@555-ventures/mock-review","version":"<package.json version>"}`                                                                                   | 0                                                                                                                                          |
 | `check`        | `check [--json]`                                                     | JSON: the `Check` object. Text: one line per finding `<severity> <kind> <file>: <message>`, then `ok` / `not ok`                                                                   | 0 (findings never change the exit)                                                                                                         |
 | `check --look` | `check --look <screen> [--state <s>]`                                | one written PNG path per line                                                                                                                                                      | 0; 2 with no running `serve`, without `playwright`, for an unknown screen, for a screen whose module fails to load, or for a bare `--look` |
 | `sweep`        | `sweep [--json]`                                                     | JSON: `{contractVersion:1, inventory, queue}`. Text: `queue empty` alone when no open items; else inventory lines, a blank line, then the queue grouped under `## <file>` headings | 0                                                                                                                                          |
@@ -146,7 +146,8 @@ rules, so the CLI and the page cannot disagree.
 
 1. Ensure `design/notes.json` and `design/approval.json` exist.
 2. Discover the host by filesystem globbing from the cwd: `src/screens/*.tsx`,
-   `src/components/*.tsx` (never `src/components/ui/**`), `src/shells/*.tsx`, `src/records/*.ts`,
+   `src/components/*.tsx` (never `src/components/ui/**`, and never a file the shadcn vite scaffold
+   itself writes there — currently `theme-provider.tsx`), `src/shells/*.tsx`, `src/records/*.ts`,
    `src/themes/*.css`, `src/journeys.ts`, `mock.config.ts`. `design/examples/` is never read.
 3. Load `mock.config.ts` and validate it with the config schema.
 4. Open one silent Vite dev server in middleware mode on the host's `vite.config.ts`, and import
@@ -175,8 +176,14 @@ still prints with empty screens, shells and journeys.
 | `render` | error    | a loaded screen module has no `meta`                                                                                                         | `meta: missing`                                         |
 | `config` | error    | `mock.config.ts` is missing, unloadable, or fails the schema                                                                                 | the first line of the zod pretty error                  |
 | `size`   | warn     | a screen over 150 lines                                                                                                                      | `<n> lines`                                             |
-| `states` | warn     | a `meta.states` entry has no case-insensitively equal `examples` key                                                                         | `state <s> has no example`                              |
+| `states` | warn     | a `meta.states` entry has no exact and no normalised `examples` key                                                                          | `state <s> has no example`                              |
+| `states` | warn     | a `meta.states` entry has no exact key and two or more normalised ones                                                                       | `state <s> matches several examples: <k1>, <k2>`        |
 | `twin`   | warn     | never emitted yet                                                                                                                            | —                                                       |
+
+A state resolves to an example key by one rule, `resolveStates` in `src/ui/frame/stateKey.ts`, used
+by `check`, the reviewer's state list, journey steps and the frame: an exact key first, otherwise
+the one key whose `stateKey` (lowercase, strip `[^a-z0-9]`) equals the state's; each key binds to at
+most one state, and an ambiguous state binds to nothing.
 
 Journey edges never produce findings. An edge resolves when the default example's rendered HTML
 contains `data-to="<edge.label>"`. Otherwise it lands in `journeys[].unresolved` with reason
