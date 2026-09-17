@@ -369,6 +369,100 @@ describe('mock-review server API (D6)', () => {
     expect(readFileSync(approvalPath, 'utf8')).toBe(corruptApproval)
   })
 
+  it('AC-20260917-01-12: a note patch migrates v1 notes.json to contractVersion 2 with notes/journeys intact and leaves approval.json byte-identical at 1; a theme patch migrates approval.json to 2; a v3 approval.json is refused 409 byte-identical', async () => {
+    serve = await startServe(greenHost)
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
+    const approvalPath = path.join(serve.host, 'design', 'approval.json')
+
+    const v1Notes = {
+      contractVersion: 1,
+      notes: [
+        {
+          id: 'N001',
+          screen: 'home',
+          state: 'Default',
+          component: 'WalletSummary',
+          key: '0',
+          snippet: 'Balance',
+          status: 'open',
+          thread: [{ by: 'owner', text: 'bigger' }],
+        },
+      ],
+      journeys: {
+        'first-visit': { status: 'open', thread: [{ by: 'owner', text: 'looks right' }] },
+      },
+    }
+    const v1Approval = {
+      contractVersion: 1,
+      screens: {},
+      journeys: {},
+      theme: null,
+    }
+    writeFileSync(notesPath, JSON.stringify(v1Notes))
+    writeFileSync(approvalPath, JSON.stringify(v1Approval))
+    const approvalBefore = readFileSync(approvalPath, 'utf8')
+
+    const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: {
+          screen: 'home',
+          state: 'Default',
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'open',
+          thread: [{ by: 'owner', text: 'migrate on write' }],
+        },
+      }),
+    })
+    expect(addRes.status).toBe(200)
+    const addedDoc = (await addRes.json()) as {
+      contractVersion: number
+      notes: { id: string }[]
+      journeys: Record<string, unknown>
+    }
+    expect(addedDoc.contractVersion).toBe(2)
+    const carriedNote = addedDoc.notes.find((n) => n.id === 'N001') as { thread: { text: string }[] } | undefined
+    expect(carriedNote?.thread[0]?.text).toBe('bigger')
+    expect(addedDoc.journeys['first-visit']).toEqual(v1Notes.journeys['first-visit'])
+
+    const onDiskNotes = JSON.parse(readFileSync(notesPath, 'utf8'))
+    expect(onDiskNotes.contractVersion).toBe(2)
+    expect(onDiskNotes).toEqual(addedDoc)
+
+    // The add patch never touches approval (`result.approval !== approval` guard) — the v1 file
+    // is left byte-identical, not merely equal after a round-trip through the same version.
+    expect(readFileSync(approvalPath, 'utf8')).toBe(approvalBefore)
+
+    const themeRes = await fetch(`${serve.url}/__mock-review/approval`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'theme', key: 'nova' }),
+    })
+    expect(themeRes.status).toBe(200)
+    const themedDoc = (await themeRes.json()) as { contractVersion: number; theme: string | null }
+    expect(themedDoc.contractVersion).toBe(2)
+    expect(themedDoc.theme).toBe('nova')
+
+    const onDiskApproval = JSON.parse(readFileSync(approvalPath, 'utf8'))
+    expect(onDiskApproval.contractVersion).toBe(2)
+    expect(onDiskApproval).toEqual(themedDoc)
+
+    const v3Approval = { contractVersion: 3, screens: {}, journeys: {}, theme: 'nova' }
+    writeFileSync(approvalPath, JSON.stringify(v3Approval))
+    const v3Before = readFileSync(approvalPath, 'utf8')
+    const refusedRes = await fetch(`${serve.url}/__mock-review/approval`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'theme', key: 'classic' }),
+    })
+    expect(refusedRes.status).toBe(409)
+    expect(readFileSync(approvalPath, 'utf8')).toBe(v3Before)
+  })
+
   it('AC-20260915-02-9 (D23): the SSE stream disposes itself when the client connection drops, without breaking later connections or notes writes', async () => {
     serve = await startServe(greenHost)
 
