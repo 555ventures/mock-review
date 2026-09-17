@@ -1,6 +1,6 @@
 {
   "contractVersion": 1,
-  "package": "@555/mock-review",
+  "package": "@555-ventures/mock-review",
   "bin": "mock-review",
   "verbs": ["contract", "sweep", "answer", "check", "serve"],
   "host": {

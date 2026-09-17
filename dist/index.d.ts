@@ -1,5 +1,5 @@
 /**
- * Public entry point for `@555/mock-review`: the contract shapes (D1) and the `check` analysis
+ * Public entry point for `@555-ventures/mock-review`: the contract shapes (D1) and the `check` analysis
  * core (D5-D8), for programmatic use outside the CLI (the reviewer page, spec 02, imports these
  * directly rather than shelling out).
  */

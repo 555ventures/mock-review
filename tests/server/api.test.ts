@@ -517,7 +517,7 @@ describe('mock-review server API (D6)', () => {
           "import { defineConfig } from 'vite'",
           "import react from '@vitejs/plugin-react'",
           "import tailwindcss from '@tailwindcss/vite'",
-          "import { mockReview } from '@555/mock-review/vite'",
+          "import { mockReview } from '@555-ventures/mock-review/vite'",
           '',
           'export default defineConfig({',
           '  plugins: [react(), tailwindcss(), mockReview()],',
@@ -525,9 +525,9 @@ describe('mock-review server API (D6)', () => {
           '',
         ].join('\n'),
       )
-      // D7/D8: materialises the package under this scratch host's own `node_modules/@555/mock-review/`
+      // D7/D8: materialises the package under this scratch host's own `node_modules/@555-ventures/mock-review/`
       // exactly as a real install would (`.test-dist/` as `dist/`, `src/ui/` as source, its own
-      // `package.json` so the `exports` map's `"./vite"` entry resolves `@555/mock-review/vite` to
+      // `package.json` so the `exports` map's `"./vite"` entry resolves `@555-ventures/mock-review/vite` to
       // `dist/vite.js`) — the host's `vite.config.ts` above imports it by its real package
       // specifier, not a hand-rolled path, so this exercises the same resolution a published
       // install would.

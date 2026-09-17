@@ -6,7 +6,7 @@ import type { Contract } from '../schemas/index.js'
 
 const require = createRequire(import.meta.url)
 
-const PACKAGE_NAME = '@555/mock-review'
+const PACKAGE_NAME = '@555-ventures/mock-review'
 
 export function contractVerb(): Contract {
   // Compiled to dist/cli/contract.js; the package.json this reads is the one at the repo root,

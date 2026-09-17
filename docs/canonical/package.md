@@ -1,4 +1,4 @@
-# Package: `@555/mock-review` CLI and file layer
+# Package: `@555-ventures/mock-review` CLI and file layer
 
 Canonical reference for the headless CLI, the reviewer page and its server, the files they read and
 write, and the release procedure. Source of truth:
@@ -15,7 +15,7 @@ loaded lazily, so `contract` never loads Vite or reads the host.
 
 | Verb           | Argv                                                                 | stdout                                                                                                                                                                             | Exit                                                                                                                                       |
 | -------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `contract`     | `contract --json`                                                    | `{"contractVersion":1,"package":"@555/mock-review","version":"<package.json version>"}`                                                                                            | 0                                                                                                                                          |
+| `contract`     | `contract --json`                                                    | `{"contractVersion":1,"package":"@555-ventures/mock-review","version":"<package.json version>"}`                                                                                            | 0                                                                                                                                          |
 | `check`        | `check [--json]`                                                     | JSON: the `Check` object. Text: one line per finding `<severity> <kind> <file>: <message>`, then `ok` / `not ok`                                                                   | 0 (findings never change the exit)                                                                                                         |
 | `check --look` | `check --look <screen> [--state <s>]`                                | one written PNG path per line                                                                                                                                                      | 0; 2 with no running `serve`, without `playwright`, for an unknown screen, for a screen whose module fails to load, or for a bare `--look` |
 | `sweep`        | `sweep [--json]`                                                     | JSON: `{contractVersion:1, inventory, queue}`. Text: `queue empty` alone when no open items; else inventory lines, a blank line, then the queue grouped under `## <file>` headings | 0                                                                                                                                          |
@@ -188,7 +188,7 @@ contains `data-to="<edge.label>"`. Otherwise it lands in `journeys[].unresolved`
 Tests never write the committed `dist/`. `tests/setup.ts` compiles `tsconfig.build.json` into the
 gitignored `.test-dist/` with `tsc` alone, rebuilding whenever `src/**` is newer, under a lock; the
 reviewer needs no build. Browser tests run both layouts: the linked package (the repo's
-`.test-dist`) and a package materialised under a scratch host's `node_modules/@555/mock-review/`.
+`.test-dist`) and a package materialised under a scratch host's `node_modules/@555-ventures/mock-review/`.
 
 `tests/package/two-vite-copies.test.ts` runs the host's own `vite` binary with `mockReview()` mounted from `.test-dist/vite.js`, plus `check` and `serve` from the bin, against a scratch host whose `node_modules/vite` is a physical copy of the repo's (a different realpath — the `npm link` layout without the network), and runs `serve`/`check` against a fake vite 9. Spawn `node_modules/vite/bin/vite.js` directly there: `node_modules/.bin/vite` in a per-entry-symlinked host points back at the repo's copy. `tests/package/vite-imports.test.ts` bans runtime `vite` imports under `src/` outside `src/analysis/host-modules.ts`.
 
