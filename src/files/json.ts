@@ -18,12 +18,24 @@ export function readJson<T>(filePath: string, schema: z.ZodType<T>): T {
   return schema.parse(value)
 }
 
-/** D1: a design document that EXISTS but cannot be used: malformed JSON, an unknown
- * `contractVersion`, or a shape this package has not learned. `relPath` is the design-relative
- * path named in every refusal. */
+/** D1: a design document that cannot be used: malformed JSON, an unknown `contractVersion`, or a
+ * shape this package has not learned — or, at a caller that reached a document before
+ * `ensureDesignFiles` created it, absent. `relPath` is the design-relative path named in every
+ * refusal, and `missing` picks the sentence: the remedy for a corrupt document is to fix it by
+ * hand, and naming an absent file "unparseable" would send the reader looking for damage that is
+ * not there. Every real entry point creates both documents first (`runCheck`, `sweep`, `answer`,
+ * `buildState`), so `missing` is unreachable through the CLI and the server today; it exists so
+ * the one shared verdict cannot state something untrue about its input. */
 export class UnparseableDesignFileError extends Error {
-  constructor(public readonly relPath: string) {
-    super(`${relPath} exists but does not parse — refusing to write until it's fixed by hand`)
+  constructor(
+    public readonly relPath: string,
+    public readonly missing = false,
+  ) {
+    super(
+      missing
+        ? `${relPath} does not exist — run a host verb to create it`
+        : `${relPath} exists but does not parse — refusing to write until it's fixed by hand`,
+    )
   }
 }
 
@@ -38,25 +50,34 @@ const DESIGN_DOC_REL_PATH: { notes: string; approval: string } = {
  * package derives its behaviour from this one function, then chooses its own policy explicitly.
  * Callers never write their own `try { readJson(...) } catch`. */
 export function readDesignDoc(cwd: string, kind: 'notes' | 'approval'): DocRead<Notes | Approval> {
+  const result = judgeDesignDoc(cwd, kind)
+  return result.ok ? result : { ok: false, error: result.err.message }
+}
+
+/** D1: the write path's form: the SAME verdict, expressed as the throw both POST handlers already
+ * turn into a 409. Both readers delegate to `judgeDesignDoc`, so there is exactly one catch site
+ * and the read and write paths cannot disagree about the same bytes — two catch sites would be
+ * precisely the drift D1 set out to make impossible. */
+export function readDesignDocOrThrow(cwd: string, kind: 'notes' | 'approval'): Notes | Approval {
+  const result = judgeDesignDoc(cwd, kind)
+  if (!result.ok) throw result.err
+  return result.doc
+}
+
+/** The single catch site behind both public readers. Returns the error OBJECT rather than its
+ * sentence, so the throwing form can rethrow the very error the result form describes instead of
+ * re-deciding the verdict or parsing its own message back apart. */
+function judgeDesignDoc(
+  cwd: string,
+  kind: 'notes' | 'approval',
+): { ok: true; doc: Notes | Approval } | { ok: false; err: UnparseableDesignFileError } {
   const relPath = DESIGN_DOC_REL_PATH[kind]
   const filePath = path.join(cwd, relPath)
   try {
     const doc = kind === 'notes' ? readJson(filePath, NotesSchema) : readJson(filePath, ApprovalSchema)
     return { ok: true, doc }
   } catch {
-    return { ok: false, error: new UnparseableDesignFileError(relPath).message }
-  }
-}
-
-/** D1: the write path's form: same verdict, expressed as the throw both POST handlers already
- * turn into a 409. Exists so the two paths cannot drift. */
-export function readDesignDocOrThrow(cwd: string, kind: 'notes' | 'approval'): Notes | Approval {
-  const relPath = DESIGN_DOC_REL_PATH[kind]
-  const filePath = path.join(cwd, relPath)
-  try {
-    return kind === 'notes' ? readJson(filePath, NotesSchema) : readJson(filePath, ApprovalSchema)
-  } catch {
-    throw new UnparseableDesignFileError(relPath)
+    return { ok: false, err: new UnparseableDesignFileError(relPath, !existsSync(filePath)) }
   }
 }
 
