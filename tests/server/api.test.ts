@@ -87,6 +87,16 @@ describe('mock-review server API (D6)', () => {
     expect(state.approval).toBeDefined()
     expect(state.role).toBe('owner')
 
+    // AC-20260917-02-12 (D8): ApprovalSchema keeps `theme` — a document carrying a `theme` must
+    // survive the schema and GET state must serve it back on `state.approval.theme`.
+    const approvalPath = path.join(serve.host, 'design', 'approval.json')
+    writeFileSync(
+      approvalPath,
+      JSON.stringify({ contractVersion: 2, screens: {}, journeys: {}, theme: 'nova' }),
+    )
+    const themedState = await getState(serve.url)
+    expect(themedState.approval.theme).toBe('nova')
+
     // D24 (redesigned): the role travels in the `mock-review-client` cookie, not the Referer —
     // the frame's own sub-requests all carry the frame's URL as Referer with no token, so a
     // Referer-based rule would 403 a real remote client into a blank mock.
@@ -214,7 +224,7 @@ describe('mock-review server API (D6)', () => {
   // AC-20260917-02-15/-16 (D10, D11): the narrow `close` op — a client may end a note or journey
   // conversation THEY THEMSELVES opened; the 404 unknown-id pre-check runs before any ownership
   // check; a client may never set a journey status directly through `op:'journey'`.
-  it('AC-20260917-02-15/-16: close op — client owns their own note, is refused another\'s, unknown id is 404 before ownership, owner may close any note or journey', async () => {
+  it('AC-20260917-02-15: close op — client owns their own note, is refused another\'s, unknown id is 404 before ownership, owner may close any note', async () => {
     serve = await startServe(greenHost)
     const notesPath = path.join(serve.host, 'design', 'notes.json')
 
@@ -282,6 +292,14 @@ describe('mock-review server API (D6)', () => {
       body: JSON.stringify({ op: 'close', id: sessionNoteId, status: 'approved' }),
     })
     expect(ownerCloseSessionRes.status).toBe(200)
+  })
+
+  // AC-20260917-02-16 (D11): a client may never set a journey status directly through
+  // `op:'journey'`; an owner may `close` a journey conversation instead, and its status lands
+  // in notes.journeys[id].status, the key `--mark approved` reads for its exclusion rows.
+  it('AC-20260917-02-16: op:\'journey\' is refused for a client (403, no entry point), owner close on a journey persists notes.journeys[id].status', async () => {
+    serve = await startServe(greenHost)
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
 
     // AC-16: a client may not set a journey status directly with op:'journey' (no entry) — 403.
     const clientJourneyRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {

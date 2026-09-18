@@ -38,6 +38,11 @@ loaded lazily, so `contract` never loads Vite or reads the host.
 
 Every refusal prints `mock-review: <reason>` on stderr.
 
+`serve` owns its own shutdown: Vite's `createServer()` registers `SIGINT`/`SIGTERM` handlers that
+exit with 128+signal before any handler registered later runs, so the CLI removes them as soon as
+`createServer()` resolves and installs its own — without that, `design/.serve.json` is never
+deleted and the exit code is not 0.
+
 ## File layer
 
 All writes go through `writeJsonAtomic` (write `<path>.tmp`, then `rename`).
@@ -90,15 +95,15 @@ optimisation; nothing requires it. `mockReview()` takes no options.
 All endpoints live under `/__mock-review/`, and every write goes through `writeJsonAtomic` under one
 in-process lock.
 
-| Route               | Method | Body / answer                                                                                                                                                        |
-| ------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ping`              | GET    | 200, no body — the liveness probe `check` uses                                                                                                                       |
-| `state`             | GET    | `{screens, shells, journeys, themes, config, inventory, violations, notes, approval, role}`; `screens[]` and `inventory[]` each carry their module's `examples` keys |
+| Route               | Method | Body / answer                                                                                                                                                                      |
+| ------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ping`              | GET    | 200, no body — the liveness probe `check` uses                                                                                                                                     |
+| `state`             | GET    | `{screens, shells, journeys, themes, config, inventory, violations, notes, approval, role}`; `screens[]` and `inventory[]` each carry their module's `examples` keys               |
 | `notes`             | POST   | `{op:'add', note} \| {op:'update', id, fields} \| {op:'remove', id} \| {op:'journey', id, status?, entry?} \| {op:'close', id, status: 'approved'\|'deferred'}` → the new document |
-| `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'clientOk', id, beats} \| {op:'theme', key}` → the new document                                     |
-| `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                           |
-| `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                           |
-| `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                        |
+| `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'clientOk', id, beats} \| {op:'theme', key}` → the new document                                                              |
+| `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                                         |
+| `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                                         |
+| `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                                      |
 
 Refusals: 400 for a body that is not JSON, for a patch that fails its schema, for an `add` carrying
 its own `id`, for approving a screen with no row in the current state (never a written empty hash),
@@ -183,20 +188,20 @@ still prints with empty screens, shells and journeys.
 
 `ok = !findings.some(f => f.severity === 'error')`.
 
-| Kind     | Severity | Fires when                                                                                                                                   | `message`                                               |
-| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `type`   | error    | a TypeScript pre-emit diagnostic under `src/`                                                                                                | `TS<code>: <text> at <line>:<col>`                      |
-| `layer`  | error    | a screen imports anything other than `react`, `react/…`, `@/components/ui/…`, `@/components/…`, `@/shells/…`, `@/records/…` (one per import) | `imports <specifier>`                                   |
-| `doc`    | error    | a component or shell lacks a `/** … */` line above an export, or lacks a named `examples` export                                             | `missing doc line` / `missing examples export`          |
-| `render` | error    | an `examples` entry throws in `renderToString`                                                                                               | `<examples key>: <error.message>` (e.g. `Broken: boom`) |
-| `render` | error    | a screen module throws on import (the only finding for that file)                                                                            | `module failed to load: <error.message>`                |
-| `render` | error    | a loaded screen module has no `meta`                                                                                                         | `meta: missing`                                         |
-| `config` | error    | `mock.config.ts` is missing, unloadable, or fails the schema                                                                                 | the first line of the zod pretty error                  |
-| `size`   | warn     | a screen over 150 lines                                                                                                                      | `<n> lines`                                             |
-| `states` | warn     | a `meta.states` entry has no exact and no normalised `examples` key                                                                          | `state <s> has no example`                              |
-| `states` | warn     | a `meta.states` entry has no exact key and two or more normalised ones                                                                       | `state <s> matches several examples: <k1>, <k2>`        |
+| Kind     | Severity | Fires when                                                                                                                                   | `message`                                                                            |
+| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `type`   | error    | a TypeScript pre-emit diagnostic under `src/`                                                                                                | `TS<code>: <text> at <line>:<col>`                                                   |
+| `layer`  | error    | a screen imports anything other than `react`, `react/…`, `@/components/ui/…`, `@/components/…`, `@/shells/…`, `@/records/…` (one per import) | `imports <specifier>`                                                                |
+| `doc`    | error    | a component or shell lacks a `/** … */` line above an export, or lacks a named `examples` export                                             | `missing doc line` / `missing examples export`                                       |
+| `render` | error    | an `examples` entry throws in `renderToString`                                                                                               | `<examples key>: <error.message>` (e.g. `Broken: boom`)                              |
+| `render` | error    | a screen module throws on import (the only finding for that file)                                                                            | `module failed to load: <error.message>`                                             |
+| `render` | error    | a loaded screen module has no `meta`                                                                                                         | `meta: missing`                                                                      |
+| `config` | error    | `mock.config.ts` is missing, unloadable, or fails the schema                                                                                 | the first line of the zod pretty error                                               |
+| `size`   | warn     | a screen over 150 lines                                                                                                                      | `<n> lines`                                                                          |
+| `states` | warn     | a `meta.states` entry has no exact and no normalised `examples` key                                                                          | `state <s> has no example`                                                           |
+| `states` | warn     | a `meta.states` entry has no exact key and two or more normalised ones                                                                       | `state <s> matches several examples: <k1>, <k2>`                                     |
 | `beats`  | warn     | a journey's steps are not all beat-bearing (`src/journeys.ts`, one per affected journey)                                                     | `journey <id> step <n> has no beat — \`--mark journey-drawn\` will refuse this step` |
-| `twin`   | warn     | never emitted yet                                                                                                                            | —                                                       |
+| `twin`   | warn     | never emitted yet                                                                                                                            | —                                                                                    |
 
 A state resolves to an example key by one rule, `resolveStates` in `src/ui/frame/stateKey.ts`, used
 by `check`, the reviewer's state list, journey steps and the frame: an exact key first, otherwise

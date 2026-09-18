@@ -3,6 +3,7 @@ name: feedback-unstable-hook-deps-under-load
 description: an unstable array/object literal fed into a hook's dependency array is an infinite-render bug that only manifests under CPU load — confirmed root cause of a gate-wide "Maximum update depth exceeded" defect
 metadata:
   type: feedback
+  reviewed: 2026-09-17
 ---
 
 `journey?.edges ?? []` (a fresh `[]` on every render) fed straight into `useJourneyGuide`'s
@@ -23,14 +24,15 @@ Under heavy CPU contention (many concurrent Vite dev servers + Chromium instance
 gate runs), React's scheduler can't get regular animation frames, so pending updates queue up and
 get flushed back-to-back once CPU is available, tripping the nested-update-count safety net that
 normally never gets hit. This reproduced as `tests/server/api.test.ts`'s AC-13, and
-`tests/browser/{surfaces,roundtrip}.test.ts`'s AC-15/AC-18/AC-19 — a *different* one timing out each
+`tests/browser/{surfaces,roundtrip}.test.ts`'s AC-15/AC-18/AC-19 — a _different_ one timing out each
 run — because the browser doing the actual work was pegged at 100% CPU rendering an infinite loop
 in a completely unrelated page.
 
 **How to apply:**
+
 1. Any `x ?? []` / `x ?? {}` fallback that is passed into a hook's dependency array (not just used
    for rendering) must be a module-level (or otherwise stable-across-renders) constant instead of
-   an inline literal — the inline literal is a *different reference* every render even when the
+   an inline literal — the inline literal is a _different reference_ every render even when the
    value is conceptually "the same empty thing."
 2. Any `setState` call at the top of an effect meant to "reset" a value (e.g. `setHints([])`) must
    use the functional-update no-op-check form (`setHints((h) => (h.length ? [] : h))`) so resetting
