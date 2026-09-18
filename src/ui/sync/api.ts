@@ -1,6 +1,7 @@
 // D2/D6: the only module that calls the server. Sends per-note/approval patches and returns the
-// new document (the server is the sole writer of `design/notes.json` and `design/approval.json`
-// while `serve` runs).
+// new document. Three processes write `design/notes.json` and `design/approval.json` — the
+// `serve` server this module talks to, the `answer` CLI, and the spec plugin's `client waive` —
+// serialised by `withDesignLock` (src/files/json.ts), not by any single writer owning the files.
 import type { ApprovalPatch, NotesPatch, ServerState } from '../../schemas/patches.js'
 import type { Approval, Notes } from '../../schemas/index.js'
 

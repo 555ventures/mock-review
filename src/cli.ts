@@ -42,7 +42,7 @@ async function main(argv: string[]): Promise<number> {
 
     case 'answer': {
       const { answerVerb } = await import('./cli/answer.js')
-      const result = answerVerb(cwd, {
+      const result = await answerVerb(cwd, {
         note: values.note,
         journey: values.journey,
         text: values.text,

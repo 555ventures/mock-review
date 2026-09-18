@@ -162,7 +162,7 @@ describe('mock-review server API (D6)', () => {
     expect(anyState.config.name).not.toBeNull()
   })
 
-  it('AC-20260915-02-9: POST notes {op:add} persists to design/notes.json with no leftover .tmp, and answer over the CLI reaches an SSE notes event within 2s', async () => {
+  it('AC-20260915-02-9 / AC-20260918-01-7: POST notes {op:add} persists to design/notes.json with no leftover .tmp, and answer over the CLI reaches an SSE notes event within 2s', async () => {
     serve = await startServe(greenHost)
 
     const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
@@ -219,6 +219,76 @@ describe('mock-review server API (D6)', () => {
     const n1 = (after.notes.notes as { id: string; status: string }[]).find((n) => n.id === 'N001')
     expect(n1?.status).toBe('answered')
   }, 20_000)
+
+  // AC-20260918-01-8, tagged [pre-green: absence-invariant]: a project note (no screen, so rule 6
+  // — which un/re-approves a screen a note targets — can never fire for it) must never touch
+  // design/approval.json. True before this spec (rule 6 already only fires for a screen-anchored
+  // note) and stays true after — kept as a named invariant, not dropped, because D2's lock wraps
+  // this exact write and must not start touching approval.json as a side effect of taking it.
+  it('AC-20260918-01-8 [pre-green: absence-invariant]: a project:true note add leaves design/approval.json byte-identical when a screen is already approved', async () => {
+    serve = await startServe(greenHost)
+    const approvalPath = path.join(serve.host, 'design', 'approval.json')
+
+    const approveRes = await fetch(`${serve.url}/__mock-review/approval`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'approveScreen', name: 'home' }),
+    })
+    expect(approveRes.status).toBe(200)
+    const before = readFileSync(approvalPath, 'utf8')
+
+    const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: {
+          screen: null,
+          state: null,
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'open',
+          thread: [{ by: 'owner', text: 'project-wide note' }],
+          project: true,
+        },
+      }),
+    })
+    expect(addRes.status).toBe(200)
+
+    expect(readFileSync(approvalPath, 'utf8')).toBe(before)
+  })
+
+  // AC-20260918-01-9: a POST that cannot acquire `design/.lock` within the acquire window answers
+  // 503 with the lock sentence as its `error` body — distinct from the 409 an unreadable document
+  // already uses. The lock file's holder is this test process's own pid (alive — `process.kill(pid,
+  // 0)` never throws ESRCH for it) with a fresh mtime (not stale), so the server can neither break
+  // it nor ever see it released; it must retry for ~2s and then refuse rather than hang.
+  it('AC-20260918-01-9: POST notes answers 503 with the lock sentence when design/.lock stays held past the acquire window', async () => {
+    serve = await startServe(greenHost)
+    const lockPath = path.join(serve.host, 'design', '.lock')
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }))
+
+    const res = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: {
+          screen: 'home',
+          state: 'Default',
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'open',
+          thread: [{ by: 'owner', text: 'locked out' }],
+        },
+      }),
+    })
+    expect(res.status).toBe(503)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/^design\/ is locked by pid \d+ — another mock-review write is in progress; retry$/)
+  }, 10_000)
 
   it('AC-20260915-02-10: a client-role request may only add notes / clientOk approval; anything else is 403', async () => {
     serve = await startServe(greenHost)

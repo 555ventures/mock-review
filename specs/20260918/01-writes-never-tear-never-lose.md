@@ -1,6 +1,7 @@
 ---
 date: 2026-09-18
-status: hardened
+status: implementing
+build_base: main
 tier: critical
 area: files
 design: false
@@ -10,6 +11,7 @@ depended_on_by: [specs/20260918/02-one-reply-and-the-page-ends-a-note.md]
 brief: n/a
 spiked: 2026-09-18
 open_markers: 0
+diff_base: e74440c330d8f9b5a212651ba143091029eb248e
 ---
 
 # Writes never tear, never lose
