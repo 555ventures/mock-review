@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import { CONTRACT_VERSION } from './version.js'
 
+/** D4: READ-BACK SCHEMA. It validates only what this package itself reads or writes; anything
+ * else passes through, and `contractVersion` is checked as "known", not "equal". `theme` defaults
+ * to `null` on read because the plugin's own `defaultApproval` omits the key entirely (A3) — the
+ * inferred type stays `string | null`, so no consumer changes. This rule LOWERS the frequency of
+ * a swallowed read; it does NOT close it, because a missing required key is not an extra key. */
+
 /** D1: `design/approval.json`'s `screens{}` map value — this package never writes one (spec 02
  * does), but `.strict()` since it is an object this package's own writers must not corrupt. */
 export const ScreenApprovalSchema = z
@@ -39,7 +45,7 @@ export const ApprovalSchema = z
     contractVersion: z.union([z.literal(1), z.literal(CONTRACT_VERSION)]),
     screens: z.record(z.string(), ScreenApprovalSchema),
     journeys: z.record(z.string(), JourneyApprovalSchema),
-    theme: z.string().nullable(),
+    theme: z.string().nullable().default(null),
   })
   .strict()
 

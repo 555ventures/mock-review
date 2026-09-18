@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { CONTRACT_VERSION } from './version.js'
 
+/** D4: READ-BACK SCHEMA. It validates only what this package itself reads or writes; anything
+ * else passes through, and `contractVersion` is checked as "known", not "equal". This rule
+ * LOWERS the frequency of a swallowed read; it does NOT close it, because a missing required key
+ * is not an extra key. */
+
 /** D1: one reply in a note's or journey's thread. `by` is a free-form attribution string
  * (`"session"` for `answer`, `"client"` for the page's client role — spec 02). */
 export const ThreadEntrySchema = z

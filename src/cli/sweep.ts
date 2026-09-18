@@ -5,9 +5,10 @@ import path from 'node:path'
 import { discoverHost } from '../analysis/discover.js'
 import { importsOf } from '../analysis/imports.js'
 import { inventory } from '../analysis/inventory.js'
-import { ensureDesignFiles, readJson } from '../files/json.js'
-import { CONTRACT_VERSION, NotesSchema } from '../schemas/index.js'
-import type { InventoryRow, QueueItem, Sweep } from '../schemas/index.js'
+import { ensureDesignFiles, readDesignDoc } from '../files/json.js'
+import { CONTRACT_VERSION } from '../schemas/index.js'
+import type { InventoryRow, Notes, QueueItem, Sweep } from '../schemas/index.js'
+import { fail } from './io.js'
 
 /** The 1-based line of the first line containing `needle`, or `1` when the file is missing or the
  * needle is not found — matches D11's `<line of … or 1>` fallback. */
@@ -33,8 +34,14 @@ export function sweepVerb(cwd: string): Sweep {
 
   const inv: InventoryRow[] = inventory(cwd, discovered.components, discovered.shells, screenSpecifiers)
 
-  const notesPath = path.join(cwd, 'design', 'notes.json')
-  const notes = readJson(notesPath, NotesSchema)
+  // D5: refuse rather than crash with a raw zod stack when design/notes.json exists but does not
+  // parse — the shared refusal sentence, at exit 2, unlike `check`'s `themeFor`, which stays
+  // silent on the same verdict.
+  const notesRead = readDesignDoc(cwd, 'notes')
+  if (!notesRead.ok) fail(notesRead.error)
+  // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
+  // the cast is safe because `kind: 'notes'` above guarantees `doc` is a `Notes`.
+  const notes: Notes = notesRead.doc as Notes
 
   const journeysFile = path.join(cwd, 'src', 'journeys.ts')
   const journeyItems: QueueItem[] = Object.entries(notes.journeys)

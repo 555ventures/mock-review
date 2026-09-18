@@ -136,6 +136,15 @@ export const ServerScreenSchema = ScreenSchema.extend({
 
 export type ServerScreen = z.infer<typeof ServerScreenSchema>
 
+/** D2: whether a design document could be read. `ok: false` means the file EXISTS and could not
+ * be used — never that it is absent (`ensureDesignFiles` creates both when missing). */
+export const DocOutcomeSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true) }).strict(),
+  z.object({ ok: z.literal(false), error: z.string() }).strict(),
+])
+
+export type DocOutcome = z.infer<typeof DocOutcomeSchema>
+
 /** D6: `GET state`'s full response shape. */
 export const ServerStateSchema = z
   .object({
@@ -149,6 +158,7 @@ export const ServerStateSchema = z
     notes: NotesSchema,
     approval: ApprovalSchema,
     role: z.enum(['owner', 'client']),
+    documents: z.object({ notes: DocOutcomeSchema, approval: DocOutcomeSchema }).strict(),
   })
   .strict()
 

@@ -5,9 +5,9 @@
 // byte-identical (D19c).
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js'
-import { CONTRACT_VERSION, DecisionsSchema, NotesSchema } from '../schemas/index.js'
-import type { Decisions, ThreadEntry } from '../schemas/index.js'
+import { ensureDesignFiles, readDesignDoc, readJson, writeJsonAtomic } from '../files/json.js'
+import { CONTRACT_VERSION, DecisionsSchema } from '../schemas/index.js'
+import type { Decisions, Notes, ThreadEntry } from '../schemas/index.js'
 import { fail } from './io.js'
 
 export type AnswerFlags = {
@@ -30,7 +30,14 @@ export function answerVerb(cwd: string, flags: AnswerFlags): string {
   }
 
   const notesPath = path.join(cwd, 'design', 'notes.json')
-  const notes = readJson(notesPath, NotesSchema)
+  // D5: refuse rather than crash with a raw zod stack when design/notes.json exists but does not
+  // parse — the shared refusal sentence, at exit 2 (mirrors sweep.ts; unlike check.ts's
+  // `themeFor`, which stays silent on the same verdict).
+  const notesRead = readDesignDoc(cwd, 'notes')
+  if (!notesRead.ok) fail(notesRead.error)
+  // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
+  // the cast is safe because `kind: 'notes'` above guarantees `doc` is a `Notes`.
+  const notes: Notes = notesRead.doc as Notes
 
   let screenForDecision: string | null = null
   let printedId: string

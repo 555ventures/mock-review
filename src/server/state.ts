@@ -12,10 +12,10 @@ import { resolveState } from '../ui/frame/stateKey.js'
 import { journeyReport, type JourneyInput } from '../analysis/journeys.js'
 import { beatHash } from '../analysis/beats.js'
 import { inventory } from '../analysis/inventory.js'
-import { ensureDesignFiles, readJson } from '../files/json.js'
-import { ApprovalSchema, EMPTY_APPROVAL, EMPTY_NOTES, NotesSchema } from '../schemas/index.js'
-import type { Shell } from '../schemas/index.js'
-import type { ServerInventoryRow, ServerJourney, ServerScreen, ServerState } from '../schemas/patches.js'
+import { ensureDesignFiles, readDesignDoc } from '../files/json.js'
+import { EMPTY_APPROVAL, EMPTY_NOTES } from '../schemas/index.js'
+import type { Approval, Notes, Shell } from '../schemas/index.js'
+import type { DocOutcome, ServerInventoryRow, ServerJourney, ServerScreen, ServerState } from '../schemas/patches.js'
 
 /** D18(b): the component/shell module's own `examples` keys, `['Default']` when the module can't
  * be loaded at all (a readable module with a genuinely empty `examples` map keeps `[]`). */
@@ -125,23 +125,23 @@ export async function buildState(cwd: string, role: 'owner' | 'client', runner: 
     violations.push(err instanceof Error ? err.message : String(err))
   }
 
-  const notesPath = path.join(cwd, 'design', 'notes.json')
-  const approvalPath = path.join(cwd, 'design', 'approval.json')
+  // D1/D3: one verdict, from `readDesignDoc` — never this file's own `try { readJson(...) }
+  // catch`. `ok: false` means the file EXISTS and could not be used; `ensureDesignFiles` above
+  // already created it when absent, so a still-failing read here is a genuine parse/shape
+  // failure, never a missing file. On failure the wire `notes`/`approval` value stays the
+  // documented EMPTY_* PLACEHOLDER — it is not a claim that the file is actually empty, and the
+  // caller must read `documents.<doc>.ok` to know whether to trust it. Every other field
+  // (`screens`, `shells`, `journeys`, `themes`, `config`, `inventory`) is unaffected by either
+  // read failing (D3) — they're built entirely above, before this block runs.
+  const notesRead = readDesignDoc(cwd, 'notes')
+  // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
+  // the cast is safe because `kind: 'notes'` above guarantees `doc` is a `Notes`.
+  const notes: Notes = notesRead.ok ? (notesRead.doc as Notes) : EMPTY_NOTES
+  const notesOutcome: DocOutcome = notesRead.ok ? { ok: true } : { ok: false, error: notesRead.error }
 
-  let notes = EMPTY_NOTES
-  try {
-    notes = readJson(notesPath, NotesSchema)
-  } catch {
-    // ensureDesignFiles just created it when absent; a still-unreadable file falls back to empty
-    // rather than failing the whole state build.
-  }
-
-  let approval = EMPTY_APPROVAL
-  try {
-    approval = readJson(approvalPath, ApprovalSchema)
-  } catch {
-    // see above.
-  }
+  const approvalRead = readDesignDoc(cwd, 'approval')
+  const approval: Approval = approvalRead.ok ? (approvalRead.doc as Approval) : EMPTY_APPROVAL
+  const approvalOutcome: DocOutcome = approvalRead.ok ? { ok: true } : { ok: false, error: approvalRead.error }
 
   return {
     screens,
@@ -154,5 +154,6 @@ export async function buildState(cwd: string, role: 'owner' | 'client', runner: 
     notes,
     approval,
     role,
+    documents: { notes: notesOutcome, approval: approvalOutcome },
   }
 }

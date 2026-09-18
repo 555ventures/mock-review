@@ -1,25 +1,25 @@
 // D5-D8/D12/D23: the `check` verb — JSON and text forms over the analysis layer's `runCheck`,
 // plus D12's `--look <screen> [--state <s>]` Playwright capture.
-import path from 'node:path'
 import { runCheck } from '../analysis/check.js'
 import { serveUrl } from '../analysis/liveness.js'
 import { look } from '../analysis/look.js'
-import { readJson } from '../files/json.js'
-import { ApprovalSchema } from '../schemas/index.js'
-import type { Check, Config } from '../schemas/index.js'
+import { readDesignDoc } from '../files/json.js'
+import type { Approval, Check, Config } from '../schemas/index.js'
 import { ServerStateSchema } from '../schemas/patches.js'
 import { fail, writeFlushed } from './io.js'
 
-/** D23: `--theme` for `check --look`'s frame captures — `approval.theme` when the file is
- * readable and a theme is picked, `undefined` otherwise (a missing/unreadable/theme-less
- * `design/approval.json` never fails the capture). */
+/** D5/D23: `--theme` for `check --look`'s frame captures — `approval.theme` when
+ * `readDesignDoc` reports the file readable and a theme is picked, `undefined` otherwise. This
+ * silent fallback is DELIBERATE, unlike `sweep`/`answer`'s refusal: a screenshot capture must
+ * never fail just because `design/approval.json` is unpicked or unreadable — it derives from the
+ * one verdict (`readDesignDoc`) but keeps its own permissive policy on top of it. */
 function themeFor(cwd: string): string | undefined {
-  try {
-    const approval = readJson(path.join(cwd, 'design', 'approval.json'), ApprovalSchema)
-    return approval.theme ?? undefined
-  } catch {
-    return undefined
-  }
+  const result = readDesignDoc(cwd, 'approval')
+  if (!result.ok) return undefined
+  // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
+  // the cast is safe because `kind: 'approval'` above guarantees `doc` is an `Approval`.
+  const approval = result.doc as Approval
+  return approval.theme ?? undefined
 }
 
 /** D21/review-2: when `--state` is omitted, `--look` must capture every state using the same

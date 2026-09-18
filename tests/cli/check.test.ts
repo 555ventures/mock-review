@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { brokenHost, ensureFixtures, greenHost } from '../setup.js'
 import { copyFixtureHost, run } from '../helpers/cli.js'
+import { startServe, stopServe, type Serve } from '../helpers/serve.js'
 
 type Finding = { kind: string; severity: string; file: string; message: string }
 type Check = {
@@ -57,6 +58,37 @@ describe('mock-review check --json (built dist/)', () => {
     expect(check.screens.some((s) => badFile(s.file))).toBe(false)
     expect(check.findings.some((f) => badFile(f.file))).toBe(false)
   })
+
+  // D5/AC-20260917-04-11 (rewrites AC-20260915-01-5): a plain `check --json` never reads
+  // design/approval.json at all (only `check --look`'s theme capture does, via `themeFor`), so a
+  // truncated approval.json cannot perturb its screens/shells/themes report either way — asserted
+  // here as the "SHALL CONTINUE TO" pin the AC names. `check --look`'s own theme capture (the
+  // mechanism D5 actually renames — `themeFor` now derives from `readDesignDoc` rather than its
+  // own `try/catch`, keeping the exact same silent-`undefined` policy) is exercised in the same
+  // test since it is the only current call site that reads approval.json from src/cli/check.ts.
+  it('AC-20260917-04-11: check --json continues to report screens/shells/themes unaffected by a truncated design/approval.json, and check --look continues to capture screenshots (theme capture never fails on an unreadable approval document)', async () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-badapproval-')
+    writeFileSync(path.join(host, 'design', 'approval.json'), '{"contractVersion":')
+
+    const check = runCheck(host)
+    expect(check.screens.map((s) => s.name).sort()).toEqual(['account', 'home'])
+    expect(check.shells.map((s) => s.name)).toEqual(['ConsoleShell'])
+    expect(check.themes).toEqual(['nova'])
+
+    let serve: Serve | undefined
+    try {
+      serve = await startServe(greenHost, 'mock-review-check-look-badapproval-')
+      writeFileSync(path.join(serve.host, 'design', 'approval.json'), '{"contractVersion":')
+
+      const r = run(serve.host, ['check', '--look', 'home', '--state', 'Default'])
+      expect(r.status).toBe(0)
+      const printed = r.stdout.trim().split('\n')
+      expect(printed).toContain('design/screenshots/home-Default-1280x800-light.png')
+      expect(existsSync(path.join(serve.host, 'design', 'screenshots', 'home-Default-1280x800-light.png'))).toBe(true)
+    } finally {
+      await stopServe(serve)
+    }
+  }, 60_000)
 
   it('AC-20260915-01-6: reports config loaded from mock.config.ts through the Vite runner', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-check-')

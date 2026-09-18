@@ -58,6 +58,51 @@ All writes go through `writeJsonAtomic` (write `<path>.tmp`, then `rename`).
 Liveness: `check` reports `serve.url` = the portfile's `url` only when
 `GET <url>/__mock-review/ping` answers 200 within 500 ms; any error or timeout is `null`.
 
+## Design document reads
+
+`design/notes.json` and `design/approval.json` have one readability verdict:
+`readDesignDoc(cwd, kind: 'notes' | 'approval')` in `src/files/json.ts`, beside
+`ensureDesignFiles`. It returns `{ok: true, doc}` or `{ok: false, error}` and is THE predicate —
+every reader in the package derives from it, then chooses its own policy explicitly; nobody writes
+its own `try { readJson(...) } catch`. `readDesignDocOrThrow` is the write path's form of the same
+verdict, thrown as `UnparseableDesignFileError` and turned into a 409 by both `POST notes` and
+`POST approval`. `ok: false` never means the file is absent — `ensureDesignFiles` runs first in
+every host-touching verb and creates both documents when missing — it means the file exists and
+cannot be used: malformed JSON, an unknown `contractVersion`, or a shape this package has not
+learned.
+
+Five call sites, four deliberate policies, one fact underneath: `buildState` (`GET state`) reports
+the outcome and serves the existing `EMPTY_NOTES`/`EMPTY_APPROVAL` value as a documented
+**placeholder**, never a claim that the file is actually empty — every other field (`screens`,
+`shells`, `journeys`, `themes`, `config`, `inventory`) is built before this read runs and is
+unaffected by it failing. Both `POST notes` and `POST approval` refuse 409, file left
+byte-identical. `sweep` and `answer` refuse on stderr at exit 2 with
+`design/<file> exists but does not parse — refusing to write until it's fixed by hand`, no zod
+stack. `check`'s `themeFor` derives from `readDesignDoc` too but deliberately keeps its own
+permissive policy on top of it, returning `undefined` on an unreadable or unpicked approval
+document — a screenshot capture must never fail over a theme.
+
+`GET /__mock-review/state` carries the verdict as a required, always-emitted `documents: {notes:
+DocOutcome, approval: DocOutcome}`, `DocOutcome = {ok: true} | {ok: false, error: string}`
+(`.strict()` on both members — no `error` when `ok: true`, `error` required when `ok: false`). It
+is per-document and structured rather than one joined string because a client-page job that wants
+to word an error or gate a write **per file** cannot match a string back to a file without
+re-parsing it. The page does not read `documents` yet and surfaces no read-failure state — whether
+the client ever sees an unreadable document, its wording, and whether it gates the composer are
+open questions carried to a later client-page spec; this mechanism only makes the fact available.
+
+Read-back document schemas (`src/schemas/notes.ts`, `src/schemas/approval.ts`) follow one written
+rule: **a read-back schema validates only what this package itself reads or writes; everything
+else passes through, and `contractVersion` is validated as "known", not "equal".** `Approval.theme`
+is `z.string().nullable().default(null)` under this rule, because the plugin's own `defaultApproval`
+fixture omits the key entirely. Schema normalisation this way is part of the read verdict, not
+drift from it — a document that parses with a default filled in is `ok: true`, and the filled value
+is what gets served, not the raw bytes. The rule is hygiene, not a fix: it lowers how often a
+document drifts out of readability but does not close the class, because the failure that started
+this — a *missing required key* — is not an unknown key, and no `.passthrough()` ever covers it.
+Reportability, not leniency, is what closes it; a future reader must not "fix" this class with
+another `.optional()`.
+
 ## The reviewer page
 
 `serve` mounts the package's Vite plugin on the host's own dev server. `GET /` — owner,

@@ -47,6 +47,7 @@ const EMPTY_STATE: ServerState = {
   violations: [],
   notes: { contractVersion: 1, notes: [], journeys: {} },
   approval: { contractVersion: 1, screens: {}, journeys: {}, theme: null },
+  documents: { notes: { ok: true }, approval: { ok: true } },
   role: 'owner',
 }
 

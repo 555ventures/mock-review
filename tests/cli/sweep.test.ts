@@ -121,6 +121,24 @@ describe('mock-review sweep (built dist/)', () => {
     ])
   })
 
+  // D5: `sweep --json` stops crashing with a raw zod stack on an unreadable design/notes.json —
+  // it refuses with the shared sentence on stderr at exit 2, leaving the file byte-identical.
+  it('AC-20260917-04-7: sweep --json on a truncated design/notes.json exits 2 with stderr naming the file and no zod stack on stdout, leaving it byte-identical', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-sweep-corrupt-')
+    mkdirSync(path.join(host, 'design'), { recursive: true })
+    const notesPath = path.join(host, 'design', 'notes.json')
+    writeFileSync(notesPath, '{"contractVersion":')
+    const before = readFileSync(notesPath, 'utf8')
+
+    const r = run(host, ['sweep', '--json'])
+
+    expect(r.status).toBe(2)
+    expect(r.stderr).toContain('design/notes.json exists but does not parse')
+    expect(r.stdout).toBe('')
+    expect(r.stderr).not.toMatch(/ZodError|node_modules[\\/]zod|at Object\.<anonymous>/)
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
+  })
+
   it('AC-20260915-01-20: text form prints "queue empty" on a host with no open items', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-sweep-')
     mkdirSync(path.join(host, 'design'), { recursive: true })

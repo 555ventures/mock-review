@@ -1,6 +1,6 @@
 ---
 date: 2026-09-17
-status: hardened
+status: done
 tier: critical
 area: server
 design: false
@@ -10,6 +10,8 @@ depended_on_by: []
 brief: n/a
 spiked: 2026-09-17
 open_markers: 0
+build_base: main
+diff_base: d033c4c90e82d10a46ef98479dabe033f040652c
 ---
 
 # Empty is not broken
@@ -39,6 +41,7 @@ the rest of the page still loads, and nothing on screen changes yet.
 | D5 | `src/cli/sweep.ts:37` and `src/cli/answer.ts:33` stop crashing with a raw zod stack on an unreadable document and refuse with the shared sentence (`design/<file> exists but does not parse — refusing to write until it's fixed by hand`) on stderr at exit 2. `src/cli/check.ts`'s `themeFor` **keeps** its silent fallback to `undefined` — now derived from `readDesignDoc` rather than its own `try/catch` — and its comment states that this is deliberate: a screenshot capture must not fail on an unpicked or unreadable theme  (AC-20260917-04-7, AC-20260917-04-11) | Every caller now derives from one verdict and then chooses its policy **explicitly**; the point is not that all five behave alike, it is that no policy is an accident of where the `try` was written |
 | D6 | The page is **not** touched beyond types. `src/ui/store/store.ts`'s `EMPTY_STATE` gains `documents: { notes: {ok:true}, approval: {ok:true} }` so the `ServerState` type still satisfies, and **no component reads `documents`**. Current rendering is byte-for-byte unchanged. The user-visible half — whether the client ever sees a read failure, its wording and placement, and whether the composer is disabled or the 409 is left to speak — is recorded in this spec's Rationale as **open user questions carried to the client-page spec** (`q12`), never defaulted here `[no-ac: types-only change with no observable surface; AC-20260917-04-4 pins that the served page state is otherwise unchanged]` | `docs/design/design-reference.md` is binding and frozen, and the user's standing rule is that a visible change is a user decision. Landing the mechanism invisibly is what lets the client-page spec decide the surface with the facts in hand instead of inheriting a default nobody chose |
 | D7 | A new `tests/unit/plugin-shapes.test.ts` holds **literal copies** of every design-document shape the plugin's verbs write today, each with a comment naming its source file and the `contractVersion` it was copied at, asserted to parse. Copied, never imported: there is no shared package, and a cross-repo import would couple this repo's test run to a sibling checkout (AC-20260917-04-6) | This is the test that would have caught both live instances before they shipped — the missing `approvedAt` (repaired by spec 02 D8) and the missing `theme` (A3). It is where the *next* unlearned field surfaces as a red test instead of a blank page |
+| D8 | **Schema normalisation is part of the read verdict, not drift from it.** AC-20260917-04-8's served-mutant assertion compares against `ApprovalSchema.parse(mutant)`, not against the raw mutant bytes. The `theme`-key-deleted mutant parses `ok: true` under D4's `.default(null)` and is therefore served with `theme: null` present — deep-equal to the raw mutant is false for that one case, and the test asserting it would force a choice between D4 and AC-20260917-04-8. AC-20260917-04-8 is amended in the same edit as this ruling (build-time, orchestrator) | D4 and AC-20260917-04-6 both pin default-fill explicitly and A4 is executed evidence, so the intent is not in doubt: the reader's contract is "what the schema says the document means", and a default is the schema speaking. AC-20260917-04-8's purpose is the `ok`-correspondence with the live schema as oracle, not byte-identical round-tripping — and comparing to `ApprovalSchema.parse(...)` preserves its "no field named in the test" property, which a hand-written `theme: null` expectation would destroy. Nothing observable moves: the served bytes are exactly what D4 already decided |
 
 ## File Plan
 
@@ -161,7 +164,7 @@ covers it. The closure is that an unreadable document is now **reportable** rath
 - **AC-20260917-04-5**: WHEN `design/notes.json` is unreadable and `GET state` runs on the green fixture host THE SYSTEM SHALL still report `screens` of length 2, a non-empty `shells`, `journeys` of length 1 and a non-null `config.name` — a failed design-document read SHALL NOT empty any analysis-derived field → writes tests/server/api.test.ts
 - **AC-20260917-04-6**: WHEN every literal document shape the plugin's verbs write today is parsed by this package's read-back schemas THE SYSTEM SHALL accept each one — including `{"contractVersion":1,"screens":{},"journeys":{}}` with **no** `theme` key (the plugin's `defaultApproval`, `claude-plugins/tests/mocks/mock-app-fixtures.js:95-97`), which the pre-change schema rejects with `invalid_type` at `theme`, and `{"contractVersion":1,"notes":[],"journeys":{}}` (its `defaultNotes`, `:91-93`); and the parsed approval's `theme` SHALL be `null` → writes tests/unit/plugin-shapes.test.ts
 - **AC-20260917-04-7**: WHEN `sweep --json` or `answer --note N1 --text x` runs on a host whose `design/notes.json` is the truncated text `{"contractVersion":` THE SYSTEM SHALL exit 2 with stderr containing `design/notes.json exists but does not parse` and no zod stack trace on stdout, leaving the file byte-identical → rewrites tests/cli/sweep.test.ts :: AC-20260915-01-18:
-- **AC-20260917-04-8**: WHEN a valid `design/approval.json` is mutated into each of — truncated JSON, `contractVersion` set to `3`, each key of the document object deleted in turn, and each leaf replaced by a wrong-typed value — THE SYSTEM SHALL, for every mutant, report `documents.approval.ok` equal to `ApprovalSchema.safeParse(mutant).success` (the live schema is the oracle, no field named in the test), AND for every mutant where that is `false` SHALL answer 409 naming `design/approval.json` to a `POST /__mock-review/approval`, AND for every mutant where it is `true` SHALL serve an `approval` deep-equal to the mutant → writes tests/unit/design-docs.test.ts
+- **AC-20260917-04-8**: WHEN a valid `design/approval.json` is mutated into each of — truncated JSON, `contractVersion` set to `3`, each key of the document object deleted in turn, and each leaf replaced by a wrong-typed value — THE SYSTEM SHALL, for every mutant, report `documents.approval.ok` equal to `ApprovalSchema.safeParse(mutant).success` (the live schema is the oracle, no field named in the test), AND for every mutant where that is `false` SHALL answer 409 naming `design/approval.json` to a `POST /__mock-review/approval`, AND for every mutant where it is `true` SHALL serve an `approval` deep-equal to `ApprovalSchema.parse(mutant)` — the schema's own normalisation is part of the read verdict, so the `theme`-key-deleted mutant is served with `theme: null` filled in per D4 (D8; still no field named in the test) → writes tests/unit/design-docs.test.ts
 - **AC-20260917-04-9**: WHEN `design/approval.json` is corrupt and a `POST /__mock-review/approval` runs THE SYSTEM SHALL CONTINUE TO answer 409 with `{"error":"design/approval.json exists but does not parse — refusing to write until it's fixed by hand"}` and leave the file byte-identical → reuses tests/server/api.test.ts :: review
 - **AC-20260917-04-11**: WHEN `check --json` runs on a host whose `design/approval.json` is the truncated text `{"contractVersion":` THE SYSTEM SHALL CONTINUE TO exit 0 and report its screens, shells and themes — a theme capture never fails on an unreadable approval document → rewrites tests/cli/check.test.ts :: AC-20260915-01-5:
 - **AC-20260917-04-10**: WHEN the reviewer page loads against the green fixture host THE SYSTEM SHALL CONTINUE TO render its notes panel, sidebar dots and journey panel exactly as before — no component reads `documents`, and no new error surface exists → reuses tests/browser/surfaces.test.ts :: AC-20260915-02-1: #/home
@@ -216,6 +219,46 @@ build batch, rebuilt wholesale at the next release. The paths leg's single `ment
 Two `SHALL CONTINUE TO` pins, both deliberate: AC-9 protects the 409 the write path already gives
 (the behaviour most likely to be "simplified" while its reader is being moved), and AC-10 protects
 the claim this spec rests on — that nothing visible changed.
+
+### Build and review record (2026-09-17)
+
+**Two ACs were already true on the untouched pre-image, and their tests are regression pins rather
+than red-phase proof.** AC-20260917-04-11's scenario cannot go red on pre-change code: the plain
+`check --json` path never reads `design/approval.json` at all, and the only call site that does —
+`themeFor`, reached exclusively by `check --look` — already swallowed a corrupt document silently
+before D5 moved it onto `readDesignDoc`. The rewritten `tests/cli/check.test.ts` test therefore
+proves `check --json` stays unaffected *and* exercises `check --look`'s theme capture against the
+same corrupt file, green before and after. AC-20260917-04-5 is the same shape: `buildState` already
+computed every analysis-derived field in a `try/catch` entirely prior to and independent of the
+design-document read, so a corrupt `notes.json` never emptied them, pre-D1. Both were verified
+against base `d033c4c` by extracting that commit and running the two tests on it. This is the
+`SHALL CONTINUE TO` category the spec already applies to AC-9 and AC-10 (marked `reuses`, no
+red-test obligation), mislabelled `writes`/`rewrites` in the File Plan — the ACs are honest, the
+File Plan's annotation was not.
+
+**Disposition — `leg:ac-matrix` rejected (2026-09-17, user-confirmed).** The AC-coverage leg
+counted AC-20260917-04-9 and AC-20260917-04-10 as uncovered on zero title hits across File Plan
+tests rows. Both are `reuses` rows whose carriers are pre-existing pins titled with their
+*original* AC-IDs, so zero title hits is the expected shape, not a gap; AC-10's carrier
+(`tests/browser/surfaces.test.ts`) is not a File Plan tests row at all, so the leg searched a set
+that by construction could not contain it. Both carriers were executed green independently
+(`api.test.ts :: review pass 3`, `surfaces.test.ts :: AC-20260915-02-1`). Rejected as a
+miscitation of the spec's own carrier annotations.
+
+**Gotchas eviction (2026-09-17).** The section was at its cap of 15, so admitting this spec's entry
+evicted the `.test-dist/cli.js` gotcha by **merge**: its content is already stated in full in
+`docs/canonical/package.md` § Tests and builds, which is where a standing fact about this repo's
+test-and-build layout belongs.
+
+**Advisory findings retained, not fixed here** (five softs, all executed-verified by the reviewer,
+none behaviour-affecting today): `readDesignDoc` absorbs an absent file into the "exists but does
+not parse" verdict, so its error text is untrue for ENOENT at the one caller that skips
+`ensureDesignFiles`; `readDesignDocOrThrow` re-implements the catch instead of wrapping
+`readDesignDoc`, leaving the two verdicts as two code paths that can still drift — the precise
+drift D1 set out to make impossible; `tests/unit/plugin-shapes.test.ts` covers only the plugin's
+fixture defaults and omits the shape `client waive` actually writes; AC-9's reused carrier asserts
+the 409 status and byte-identity but never the refusal sentence the AC quotes; and AC-8's mutant
+sweep replaces three values rather than each leaf.
 
 ## Canonical Delta
 
