@@ -316,7 +316,97 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
     }
   }, 60_000)
 
-  it("AC-20260915-02-18 (D1's PROJECT group): a PROJECT note saves with component: null and project: true, and opening its row opens the thread without changing the hash", async () => {
+  // AC-20260917-03-2 (D1): the panel's PROJECT group membership becomes `n.project === true`,
+  // never "not this screen" — a note pinned to a DIFFERENT screen must not appear anywhere in this
+  // screen's panel (not in THIS SCREEN, not in PROJECT). It is reached only through that other
+  // screen's own sidebar entry, never from here.
+  it('AC-20260917-03-2: an other-screen note appears nowhere in the panel; THIS SCREEN and PROJECT hold exactly one row each', async () => {
+    serve = await startServe(greenHost)
+    const { url: serveUrl, host: serveHost } = serve
+    const notesPath = path.join(serveHost, 'design', 'notes.json')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(path.dirname(notesPath), { recursive: true })
+    writeFileSync(
+      notesPath,
+      JSON.stringify({
+        contractVersion: 2,
+        notes: [
+          {
+            id: 'N001',
+            screen: 'home',
+            state: 'Default',
+            component: 'WalletSummary',
+            key: '0',
+            snippet: 'USD 128.50',
+            status: 'open',
+            thread: [{ by: 'owner', text: 'this screen note' }],
+          },
+          {
+            id: 'N002',
+            screen: 'account',
+            state: 'Default',
+            component: null,
+            key: null,
+            snippet: null,
+            status: 'open',
+            thread: [{ by: 'owner', text: 'a note on another screen entirely' }],
+          },
+          {
+            id: 'N003',
+            screen: null,
+            state: null,
+            component: null,
+            key: null,
+            snippet: null,
+            status: 'open',
+            thread: [{ by: 'owner', text: 'a product-wide note' }],
+            project: true,
+          },
+        ],
+        journeys: {},
+      }),
+    )
+
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serveUrl}/#/home`, { waitUntil: 'networkidle' })
+
+      const hereSection = page.locator('[data-notes-scroll]').filter({ hasText: /this screen/i })
+      const projectSection = page.locator('[data-notes-scroll]').filter({ hasText: /project/i })
+
+      await expect.poll(() => hereSection.getByText('this screen note').count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await hereSection.getByText('this screen note').count()).toBe(1)
+      await expect.poll(() => projectSection.getByText('a product-wide note').count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await projectSection.getByText('a product-wide note').count()).toBe(1)
+
+      // The account-screen note (N002) must appear nowhere in this panel — not in THIS SCREEN, not
+      // in PROJECT (the old `notesRest` rule would have put it in PROJECT as "not this screen").
+      expect(await hereSection.getByText('a note on another screen entirely').count()).toBe(0)
+      expect(await projectSection.getByText('a note on another screen entirely').count()).toBe(0)
+      expect(await page.getByText('a note on another screen entirely').count()).toBe(0)
+    } finally {
+      await page.close()
+    }
+  }, 60_000)
+
+  // AC-20260917-03-14 (D8): the PROJECT group's empty text changes with its narrowed meaning — it
+  // now holds only project notes, so "No other notes." (a claim about the retired "not this
+  // screen" rule) becomes "No project notes."
+  it('AC-20260917-03-14: the PROJECT group renders "No project notes." when it holds no project:true note', async () => {
+    serve = await startServe(greenHost)
+    const { url: serveUrl } = serve
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serveUrl}/#/home`, { waitUntil: 'networkidle' })
+      const projectSection = page.locator('[data-notes-scroll]').filter({ hasText: /project/i })
+      await expect.poll(() => projectSection.getByText('No project notes.').count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await projectSection.getByText('No other notes.').count()).toBe(0)
+    } finally {
+      await page.close()
+    }
+  }, 60_000)
+
+  it("AC-20260917-03-3 (rewrites AC-20260915-02-18, D1's PROJECT group): a PROJECT note saves with component: null and project: true, and opening its row opens the thread without changing the hash", async () => {
     serve = await startServe(greenHost)
     const { url: serveUrl, host: serveHost } = serve
     const page = await browser.newPage()
@@ -393,6 +483,43 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
       // screen and come back) — no draft dialog, no leftover marking mode.
       await page.goto(`${serveUrl}/#/home`, { waitUntil: 'networkidle' })
       expect(await page.getByRole('dialog', { name: /New note/i }).count()).toBe(0)
+    } finally {
+      await page.close()
+    }
+  }, 60_000)
+
+  // AC-20260917-03-21 (D11): under D3 a fresh screen (no notes, no approval.screens entry) has
+  // tone `null`, not `'answered'` — D5's amended clause hands that header off to D11, which keeps
+  // the "Approve screen" control reachable at `null` (no dot to paint, but the approve control
+  // still shows, since approving is the only way such a screen turns blue). AC-20260915-03-5 is
+  // the pre-existing approve-a-fresh-screen flow test in this same file and is left untouched —
+  // it is failing for this same reason and is the ui worker's to fix, not this test's.
+  it('AC-20260917-03-21: a screen with no notes and no approval.screens entry shows Approve screen with no status dot, and clicking it writes approval.screens', async () => {
+    serve = await startServe(greenHost)
+    const { url: serveUrl } = serve
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serveUrl}/#/home`, { waitUntil: 'networkidle' })
+
+      // Scope to the notes panel's own header (the right sidebar's `SidebarHeader`), not the left
+      // sidebar's per-screen dot (AC-20260917-03-5's own null-dot case) or any other status dot on
+      // the page.
+      const rightSidebar = page.locator('[data-slot="sidebar"][data-side="right"]')
+      const header = rightSidebar.locator('[data-slot="sidebar-header"]')
+      await expect.poll(() => header.count(), SLOW_POLL).toBeGreaterThan(0)
+
+      expect(await header.locator('span.rounded-full').count()).toBe(0)
+      const approveScreenButton = header.getByRole('button', { name: 'Approve screen' })
+      await expect.poll(() => approveScreenButton.count(), SLOW_POLL).toBeGreaterThan(0)
+
+      await approveScreenButton.click()
+      await page.getByRole('button', { name: 'Approve', exact: true }).click()
+
+      await expect.poll(async () => {
+        const res = await fetch(`${serveUrl}/__mock-review/state`)
+        const state = (await res.json()) as { approval: { screens: Record<string, unknown> } }
+        return state.approval.screens.home
+      }, SLOW_POLL).toBeDefined()
     } finally {
       await page.close()
     }

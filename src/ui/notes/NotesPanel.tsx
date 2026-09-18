@@ -9,10 +9,10 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../compone
 import { Sidebar, SidebarHeader } from '../components/ui/sidebar.js'
 import { NoteRow, StatusLine } from './notes-ui.js'
 import { SCREEN_ANCHOR, type UiNote } from './anchor.js'
-import { screenLabel, stateLabel, stepLabel } from '../store/labels.js'
+import { screenLabel, stateLabel } from '../store/labels.js'
 import { sameState, toneOf, type Tone } from '../store/selectors.js'
 
-export type NotesGroup = { key: 'here' | 'rest'; label: string; notes: UiNote[] }
+export type NotesGroup = { key: 'here' | 'project'; label: string; notes: UiNote[] }
 
 export function NotesPanel({
   role,
@@ -20,7 +20,7 @@ export function NotesPanel({
   state,
   screenTone: tone,
   here,
-  rest,
+  project,
   selected,
   onSelect,
   onAddNote,
@@ -30,23 +30,23 @@ export function NotesPanel({
   role: 'owner' | 'client'
   screen: string
   state: string
-  screenTone: Tone
+  screenTone: Tone | null
   here: UiNote[]
-  rest: UiNote[]
+  project: UiNote[]
   selected: string | null
   onSelect: (id: string, fromList: boolean) => void
-  onAddNote: (target: 'here' | 'rest') => void
+  onAddNote: (target: 'here' | 'project') => void
   onApproveScreen: () => void
   listRef: React.RefObject<HTMLDivElement | null>
 }) {
   const groups: NotesGroup[] = [
     { key: 'here', label: 'This screen', notes: here },
-    { key: 'rest', label: 'Project', notes: rest },
+    { key: 'project', label: 'Project', notes: project },
   ]
 
   return (
     <Sidebar side="right" collapsible="none" className="sticky top-0 h-svh w-80 border-l">
-      {role === 'owner' && tone === 'answered' && (
+      {role === 'owner' && (tone === 'answered' || tone === null) && (
         <SidebarHeader className="gap-2 border-b border-sidebar-border">
           <StatusLine
             tone={tone}
@@ -75,7 +75,7 @@ export function NotesPanel({
                   </div>
                   {g.notes.length === 0 ? (
                     <p className="px-3 text-sm text-muted-foreground">
-                      {g.key === 'here' ? 'No notes on this screen.' : 'No other notes.'}
+                      {g.key === 'here' ? 'No notes on this screen.' : 'No project notes.'}
                     </p>
                   ) : (
                     <ItemGroup className="gap-1.5 px-2">
@@ -89,9 +89,7 @@ export function NotesPanel({
                               : (n.component ?? 'Screen')
                         const noteState = n.state ?? ''
                         const what =
-                          n.project || (g.key === 'here' && sameState(noteState, state))
-                            ? part
-                            : `${n.screen === screen ? stateLabel(noteState) : stepLabel(n.screen ?? '', noteState)} · ${part}`
+                          n.project || sameState(noteState, state) ? part : `${stateLabel(noteState)} · ${part}`
                         return (
                           <NoteRow
                             key={n.id}

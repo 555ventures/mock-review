@@ -553,7 +553,7 @@ describe('mock-review server API (D6)', () => {
     expect(pingRes.status).toBe(200)
   })
 
-  it('AC-20260915-02-8/-9/-11 (D23): approveScreen for an unknown screen is 400 and writes nothing; a non-JSON body is 400, not 500; add ignores a caller id; update/remove of an unknown id is 404', async () => {
+  it('AC-20260915-02-8/-9/-11 (D23) / AC-20260917-03-17: approveScreen for an unknown screen is 400 and writes nothing; a non-JSON body is 400, not 500; add ignores a caller id; update/remove of an unknown id is 404', async () => {
     serve = await startServe(greenHost)
     const approvalPath = path.join(serve.host, 'design', 'approval.json')
     const notesPath = path.join(serve.host, 'design', 'notes.json')
@@ -989,6 +989,45 @@ describe('mock-review server API (D6)', () => {
 
     expect(state.inventory.some((row) => row.name === 'ThemeProvider')).toBe(false)
     expect(state.inventory.some((row) => row.name === 'WalletSummary')).toBe(true)
+  })
+
+  // AC-20260917-03-11 (D6): the write-path scope invariant runs on `op:'update'` too, against the
+  // MERGED note (existing + patch fields) — a patch that would leave an existing screen note
+  // claiming `project: true` is refused 400, after the 404 pre-check, before the write lands.
+  it('AC-20260917-03-11: an update that would merge project:true onto an existing screen note is refused 400, and design/notes.json is left byte-identical', async () => {
+    serve = await startServe(greenHost)
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
+
+    const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: {
+          screen: 'home',
+          state: 'Default',
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'open',
+          thread: [{ by: 'owner', text: 'a real screen note' }],
+        },
+      }),
+    })
+    expect(addRes.status).toBe(200)
+    const addedDoc = (await addRes.json()) as { notes: { id: string; screen: string | null }[] }
+    const id = addedDoc.notes.find((n) => n.screen === 'home')?.id as string
+    expect(id).toBeDefined()
+
+    const before = readFileSync(notesPath, 'utf8')
+    const updateRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'update', id, fields: { project: true } }),
+    })
+    expect(updateRes.status).toBe(400)
+    expect(await updateRes.json()).toEqual({ error: 'invalid notes patch' })
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
   })
 
   describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-14: viewport-driven device captions (D9) [env: SKIP_BROWSER]', () => {

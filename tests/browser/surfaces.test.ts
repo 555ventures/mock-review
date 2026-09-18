@@ -307,6 +307,39 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
+  // AC-20260917-03-18 (D9): an untouched journey (no `notes.journeys` entry — the default state
+  // of a fresh serve, since `design/notes.json` never ships committed, D9's own build gotcha)
+  // renders no status line in its own panel and no dot in the sidebar, matching each other exactly.
+  // Before D9, ScreenPage routed the journey's tone through `journeyTone`, which itself defaulted
+  // an untouched journey to `answered` — so the panel showed an actionable Approve button while
+  // the sidebar (already null-guarded by D5 in this same spec) showed nothing at all.
+  it('AC-20260917-03-18: an untouched journey (no conversation entry) shows no Approve control in its panel and no dot in the sidebar', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home?j=first-visit&step=0`, { waitUntil: 'networkidle' })
+
+      // The journey panel replaces the notes list while a journey is active (reference §8.1) —
+      // wait for its Reply control to confirm it has actually mounted before asserting Approve's
+      // absence (an absence check performed too early would pass for the wrong reason).
+      const replyButton = page.getByRole('button', { name: 'Reply' })
+      await expect.poll(() => replyButton.count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await page.getByRole('button', { name: 'Approve' }).count()).toBe(0)
+
+      // The sidebar's own per-journey badge (Journeys tab, the default side-tab) renders no colour
+      // dot at all for this same untouched journey.
+      const journeyItem = page
+        .locator('li[data-slot="sidebar-menu-item"]')
+        .filter({ has: page.getByRole('link', { name: 'First visit', exact: true }) })
+      const badge = journeyItem.locator('[data-slot="sidebar-menu-badge"]')
+      await expect.poll(() => badge.count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await badge.locator('span.rounded-full').count()).toBe(0)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
   it("AC-20260915-02-1/-6 (D21): the state switcher and the frame src both carry the example-key casing (Default), not meta.states' raw case", async () => {
     serve = await startServe(greenHost)
     const page = await browser.newPage()

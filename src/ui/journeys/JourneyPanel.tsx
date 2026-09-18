@@ -31,7 +31,7 @@ export function JourneyPanel({
 }: {
   title: string
   thread: ThreadEntry[]
-  tone: Tone
+  tone: Tone | null
   role: 'owner' | 'client'
   onReply: (text: string) => void
   onApprove: () => void

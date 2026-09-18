@@ -17,13 +17,11 @@ import { useJourneyGuide, type GuideStep } from '../journeys/useJourneyGuide.js'
 import { locate, type LocateEdge } from '../journeys/locate.js'
 import { href, type Route } from '../router/route.js'
 import { screenLabel } from '../store/labels.js'
-import { journeyTone, notesHere, notesRest, sameState, screenStates, screenTone } from '../store/selectors.js'
+import { journeyTone, notesHere, projectNotes, sameState, screenStates, screenTone } from '../store/selectors.js'
 import { getStore, useStore } from '../store/store.js'
 import type { Verdict } from '../notes/notes-ui.js'
 import type { JourneyConversation } from '../../schemas/index.js'
 import { useShortcuts } from './useShortcuts.js'
-
-let pendingOpen: string | null = null
 
 // A screen with no active journey needs a stable "no edges" value: `journey?.edges ?? []` would
 // build a brand-new array on every render, which is exactly the kind of unstable dependency
@@ -105,7 +103,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   const onFrameLoad = useCallback(() => setFrameLoads((n) => n + 1), [])
 
   const here = useMemo(() => notesHere(route.screen, notes), [route.screen, notes])
-  const rest = useMemo(() => notesRest(route.screen, notes), [route.screen, notes])
+  const project = useMemo(() => projectNotes(notes), [notes])
 
   const { ref: wsRef, avail } = useMeasure()
 
@@ -126,11 +124,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
       if (!n) return
       if (n.project) {
         getStore().setUi((u) => ({ selected: id, cardOpen: true, draft: u.draft && u.draft.text.trim() ? { ...u.draft, open: false } : null }))
-        return
-      }
-      if (n.screen !== route.screen) {
-        pendingOpen = id
-        location.hash = href({ kind: 'screen', screen: n.screen ?? '', state: n.state ?? undefined })
         return
       }
       getStore().setUi((u) => ({ selected: id, cardOpen: true, draft: u.draft && u.draft.text.trim() ? { ...u.draft, open: false } : null }))
@@ -156,14 +149,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   }, [selected])
 
   useEffect(() => {
-    if (pendingOpen && notes.some((n) => n.id === pendingOpen)) {
-      const id = pendingOpen
-      pendingOpen = null
-      select(id, false)
-    }
-  }, [notes, select])
-
-  useEffect(() => {
     if (!marking) getStore().setUi({ reanchor: null })
   }, [marking])
 
@@ -179,7 +164,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     getStore().setUi((u) => ({ cardOpen: false, draft: { viewport: v, box, text: u.draft?.text ?? '', open: true } }))
   }
 
-  const noteOnScreen = (target: 'here' | 'rest' = 'here') => {
+  const noteOnScreen = (target: 'here' | 'project' = 'here') => {
     getStore().setUi({
       showNotes: true,
       marking: false,
@@ -191,7 +176,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
         text: '',
         open: true,
         whole: true,
-        ...(target === 'rest' ? { about: 'project' as const } : {}),
+        ...(target === 'project' ? { about: 'project' as const } : {}),
       },
     })
   }
@@ -373,7 +358,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             state={state}
             screenTone={sTone}
             here={here}
-            rest={rest}
+            project={project}
             selected={selected}
             onSelect={select}
             onAddNote={(target) => noteOnScreen(target)}

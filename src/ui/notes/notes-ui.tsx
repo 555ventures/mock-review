@@ -32,8 +32,10 @@ export function StatusDot({ tone }: { tone: Exclude<PinTone, 'draft'> }) {
   return <span className={`size-2 shrink-0 rounded-full ${TONE[tone].pin}`} />
 }
 
-/** Dot + title (+ approve button and its confirmation while yellow) — one status line for journey
- * and screen mode. */
+/** Dot + title (+ approve button and its confirmation while yellow, or while untouched — D11) —
+ * one status line for journey and screen mode. `tone: null` (D11) means the screen carries no
+ * notes at all: no dot to paint (D5's no-grey-circle rule), but the approve control still shows,
+ * since approving is the only way such a screen turns blue. */
 export function StatusLine({
   tone,
   title,
@@ -41,7 +43,7 @@ export function StatusLine({
   description,
   onApprove,
 }: {
-  tone: Exclude<PinTone, 'draft'>
+  tone: Exclude<PinTone, 'draft'> | null
   title: string
   approveLabel: string
   description: string
@@ -51,9 +53,9 @@ export function StatusLine({
   return (
     <>
       <div className="flex min-h-8 items-center gap-2">
-        <StatusDot tone={tone} />
+        {tone && <StatusDot tone={tone} />}
         <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
-        {tone === 'answered' && (
+        {(tone === 'answered' || tone === null) && (
           <Button size="sm" onClick={() => setOpen(true)}>
             {approveLabel}
           </Button>
