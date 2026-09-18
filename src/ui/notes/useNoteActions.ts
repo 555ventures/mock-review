@@ -61,11 +61,10 @@ export function useNoteActions() {
     await refresh()
   }, [])
 
-  // D7: approving a journey both closes its conversation (blue tone, rule 33) and writes
-  // `approval.journeys[id].approvedAt` — the key the plugin's `--mark journey-approved` reads.
+  // D9: approving a journey closes its conversation (blue tone, rule 33) only — the
+  // `approveJourney` approval op is gone, and nothing renders `approvedAt` any more.
   const approveJourney = useCallback(async (id: string): Promise<void> => {
     await patchNotes({ op: 'journey', id, status: 'approved' })
-    await patchApproval({ op: 'approveJourney', id })
     await refresh()
   }, [])
 
@@ -74,8 +73,11 @@ export function useNoteActions() {
     await refresh()
   }, [])
 
-  const clientOk = useCallback(async (id: string): Promise<void> => {
-    await patchApproval({ op: 'clientOk', id })
+  // D7: the confirm is If-Match on the story hash — `beats` is the hash the page was served
+  // (`ServerJourney.beats`), echoed back verbatim so the server can tell a stale page from a
+  // fresh one.
+  const clientOk = useCallback(async (id: string, beats: string): Promise<void> => {
+    await patchApproval({ op: 'clientOk', id, beats })
     await refresh()
   }, [])
 

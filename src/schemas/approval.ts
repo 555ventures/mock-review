@@ -16,12 +16,19 @@ export const ScreenApprovalSchema = z
 
 export type ScreenApproval = z.infer<typeof ScreenApprovalSchema>
 
-/** D1: `journeys{}` map value. `.passthrough()` per D1 — the plugin's `client waive` adds
- * `reason`/`at` on top of `approvedAt`/`client`. */
+/** D8: `.passthrough()` and every key but `client` optional: the plugin's `client waive` writes
+ * `{client:'waived', reason, at, beats}` with NO `approvedAt`, and contract v2's
+ * `fields["approval.journeys{}"]` is `["client","beats","at?","reason?"]`. A required-but-nullable
+ * `approvedAt` rejected that document, and a rejected document is swallowed into EMPTY_APPROVAL
+ * with no error surfaced anywhere (A3). Existing v1 rows (`{approvedAt, client}`) still parse and
+ * round-trip both keys untouched (A4). */
 export const JourneyApprovalSchema = z
   .object({
-    approvedAt: z.string().nullable(),
     client: z.enum(['ok', 'waived']).nullable(),
+    beats: z.string().optional(),
+    at: z.string().optional(),
+    reason: z.string().optional(),
+    approvedAt: z.string().nullable().optional(),
   })
   .passthrough()
 

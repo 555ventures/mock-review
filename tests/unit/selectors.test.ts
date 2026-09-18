@@ -1,11 +1,13 @@
 // AC-20260915-02-4: D7 + reference §13 rules 2-5 tone derivations, and the "no `!.` in
 // src/ui/store/*.ts" no-non-null-assertion rule from D2.
+// AC-20260917-02-17 (D12): `toneOf` is the one crash guard for the new `deferred` note status —
+// `deferred` renders exactly as `approved` (a closed status), never a widened `Tone`/`PinTone`.
 import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { globSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { screenTone, stateTone, journeyTone } from '../../src/ui/store/selectors.js'
+import { screenTone, stateTone, journeyTone, toneOf, worst } from '../../src/ui/store/selectors.js'
 import type { Note } from '../../src/schemas/index.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -52,6 +54,30 @@ describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
 
   it('journeyTone defaults to answered when the journey has no conversation entry', () => {
     expect(journeyTone('first-visit', {})).toBe('answered')
+  })
+
+  // AC-20260917-02-17 (D12): `toneOf` is the one crash guard for the new `deferred` status —
+  // `deferred -> approved`, identity on the other three.
+  it('AC-20260917-02-17: toneOf(\'deferred\') returns \'approved\', and is the identity on open/answered/approved', () => {
+    expect(toneOf('deferred')).toBe('approved')
+    expect(toneOf('open')).toBe('open')
+    expect(toneOf('answered')).toBe('answered')
+    expect(toneOf('approved')).toBe('approved')
+  })
+
+  it('AC-20260917-02-17: worst() treats deferred as closed — nothing pending when every note is approved/deferred', () => {
+    expect(
+      worst([
+        { screen: 'home', state: null, component: null, key: null, snippet: null, status: 'deferred', thread: [] },
+        { screen: 'home', state: null, component: null, key: null, snippet: null, status: 'approved', thread: [] },
+      ] as unknown as Note[]),
+    ).toBeNull()
+  })
+
+  it('AC-20260917-02-17: journeyTone routes a deferred journey conversation through toneOf, returning approved', () => {
+    expect(
+      journeyTone('j', { j: { status: 'deferred', thread: [] } as unknown as { status: Note['status']; thread: [] } }),
+    ).toBe('approved')
   })
 
   it('src/ui/store/*.ts never uses `!.` non-null assertions (D2)', () => {

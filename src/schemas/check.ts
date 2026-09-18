@@ -2,8 +2,9 @@ import { z } from 'zod'
 import { ConfigSchema, NullConfigSchema } from './config.js'
 import { CONTRACT_VERSION } from './version.js'
 
-/** D5: the five error-severity finding kinds and the two warn-severity kinds (`twin` is stubbed
- * per D5 and never emitted in this spec, but the shape stays discriminable for a future waive). */
+/** D5: the five error-severity finding kinds and the three warn-severity kinds (`twin` is stubbed
+ * per D5 and never emitted in this spec, but the shape stays discriminable for a future waive).
+ * D3: `beats` is a new warn kind — one per journey whose steps are not all beat-bearing. */
 export const FindingSchema = z.discriminatedUnion('severity', [
   z
     .object({
@@ -15,7 +16,7 @@ export const FindingSchema = z.discriminatedUnion('severity', [
     .strict(),
   z
     .object({
-      kind: z.enum(['size', 'twin', 'states']),
+      kind: z.enum(['size', 'twin', 'states', 'beats']),
       severity: z.literal('warn'),
       file: z.string(),
       message: z.string(),
@@ -50,8 +51,17 @@ export const ShellSchema = z
 
 export type Shell = z.infer<typeof ShellSchema>
 
-/** D7: a step names a screen; an edge is an index pair with an optional label. */
-export const StepSchema = z.object({ screen: z.string() }).strict()
+/** D7/D1: a step names a screen and, when the host has written one, carries the client's own
+ * sentence (`beat`) and the raw state spelling (`state`); an edge is an index pair with an
+ * optional label and, when written, the client's own words for taking it (`say`). Absent fields
+ * are omitted from parse output, never emitted as `undefined` (A4). */
+export const StepSchema = z
+  .object({
+    screen: z.string(),
+    beat: z.string().optional(),
+    state: z.string().optional(),
+  })
+  .strict()
 export type Step = z.infer<typeof StepSchema>
 
 export const EdgeSchema = z
@@ -59,6 +69,7 @@ export const EdgeSchema = z
     from: z.number().int(),
     to: z.number().int(),
     label: z.string().optional(),
+    say: z.string().optional(),
   })
   .strict()
 export type Edge = z.infer<typeof EdgeSchema>
@@ -74,10 +85,13 @@ export const UnresolvedEdgeSchema = z
   .strict()
 export type UnresolvedEdge = z.infer<typeof UnresolvedEdgeSchema>
 
+/** D1: `persona` is the client's own description of who is walking this journey — optional,
+ * omitted when the host has not written one (A4). */
 export const JourneySchema = z
   .object({
     id: z.string(),
     title: z.string(),
+    persona: z.string().optional(),
     steps: z.array(StepSchema),
     edges: z.array(EdgeSchema),
     resolved: z.boolean(),

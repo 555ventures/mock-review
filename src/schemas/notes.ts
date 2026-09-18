@@ -23,7 +23,7 @@ export const NoteSchema = z
     component: z.string().nullable(),
     key: z.string().nullable(),
     snippet: z.string().nullable(),
-    status: z.enum(['open', 'answered', 'approved']),
+    status: z.enum(['open', 'answered', 'approved', 'deferred']),
     thread: z.array(ThreadEntrySchema),
     project: z.literal(true).optional(),
   })
@@ -34,7 +34,7 @@ export type Note = z.infer<typeof NoteSchema>
 /** D1: a journey's conversation entry inside `notes.journeys`. */
 export const JourneyConversationSchema = z
   .object({
-    status: z.enum(['open', 'answered', 'approved']),
+    status: z.enum(['open', 'answered', 'approved', 'deferred']),
     thread: z.array(ThreadEntrySchema),
   })
   .strict()

@@ -394,7 +394,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
-  it('AC-20260915-02-16: the client role hides owner-only controls and shows Confirm journey; a wrong token renders the owner page', async () => {
+  it('AC-20260917-02-20 (rewrites AC-20260915-02-16): the client role hides owner-only controls and shows Confirm journey; confirming still leaves approval.journeys client:"ok"; a wrong token renders the owner page', async () => {
     serve = await startServe(greenHost)
     const page = await browser.newPage()
     try {
@@ -507,11 +507,14 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     expect(editedHome).not.toBe(homeSrc)
     writeFileSync(homePath, editedHome)
 
+    // D13/Gotchas: anchored on the fixture's own beat-bearing home step (`{ screen: 'home', beat:
+    // 'I open the app' }`), not a whole-line source literal — the fixture's step shape changed
+    // under this spec, and a `.replace()` anchored on the retired shape would silently no-op.
     const journeysPath = path.join(host, 'src', 'journeys.ts')
     const journeysSrc = readFileSync(journeysPath, 'utf8')
     const editedJourneys = journeysSrc.replace(
-      'steps: [{ screen: \'home\' }, { screen: \'account\' }],',
-      'steps: [{ screen: \'home\', state: \'Low balance\' }, { screen: \'account\' }],',
+      "{ screen: 'home', beat: 'I open the app' }",
+      "{ screen: 'home', beat: 'I open the app', state: 'Low balance' }",
     )
     expect(editedJourneys).not.toBe(journeysSrc)
     writeFileSync(journeysPath, editedJourneys)

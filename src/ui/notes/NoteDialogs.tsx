@@ -18,6 +18,7 @@ import { Textarea } from '../components/ui/textarea.js'
 import { NoteActions, NotePin, NoteThread, VerdictDialog, type Verdict } from './notes-ui.js'
 import { SCREEN_ANCHOR, type UiNote, type Viewport } from './anchor.js'
 import { screenLabel, stateLabel, stepLabel } from '../store/labels.js'
+import { toneOf } from '../store/selectors.js'
 
 export type DraftState = {
   viewport: Viewport
@@ -134,7 +135,7 @@ export function NoteThreadDialog({
             <DialogContent className="sm:max-w-sm" onInteractOutside={(e) => confirm && e.preventDefault()}>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <NotePin tone={note.status}>{note.id}</NotePin>
+                  <NotePin tone={toneOf(note.status)}>{note.id}</NotePin>
                   {note.project ? 'Project note' : note.whole || note.component === SCREEN_ANCHOR ? 'Whole screen' : note.component}
                 </DialogTitle>
                 <DialogDescription>
@@ -161,7 +162,7 @@ export function NoteThreadDialog({
               <DialogFooter>
                 {role === 'owner' && (
                   <NoteActions
-                    status={note.status}
+                    status={toneOf(note.status)}
                     onDelete={() => setConfirm({ id: note.id, kind: 'delete' })}
                     onApprove={() => setConfirm({ id: note.id, kind: 'approve' })}
                     onReject={() => setConfirm({ id: note.id, kind: 'reject' })}

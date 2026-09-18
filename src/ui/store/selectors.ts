@@ -14,10 +14,21 @@ export function sameState(a: string | null | undefined, b: string | null | undef
   return a === b
 }
 
-/** Rule 2: worst-of — open beats answered beats nothing pending. */
+/** D12: `deferred` is a CLOSED status that this spec renders exactly as `approved`. It is a crash
+ * guard, not a rendering decision — nothing on the page can produce it here (only the `close` op,
+ * whose page caller is the client-page spec). THAT spec owns the real muted-grey tone and the
+ * `Deferred` badge, widens `Tone`/`PinTone`/`TONE`, amends design-reference §4 and §13, and
+ * DELETES this function; the compiler lists its call sites. */
+export function toneOf(status: Note['status']): Tone {
+  return status === 'deferred' ? 'approved' : status
+}
+
+/** Rule 2: worst-of — open beats answered beats nothing pending. `deferred` is explicitly closed
+ * (D12) rather than left to fall through the `if`/`if`/`return null` order below. */
 export function worst(notes: readonly Note[]): Tone | null {
   if (notes.some((n) => n.status === 'open')) return 'open'
   if (notes.some((n) => n.status === 'answered')) return 'answered'
+  if (notes.some((n) => n.status === 'deferred')) return null
   return null
 }
 
@@ -37,7 +48,8 @@ export function stateTone(screen: string, state: string, notes: readonly Note[])
 
 /** Rule 5: a journey with no conversation entry defaults to `answered`. */
 export function journeyTone(id: string, journeys: Record<string, JourneyConversation>): Tone {
-  return journeys[id]?.status ?? 'answered'
+  const status = journeys[id]?.status
+  return status === undefined ? 'answered' : toneOf(status)
 }
 
 /** Every note anchored to `screen`, any state (the notes panel's "THIS SCREEN" group). */

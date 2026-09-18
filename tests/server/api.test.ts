@@ -23,7 +23,13 @@ afterEach(async () => {
 
 type ServerState = {
   screens: { name: string }[]
-  journeys: { id: string }[]
+  journeys: {
+    id: string
+    beats: string | null
+    persona?: string
+    steps: { screen: string; beat?: string; state?: string }[]
+    edges: { from: number; to: number; label?: string; say?: string }[]
+  }[]
   inventory: { name: string }[]
   notes: { notes: unknown[]; journeys: Record<string, unknown> }
   approval: { screens: Record<string, unknown>; journeys: Record<string, unknown>; theme: string | null }
@@ -190,14 +196,265 @@ describe('mock-review server API (D6)', () => {
     })
     expect(approveScreenRes.status).toBe(403)
 
+    // AC-20260917-02-7/-9/-10 (D7): `clientOk` now requires the story hash `GET state` served —
+    // fetch it first rather than hand-typing a literal that would drift from the fixture's beats.
+    const state = await getState(serve.url)
+    const beats = (state.journeys[0] as unknown as { beats: string | null })?.beats
+    expect(typeof beats).toBe('string')
     const clientOkRes = await fetch(`${serve.url}/__mock-review/approval?client=replace-me`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ op: 'clientOk', id: 'first-visit' }),
+      body: JSON.stringify({ op: 'clientOk', id: 'first-visit', beats }),
     })
     expect(clientOkRes.status).toBe(200)
     const approval = (await clientOkRes.json()) as { journeys: Record<string, { client: string | null }> }
     expect(approval.journeys['first-visit']?.client).toBe('ok')
+  })
+
+  // AC-20260917-02-15/-16 (D10, D11): the narrow `close` op — a client may end a note or journey
+  // conversation THEY THEMSELVES opened; the 404 unknown-id pre-check runs before any ownership
+  // check; a client may never set a journey status directly through `op:'journey'`.
+  it('AC-20260917-02-15/-16: close op — client owns their own note, is refused another\'s, unknown id is 404 before ownership, owner may close any note or journey', async () => {
+    serve = await startServe(greenHost)
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
+
+    // A note whose thread[0].by is 'client' (added by the client, forced by clientNotesPatch).
+    const clientAddRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: { screen: 'home', state: 'Default', component: null, key: null, snippet: null, status: 'open', thread: [{ by: 'owner', text: 'mine' }] },
+      }),
+    })
+    expect(clientAddRes.status).toBe(200)
+    const clientDoc = (await clientAddRes.json()) as { notes: { id: string; thread: { by: string }[] }[] }
+    const clientNoteId = clientDoc.notes[clientDoc.notes.length - 1]?.id as string
+    expect(clientDoc.notes.find((n) => n.id === clientNoteId)?.thread[0]?.by).toBe('client')
+
+    // A note whose thread[0].by is 'session' (owner-added).
+    const ownerAddRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: { screen: 'home', state: 'Default', component: null, key: null, snippet: null, status: 'open', thread: [{ by: 'session', text: 'not yours' }] },
+      }),
+    })
+    expect(ownerAddRes.status).toBe(200)
+    const ownerDoc = (await ownerAddRes.json()) as { notes: { id: string }[] }
+    const sessionNoteId = ownerDoc.notes[ownerDoc.notes.length - 1]?.id as string
+
+    // Client closes their own note: 200, status persisted deferred.
+    const closeOwnRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'close', id: clientNoteId, status: 'deferred' }),
+    })
+    expect(closeOwnRes.status).toBe(200)
+    const afterOwn = JSON.parse(readFileSync(notesPath, 'utf8')) as { notes: { id: string; status: string }[] }
+    expect(afterOwn.notes.find((n) => n.id === clientNoteId)?.status).toBe('deferred')
+
+    // Client tries to close a session-raised note: 403, file byte-identical.
+    const beforeSession = readFileSync(notesPath, 'utf8')
+    const closeOthersRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'close', id: sessionNoteId, status: 'deferred' }),
+    })
+    expect(closeOthersRes.status).toBe(403)
+    expect(readFileSync(notesPath, 'utf8')).toBe(beforeSession)
+
+    // Unknown id: 404 before any ownership check, file byte-identical.
+    const beforeUnknown = readFileSync(notesPath, 'utf8')
+    const closeUnknownRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'close', id: 'N999', status: 'deferred' }),
+    })
+    expect(closeUnknownRes.status).toBe(404)
+    expect(readFileSync(notesPath, 'utf8')).toBe(beforeUnknown)
+
+    // Owner-role may close any note, regardless of who raised it.
+    const ownerCloseSessionRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'close', id: sessionNoteId, status: 'approved' }),
+    })
+    expect(ownerCloseSessionRes.status).toBe(200)
+
+    // AC-16: a client may not set a journey status directly with op:'journey' (no entry) — 403.
+    const clientJourneyRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'journey', id: 'first-visit', status: 'deferred' }),
+    })
+    expect(clientJourneyRes.status).toBe(403)
+
+    // AC-16: an owner may `close` a journey conversation; its status lands in
+    // notes.journeys[id].status, the key `--mark approved` reads for its exclusion rows.
+    const ownerCloseJourneyRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'close', id: 'first-visit', status: 'deferred' }),
+    })
+    expect(ownerCloseJourneyRes.status).toBe(200)
+    const afterJourney = JSON.parse(readFileSync(notesPath, 'utf8')) as { journeys: Record<string, { status: string }> }
+    expect(afterJourney.journeys['first-visit']?.status).toBe('deferred')
+  })
+
+  // AC-20260917-02-6 (D5/D6): GET state's journeys carry the story fields, and `beats` is a
+  // 12-character hex string computed over the RAW steps — never `undefined`/missing.
+  it('AC-20260917-02-6: GET state includes journeys[0].beats (12-hex), persona, steps[*].beat and edges[*].say', async () => {
+    serve = await startServe(greenHost)
+    const state = await getState(serve.url)
+    const journey = state.journeys[0]
+    expect(journey?.beats).toMatch(/^[0-9a-f]{12}$/)
+    expect(journey?.persona).toBe('a new customer')
+    expect(journey?.steps[0]?.beat).toBe('I open the app')
+    expect(journey?.steps[1]?.beat).toBe('I land on my account')
+    expect(journey?.edges[0]?.say).toBe('I tap Account')
+  })
+
+  it('AC-20260917-02-6: a journey with a beat-less step serves journeys[0].beats === null', async () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-serve-beatless-')
+    const journeysFile = path.join(host, 'src', 'journeys.ts')
+    const journeysSrc = readFileSync(journeysFile, 'utf8')
+    const beatless = journeysSrc.replace(
+      "{ screen: 'account', beat: 'I land on my account', state: 'default' }",
+      "{ screen: 'account' }",
+    )
+    expect(beatless).not.toBe(journeysSrc)
+    writeFileSync(journeysFile, beatless)
+
+    serve = await startServeIn(host)
+    const state = await getState(serve.url)
+    expect(state.journeys[0]?.beats).toBeNull()
+  })
+
+  // AC-20260917-02-7/-9/-10 (D7): the confirm round trip's three refusals and its success, in
+  // full — this is the whole If-Match hazard the spec exists to close.
+  describe('AC-20260917-02-7/-9/-10: POST approval clientOk (D7)', () => {
+    it('AC-20260917-02-7: a client posting the hash GET state served gets 200 and design/approval.json carries exactly client/beats/at (no approvedAt)', async () => {
+      serve = await startServe(greenHost)
+      const state = await getState(serve.url)
+      const beats = state.journeys[0]?.beats
+      expect(typeof beats).toBe('string')
+
+      const res = await fetch(`${serve.url}/__mock-review/approval?client=replace-me`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'clientOk', id: 'first-visit', beats }),
+      })
+      expect(res.status).toBe(200)
+
+      const approvalPath = path.join(serve.host, 'design', 'approval.json')
+      const onDisk = JSON.parse(readFileSync(approvalPath, 'utf8')) as { journeys: Record<string, Record<string, unknown>> }
+      const entry = onDisk.journeys['first-visit']
+      expect(entry).toBeDefined()
+      expect(Object.keys(entry ?? {}).sort()).toEqual(['at', 'beats', 'client'])
+      expect(entry?.client).toBe('ok')
+      expect(entry?.beats).toBe(beats)
+    })
+
+    it('AC-20260917-02-9: a stale beats value is refused 409 with the exact reload message, and the file is left byte-identical', async () => {
+      serve = await startServe(greenHost)
+      const approvalPath = path.join(serve.host, 'design', 'approval.json')
+      const before = readFileSync(approvalPath, 'utf8')
+
+      const res = await fetch(`${serve.url}/__mock-review/approval?client=replace-me`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'clientOk', id: 'first-visit', beats: 'deadbeef0000' }),
+      })
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'story changed since it was shown — reload' })
+      expect(readFileSync(approvalPath, 'utf8')).toBe(before)
+    })
+
+    it('AC-20260917-02-10: unknown journey id, null-beats journey, and a missing beats field are each refused 400 with the exact bodies, file byte-identical throughout', async () => {
+      serve = await startServe(greenHost)
+      const approvalPath = path.join(serve.host, 'design', 'approval.json')
+
+      const beforeGhost = readFileSync(approvalPath, 'utf8')
+      const ghostRes = await fetch(`${serve.url}/__mock-review/approval?client=replace-me`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'clientOk', id: 'ghost', beats: 'deadbeef0000' }),
+      })
+      expect(ghostRes.status).toBe(400)
+      expect(await ghostRes.json()).toEqual({ error: 'unknown journey ghost' })
+      expect(readFileSync(approvalPath, 'utf8')).toBe(beforeGhost)
+
+      // A beat-less host's journey serves `beats: null` — confirming it is refused.
+      const beatlessHost = copyFixtureHost(greenHost, 'mock-review-serve-confirm-beatless-')
+      const journeysFile = path.join(beatlessHost, 'src', 'journeys.ts')
+      const journeysSrc = readFileSync(journeysFile, 'utf8')
+      const beatless = journeysSrc.replace(
+        "{ screen: 'account', beat: 'I land on my account', state: 'default' }",
+        "{ screen: 'account' }",
+      )
+      expect(beatless).not.toBe(journeysSrc)
+      writeFileSync(journeysFile, beatless)
+      let beatlessServe: Serve | undefined
+      try {
+        beatlessServe = await startServeIn(beatlessHost)
+        const beatlessApprovalPath = path.join(beatlessHost, 'design', 'approval.json')
+        const beforeBeatless = readFileSync(beatlessApprovalPath, 'utf8')
+        const beatlessRes = await fetch(`${beatlessServe.url}/__mock-review/approval?client=replace-me`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'clientOk', id: 'first-visit', beats: 'deadbeef0000' }),
+        })
+        expect(beatlessRes.status).toBe(400)
+        expect(await beatlessRes.json()).toEqual({
+          error: 'journey first-visit has no beats — every step needs a sentence before a client can confirm it',
+        })
+        expect(readFileSync(beatlessApprovalPath, 'utf8')).toBe(beforeBeatless)
+      } finally {
+        await stopServe(beatlessServe)
+      }
+
+      const beforeMissing = readFileSync(approvalPath, 'utf8')
+      const missingRes = await fetch(`${serve.url}/__mock-review/approval?client=replace-me`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'clientOk', id: 'first-visit' }),
+      })
+      expect(missingRes.status).toBe(400)
+      expect(await missingRes.json()).toEqual({ error: 'invalid approval patch' })
+      expect(readFileSync(approvalPath, 'utf8')).toBe(beforeMissing)
+    })
+  })
+
+  // AC-20260917-02-11 (D8): the exact document the plugin's shipped `client waive` writes — no
+  // `approvedAt` — must parse, serve intact, and survive an unrelated theme patch unchanged.
+  it('AC-20260917-02-11: a waived journey entry with no approvedAt parses, serves intact from GET state, and survives an unrelated theme patch', async () => {
+    serve = await startServe(greenHost)
+    const approvalPath = path.join(serve.host, 'design', 'approval.json')
+    const waived = {
+      contractVersion: 2,
+      screens: {},
+      journeys: {
+        'first-visit': { client: 'waived', reason: 'no client', at: '2026-09-17T00:00:00.000Z', beats: '7c0be20327a0' },
+      },
+      theme: null,
+    }
+    writeFileSync(approvalPath, JSON.stringify(waived))
+
+    const state = await getState(serve.url)
+    expect(state.approval.journeys['first-visit']).toEqual(waived.journeys['first-visit'])
+    expect(state.approval.journeys).not.toEqual({})
+
+    const themeRes = await fetch(`${serve.url}/__mock-review/approval`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'theme', key: 'nova' }),
+    })
+    expect(themeRes.status).toBe(200)
+    const themed = (await themeRes.json()) as { journeys: Record<string, unknown>; theme: string | null }
+    expect(themed.theme).toBe('nova')
+    expect(themed.journeys['first-visit']).toEqual(waived.journeys['first-visit'])
   })
 
   it('AC-20260915-03-7 (AC-20260915-02-8/-10, D24): ?client= sets a Set-Cookie, the cookie alone grants client from a forwarded request across every gated route including the entry and its module import, and a Referer-only token or a stale/missing cookie is 403 with no file changed', async () => {
@@ -675,14 +932,18 @@ describe('mock-review server API (D6)', () => {
           'export const examples = {\n  Default: <Account />,\n  NoPhone: <Account />,\n}',
         ),
     )
+    // D13/Gotchas: anchored on the fixture's own beat-bearing account step's `state` value
+    // (`default`), not a whole-line source literal that breaks the moment the fixture's shape
+    // changes — the fixture's account step already carries a `state`, so this only needs to
+    // change its spelling.
     const journeysFile = path.join(host, 'src', 'journeys.ts')
-    writeFileSync(
-      journeysFile,
-      readFileSync(journeysFile, 'utf8').replace(
-        `steps: [{ screen: 'home' }, { screen: 'account' }]`,
-        `steps: [{ screen: 'home' }, { screen: 'account', state: 'no-phone' }]`,
-      ),
+    const journeysSrc = readFileSync(journeysFile, 'utf8')
+    const editedJourneys = journeysSrc.replace(
+      "{ screen: 'account', beat: 'I land on my account', state: 'default' }",
+      "{ screen: 'account', beat: 'I land on my account', state: 'no-phone' }",
     )
+    expect(editedJourneys).not.toBe(journeysSrc)
+    writeFileSync(journeysFile, editedJourneys)
 
     serve = await startServeIn(host)
     const res = await fetch(`${serve.url}/__mock-review/state`)

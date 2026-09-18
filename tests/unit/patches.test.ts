@@ -62,12 +62,18 @@ const config: Config = {
   client: { token: 'replace-me' },
 }
 
-function ctx() {
+// D7: `applyApprovalPatch`'s `clientOk` case derives the written `beats` from `ctx.beatsHash`,
+// never from the patch's own `beats` (that's the route layer's If-Match verification — D7's own
+// "verification stays in the endpoint, derivation in the ctx"). Every clientOk case in this file
+// posts `beats: '7c0be20327a0'`, so the stub returns that same literal for every journey id; a
+// case that needs the null (no-story) path passes its own ctx override instead of this default.
+function ctx(beatsHash: (journeyId: string) => string | null = (_journeyId: string) => '7c0be20327a0') {
   return {
     hash: (_name: string) => 'abc',
     config,
     statesOf: (_name: string) => ['default', 'empty'],
     screenshotsFor: (_name: string) => [] as string[],
+    beatsHash,
   }
 }
 
@@ -84,19 +90,57 @@ describe('AC-20260915-02-11: applyApprovalPatch', () => {
     expect(() => new Date(entry?.approvedAt ?? '').toISOString()).not.toThrow()
   })
 
-  it('approveJourney keeps an existing client:"ok" and sets approvedAt', () => {
+  // AC-20260917-02-8 (D7/D8): `approveJourney` no longer exists; `clientOk` is the sole journey
+  // approval op, and it now REQUIRES the story hash it was served (`beats`).
+  it('AC-20260917-02-8: clientOk over an empty journeys map writes an entry with exactly client/beats/at (no approvedAt)', () => {
+    const result = applyApprovalPatch(
+      EMPTY_APPROVAL,
+      { op: 'clientOk', id: 'first-visit', beats: '7c0be20327a0' },
+      ctx(),
+    )
+    const entry = result.journeys['first-visit']
+    expect(entry).toBeDefined()
+    expect(Object.keys(entry ?? {}).sort()).toEqual(['at', 'beats', 'client'])
+    expect(entry?.client).toBe('ok')
+    expect((entry as unknown as { beats?: string })?.beats).toBe('7c0be20327a0')
+    expect(() => new Date((entry as unknown as { at?: string })?.at ?? '').toISOString()).not.toThrow()
+  })
+
+  it('AC-20260917-02-8: clientOk over an existing v1-shaped entry preserves approvedAt untouched while setting client/beats/at', () => {
     const approval: Approval = {
       ...EMPTY_APPROVAL,
-      journeys: { 'first-visit': { approvedAt: null, client: 'ok' } },
+      journeys: { 'first-visit': { approvedAt: '2026-01-01T00:00:00.000Z', client: null } as Approval['journeys'][string] },
     }
-    const result = applyApprovalPatch(approval, { op: 'approveJourney', id: 'first-visit' }, ctx())
-    expect(result.journeys['first-visit']?.client).toBe('ok')
-    expect(result.journeys['first-visit']?.approvedAt).not.toBeNull()
+    const result = applyApprovalPatch(
+      approval,
+      { op: 'clientOk', id: 'first-visit', beats: '7c0be20327a0' },
+      ctx(),
+    )
+    const entry = result.journeys['first-visit'] as unknown as {
+      approvedAt?: string | null
+      client: string | null
+      beats?: string
+      at?: string
+    }
+    expect(entry.approvedAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(entry.client).toBe('ok')
+    expect(entry.beats).toBe('7c0be20327a0')
+    expect(typeof entry.at).toBe('string')
   })
 
   it('theme sets approval.theme', () => {
     const result = applyApprovalPatch(EMPTY_APPROVAL, { op: 'theme', key: 'nova' }, ctx())
     expect(result.theme).toBe('nova')
+  })
+
+  // AC-20260917-02-13 (D9): `approveJourney` is removed from `ApprovalPatchSchema` entirely — any
+  // role posting it is refused 400 `invalid approval patch` at the schema layer, never reaching
+  // `applyApprovalPatch` at all. Proven here at the schema (the route-level 400 is
+  // tests/server/api.test.ts's own AC-13 case).
+  it('AC-20260917-02-13: ApprovalPatchSchema refuses an approveJourney op outright', async () => {
+    const { ApprovalPatchSchema } = await import('../../src/schemas/patches.js')
+    const result = ApprovalPatchSchema.safeParse({ op: 'approveJourney', id: 'first-visit' })
+    expect(result.success).toBe(false)
   })
 })
 
@@ -159,5 +203,43 @@ describe('AC-20260915-02-12: notes patches un-approve a screen (D7 rule 6)', () 
     const result = applyNotesPatch(seeded.notes, { op: 'update', id, fields: { screen: 'account' } }, bothApproved)
     expect(result.approval.screens.home).toBeDefined()
     expect(result.approval.screens.account).toBeDefined()
+  })
+})
+
+// AC-20260917-02-14 (D10, D11): the narrow `close` op — a client (or owner) ends a note or
+// journey conversation they themselves opened, as `approved` or `deferred`. It never touches
+// `approval.screens` (rule 6 fires only on a note turning `open`, which `close` cannot produce),
+// and returns the input `approval` object BY IDENTITY so plugin.ts's `result.approval !==
+// approval` write-suppression holds (D10's own rationale).
+describe('AC-20260917-02-14: applyNotesPatch close op (D10)', () => {
+  const approvedHome: Approval = {
+    ...EMPTY_APPROVAL,
+    screens: {
+      home: { hash: 'abc', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
+    },
+  }
+
+  it('sets the target note status to deferred and returns the SAME approval object reference, leaving approval.screens.home present', () => {
+    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'open' }) as unknown as Note }, approvedHome)
+    const id = seeded.notes.notes[0]?.id as string
+    // The `add` above already un-approved home (rule 6) — re-seed a fresh approved doc so this
+    // case isolates `close`'s own behaviour, not `add`'s.
+    const result = applyNotesPatch(seeded.notes, { op: 'close', id, status: 'deferred' }, approvedHome)
+    expect(result.notes.notes.find((n) => n.id === id)?.status).toBe('deferred')
+    expect(result.approval).toBe(approvedHome)
+    expect(result.approval.screens.home).toBeDefined()
+  })
+
+  it('is a no-op on an unknown id, returning the notes document unchanged', () => {
+    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote() as unknown as Note })
+    const result = applyNotesPatch(seeded.notes, { op: 'close', id: 'N999', status: 'approved' }, approvedHome)
+    expect(result.notes).toEqual(seeded.notes)
+  })
+
+  it('close is allowed from any current status, e.g. approved -> deferred', () => {
+    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'approved' }) as unknown as Note })
+    const id = seeded.notes.notes[0]?.id as string
+    const result = applyNotesPatch(seeded.notes, { op: 'close', id, status: 'deferred' })
+    expect(result.notes.notes.find((n) => n.id === id)?.status).toBe('deferred')
   })
 })

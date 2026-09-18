@@ -17,9 +17,10 @@ import { useJourneyGuide, type GuideStep } from '../journeys/useJourneyGuide.js'
 import { locate, type LocateEdge } from '../journeys/locate.js'
 import { href, type Route } from '../router/route.js'
 import { screenLabel } from '../store/labels.js'
-import { notesHere, notesRest, sameState, screenStates, screenTone } from '../store/selectors.js'
+import { journeyTone, notesHere, notesRest, sameState, screenStates, screenTone } from '../store/selectors.js'
 import { getStore, useStore } from '../store/store.js'
 import type { Verdict } from '../notes/notes-ui.js'
+import type { JourneyConversation } from '../../schemas/index.js'
 import { useShortcuts } from './useShortcuts.js'
 
 let pendingOpen: string | null = null
@@ -33,6 +34,7 @@ let pendingOpen: string | null = null
 // high enough to stop the browser's normal per-frame throttling from masking it) and by removing
 // this exact line and watching the loop disappear.
 const EMPTY_EDGES: LocateEdge[] = []
+const EMPTY_JOURNEYS: Record<string, JourneyConversation> = {}
 
 // Same stability concern as `EMPTY_EDGES` above, for the brief window before the store's first
 // `fetchState()` resolves (`data` is `null`): `notes` feeds straight into `DeviceFrames`' own
@@ -357,11 +359,11 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             <JourneyPanel
               title={journey.title}
               thread={journeyThread}
-              tone={data?.notes.journeys[journey.id]?.status ?? 'answered'}
+              tone={journeyTone(journey.id, data?.notes.journeys ?? EMPTY_JOURNEYS)}
               role={role}
               onReply={(text) => void actions.replyJourney(journey.id, text, role)}
               onApprove={() => void actions.approveJourney(journey.id)}
-              onConfirm={() => void actions.clientOk(journey.id)}
+              onConfirm={() => void actions.clientOk(journey.id, journey.beats ?? '')}
             />
           </div>
         ) : (

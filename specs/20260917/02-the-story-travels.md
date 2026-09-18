@@ -1,6 +1,6 @@
 ---
 date: 2026-09-17
-status: hardened
+status: implementing
 tier: critical
 area: schemas
 design: false
@@ -9,7 +9,9 @@ depends_on: [specs/20260917/01-contract-version-2.md]
 depended_on_by: [specs/20260917/03-the-panel-and-the-dots-tell-the-truth.md]
 brief: n/a
 spiked: 2026-09-17
+build_base: main
 open_markers: 0
+diff_base: 8c847d88c80440a522a6ac8778327134b55d0139
 ---
 
 # The story travels

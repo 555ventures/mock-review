@@ -3,8 +3,9 @@ import type { Journey } from '../schemas/index.js'
 export type JourneyInput = {
   id: string
   title: string
-  steps: { screen: string }[]
-  edges: { from: number; to: number; label?: string }[]
+  persona?: string | undefined
+  steps: { screen: string; beat?: string | undefined; state?: string | undefined }[]
+  edges: { from: number; to: number; label?: string | undefined; say?: string | undefined }[]
 }
 
 /**
@@ -47,6 +48,7 @@ export function journeyReport(journeys: JourneyInput[], htmlOf: (screenName: str
     return {
       id: journey.id,
       title: journey.title,
+      ...(journey.persona !== undefined ? { persona: journey.persona } : {}),
       steps: journey.steps,
       edges: journey.edges,
       resolved: unresolved.length === 0,
