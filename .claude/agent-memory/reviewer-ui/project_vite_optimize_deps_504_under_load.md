@@ -2,6 +2,7 @@
 name: project-vite-optimize-deps-504-under-load
 description: AC-15's theme-stylesheet flake root cause — a Vite dev-server "504 Outdated Optimize Dep" aborts the frame's entire script under heavy concurrent load, not a src/ui/** or entry.tsx logic bug
 metadata:
+  reviewed: 2026-09-17
   type: project
 ---
 

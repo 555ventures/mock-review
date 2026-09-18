@@ -31,7 +31,7 @@ function note(fields: Partial<Note> & Pick<Note, 'screen' | 'status'>): Note {
 }
 
 describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
-  it('screenTone is worst-of its notes: open beats answered', () => {
+  it('AC-20260917-03-15: screenTone is worst-of its notes: open beats answered', () => {
     const notes = [note({ screen: 'home', status: 'answered' }), note({ screen: 'home', status: 'open' })]
     expect(screenTone('home', notes, { screens: {}, journeys: {}, contractVersion: 1, theme: null })).toBe('open')
   })
@@ -52,7 +52,7 @@ describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
     expect(screenTone('home', [], { screens: {}, journeys: {}, contractVersion: 1, theme: null })).toBeNull()
   })
 
-  it('screenTone reports approved when approval.screens[name] exists', () => {
+  it('AC-20260917-03-16: screenTone reports approved when approval.screens[name] exists', () => {
     const notes = [note({ screen: 'home', status: 'approved' })]
     const approval = {
       screens: { home: { hash: 'x', approvedAt: 'now', states: [], viewports: [], schemes: [], screenshots: [] } },

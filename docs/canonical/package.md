@@ -236,3 +236,22 @@ and `react-dom` are peers, and `playwright` is an optional peer. The runtime `de
 carry the reviewer's UI libraries (`radix-ui`, `cmdk`, `lucide-react`, `class-variance-authority`,
 `clsx`, `tailwind-merge`, `react-resizable-panels`, `tw-animate-css`, `@fontsource-variable/geist`);
 `tailwindcss ^4` is a peer; the host provides `@vitejs/plugin-react` and `@tailwindcss/vite`.
+
+## Note scope and the status dots
+
+A note is one of exactly two kinds. A **project note** carries `project: true` and no screen,
+state, component, key or snippet; it is a product-wide request that belongs to no screen. A
+**screen note** carries a real `screen` and no `project` marker. The write path enforces the pair
+— `POST notes` answers 400 for an `add`, or an `update` whose merged result, that claims one kind
+while carrying the other's fields. The read-back schemas stay permissive on purpose, so a
+document written by an older build always loads.
+
+The reviewer page's notes panel shows exactly two groups: the notes on the screen being viewed,
+and the project's own notes. A note anchored to another screen is never listed; it is reached
+through that screen's sidebar entry.
+
+A status dot reports where its own item sits in the review lifecycle, over its own notes only:
+red when any note is open, yellow when none is open and any is answered, blue when it has notes
+and every one is approved, and no dot at all when nothing has been raised. A screen with no notes
+shows blue only when the owner used the separate "Approve screen" control. Journeys derive their
+dot from their own conversation and never from the screens their steps visit.

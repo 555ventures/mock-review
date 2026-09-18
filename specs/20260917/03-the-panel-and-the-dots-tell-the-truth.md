@@ -1,6 +1,6 @@
 ---
 date: 2026-09-17
-status: implementing
+status: done
 tier: critical
 area: ui
 design: false
@@ -219,7 +219,7 @@ refused with 400 (D6). Nothing rewrites it silently.
 - **AC-20260917-03-14**: WHEN the PROJECT group holds no `project: true` note THE SYSTEM SHALL render the empty text `No project notes.` → writes tests/browser/roundtrip.test.ts
 - **AC-20260917-03-15**: WHEN `screenTone('home', notes, approval)` runs with `notes = [{screen:'home',status:'answered'},{screen:'home',status:'open'}]` THE SYSTEM SHALL CONTINUE TO return `'open'` → reuses tests/unit/selectors.test.ts :: screenTone is worst-of its notes: open beats answered
 - **AC-20260917-03-16**: WHEN `screenTone('home', [], approval)` runs with `approval.screens.home` present THE SYSTEM SHALL CONTINUE TO return `'approved'` → reuses tests/unit/selectors.test.ts :: screenTone reports approved when approval.screens[name] exists
-- **AC-20260917-03-17**: WHEN `POST /__mock-review/notes` receives an `add` whose `note` carries an `id` THE SYSTEM SHALL CONTINUE TO answer `400` → reuses tests/server/api.test.ts :: AC-20260915-02-9: POST notes {op:add} persists
+- **AC-20260917-03-17**: WHEN `POST /__mock-review/notes` receives an `add` whose `note` carries an `id` THE SYSTEM SHALL CONTINUE TO answer `400` → reuses tests/server/api.test.ts :: AC-20260915-02-8/-9/-11 (D23): approveScreen for an unknown screen is 400 and writes nothing; a non-JSON body is 400, not 500; add ignores a caller id; update/remove of an unknown id is 404
 - **AC-20260917-03-18**: WHEN the journey panel renders a journey with no conversation entry THE SYSTEM SHALL render no status line and no dot, matching that journey's sidebar entry (today the panel shows an `answered` tone while the sidebar will show none) → writes tests/browser/surfaces.test.ts
 - **AC-20260917-03-19**: WHEN `worst([{status:'deferred'},{status:'approved'}])` runs THE SYSTEM SHALL return `'approved'`, superseding spec 02's pin of `null` for that same input → rewrites tests/unit/selectors.test.ts :: journeyTone
 - **AC-20260917-03-20**: WHEN `toneOf('deferred')` runs THE SYSTEM SHALL CONTINUE TO return `'approved'`, and WHEN `journeyTone('j', {j:{status:'deferred',thread:[]}})` runs THE SYSTEM SHALL CONTINUE TO return `'approved'` → reuses tests/unit/selectors.test.ts :: journeyTone
@@ -264,6 +264,21 @@ refused with 400 (D6). Nothing rewrites it silently.
   simply cannot be updated until the contradiction is resolved.
 
 ## Rationale
+
+Two build-time departures, folded from this spec's deviations sidecar at close (2026-09-17), both
+one-offs rather than recurring classes:
+
+- **AC-20260917-03-21's test was never observed red.** That AC did not exist when red-check ran —
+  it was created mid-build by the user ruling recorded as D11, and its implementation and its test
+  were authored concurrently in the same worktree, the implementation landing first. The behaviour
+  it pins was demonstrably broken beforehand: `tests/browser/roundtrip.test.ts :: AC-20260915-03-5`
+  failed on the `Approve screen` button never appearing, executed before the ruling was taken to
+  the user.
+- **AC-20260917-03-17's citation was corrected at review.** It pointed at the happy-path add test,
+  which never sends a caller `id` and never asserts 400. The behaviour it pins lives in the test
+  titled `AC-20260915-02-8/-9/-11 (D23): …`, whose `add ignores a caller id` clause asserts the
+  400. The citation now points there and that title carries this AC's ID, following this repo's
+  precedent of appending a reuse AC-ID to an already-multi-ID title.
 
 The user reported "a screen note derived by annotation is displayed as project notes" and, when the
 first reading was that the heading was merely misnamed, rejected that framing outright: a project

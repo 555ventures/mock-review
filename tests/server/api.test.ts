@@ -553,7 +553,7 @@ describe('mock-review server API (D6)', () => {
     expect(pingRes.status).toBe(200)
   })
 
-  it('AC-20260915-02-8/-9/-11 (D23): approveScreen for an unknown screen is 400 and writes nothing; a non-JSON body is 400, not 500; add ignores a caller id; update/remove of an unknown id is 404', async () => {
+  it('AC-20260915-02-8/-9/-11 (D23) / AC-20260917-03-17: approveScreen for an unknown screen is 400 and writes nothing; a non-JSON body is 400, not 500; add ignores a caller id; update/remove of an unknown id is 404', async () => {
     serve = await startServe(greenHost)
     const approvalPath = path.join(serve.host, 'design', 'approval.json')
     const notesPath = path.join(serve.host, 'design', 'notes.json')
