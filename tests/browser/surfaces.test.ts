@@ -492,42 +492,91 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
   // op-level gate answers 403 and the reply textarea clears, losing what they typed. The reply
   // itself still needs a server-side `reply` op (staged separately); this pins that the refusal is
   // now *visible*, and that a write 403 does NOT blank the page the way a dead token does.
+  // Gate repair (spec 02, 2026-09-18): this test used to produce its 403 by having a client
+  // Reply to a note (`op:'update'` under the pre-image). D1/D2 make a client reply `op:'reply'`,
+  // which the server now ADMITS (200) — see
+  // specs/20260918/02-one-reply-and-the-page-ends-a-note.deviations.md. `op:'update'` is still
+  // UNCONDITIONALLY refused for a client role — `clientNotesOpPatch` (src/server/plugin.ts)
+  // returns `null` for it regardless of ownership, D2's own point being that only `add`/`reply`/
+  // `close` get an entry point at all. The one client-reachable UI path that still sends
+  // `op:'update'` is Re-anchor, offered on a note whose anchor `snippet` no longer matches the
+  // DOM (reference rule 12) — this seeds exactly that note directly, then re-anchors it over
+  // WalletSummary using the same on-screen-to-document scale conversion as
+  // AC-20260915-02-18/-19 in tests/browser/roundtrip.test.ts.
   it('AC-20260917-02-20 (escape): a write the server refuses shows one notice instead of failing silently, and does not replace the page with the dead-link notice', async () => {
     serve = await startServe(greenHost)
+    const { url: serveUrl, host: serveHost } = serve
+    const notesPath = path.join(serveHost, 'design', 'notes.json')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(path.dirname(notesPath), { recursive: true })
+    // `snippet` deliberately does not appear anywhere in WalletSummary's rendered text
+    // ("{currency} {balance.toFixed(2)}" -> "USD 128.50", tests/fixtures/host's WalletSummary) —
+    // `anchorEl` (src/ui/notes/anchor.ts) then resolves the element by component+key but reports
+    // no box for it (rule 12), which is exactly what makes the card offer Re-anchor.
+    writeFileSync(
+      notesPath,
+      JSON.stringify({
+        contractVersion: 1,
+        notes: [
+          {
+            id: 'N001',
+            screen: 'home',
+            state: 'Default',
+            component: 'WalletSummary',
+            key: '0',
+            snippet: 'this snippet no longer matches anything on screen',
+            status: 'open',
+            thread: [{ by: 'client', text: 'change this' }],
+          },
+        ],
+        journeys: {},
+      }),
+    )
+
     const page = await browser.newPage()
     try {
-      await page.goto(`${serve.url}/?client=replace-me#/home`, { waitUntil: 'networkidle' })
+      await page.goto(`${serveUrl}/?client=replace-me#/home`, { waitUntil: 'networkidle' })
 
-      // The client may add a note (op:'add'), so make one to reply to.
-      await page.keyboard.press('m')
-      await expect.poll(() => page.locator('.cursor-crosshair').count(), SLOW_POLL).toBeGreaterThan(0)
-      const frame = page.locator('iframe').first()
-      const box = await frame.boundingBox()
-      if (!box) throw new Error('frame has no bounding box')
-      await page.mouse.move(box.x + 20, box.y + 20)
-      await page.mouse.down()
-      await page.mouse.move(box.x + 80, box.y + 60, { steps: 5 })
-      await page.mouse.up()
-      const newNote = page.getByRole('dialog', { name: /New note/i })
-      await expect.poll(() => newNote.isVisible(), SLOW_POLL).toBe(true)
-      await newNote.getByRole('textbox').fill('Please change this part')
-      await newNote.getByRole('button', { name: 'Save' }).click()
+      // The pin itself does not render for an outdated note (rule 12: no pin, not a stale one) —
+      // open the note through its panel row instead (NoteRow sets `data-row={id}`).
+      const row = page.locator('button[data-row="N001"]')
+      await expect.poll(() => row.count(), SLOW_POLL).toBeGreaterThan(0)
+      await row.first().click()
 
-      // Reopen it and reply — `op:'update'` is not admitted for a client, so the server answers 403.
-      // The pin's wrapper is `pointer-events-none` (Overlay.tsx) — the hit target is the labelled
-      // button inside it. Leave mark mode first, or the crosshair surface swallows the click.
-      await page.keyboard.press('Escape')
-      const pin = page.getByRole('button', { name: /^Open note / })
-      await expect.poll(() => pin.count(), SLOW_POLL).toBeGreaterThan(0)
-      await pin.first().click()
       const card = page.getByRole('dialog')
       await expect.poll(() => card.isVisible(), SLOW_POLL).toBe(true)
-      await card.getByRole('textbox').fill('one more thing')
-      await card.getByRole('button', { name: /Reply/i }).click()
+      const reanchorButton = card.getByRole('button', { name: 'Re-anchor' })
+      await expect.poll(() => reanchorButton.count(), SLOW_POLL).toBeGreaterThan(0)
+      await reanchorButton.click()
 
-      // The note card is a Radix modal, which `aria-hidden`s everything behind it — so the notice
-      // is unreachable by role while the card is open (gotcha AC-20260915-02-19). Locate it by
-      // attribute instead.
+      // Draw a new anchor over WalletSummary — same geometry conversion as
+      // AC-20260915-02-18 (tests/browser/roundtrip.test.ts): the frame is CSS-transform-scaled to
+      // fit its device width, so the on-screen drag must be converted through that scale.
+      const readWalletBox = () =>
+        page.locator('iframe').first().evaluate((el: HTMLIFrameElement) => {
+          const doc = el.contentDocument
+          const target = doc?.querySelector('[data-component="WalletSummary"]')
+          const rect = target?.getBoundingClientRect()
+          return rect
+            ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clientWidth: el.clientWidth }
+            : null
+        })
+      await expect.poll(readWalletBox, SLOW_POLL).not.toBeNull()
+      const walletBox = await readWalletBox()
+      const frameBox = await page.locator('iframe').first().boundingBox()
+      if (!walletBox || !frameBox) throw new Error('could not locate WalletSummary inside the frame')
+      const scale = walletBox.clientWidth > 0 ? frameBox.width / walletBox.clientWidth : 1
+      const startX = frameBox.x + walletBox.x * scale + 5
+      const startY = frameBox.y + walletBox.y * scale + 5
+      const dragDocWidth = Math.min(60, Math.max(8, walletBox.width - 4))
+      const dragDocHeight = Math.min(14, Math.max(8, walletBox.height - 2))
+      await page.mouse.move(startX, startY)
+      await page.mouse.down()
+      await page.mouse.move(startX + dragDocWidth * scale, startY + dragDocHeight * scale, { steps: 5 })
+      await page.mouse.up()
+
+      // The re-anchor write (`op:'update'`) is not admitted for a client at all — the notice must
+      // surface it, never fail silently.
       const alert = page.locator('[data-notice]')
       await expect.poll(() => alert.count(), SLOW_POLL).toBeGreaterThan(0)
       expect(await alert.first().textContent()).toContain('cannot make that change')
@@ -568,6 +617,65 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
       // D24: a present-but-mismatched ?client= clears any previously-set cookie.
       const cookies = await page.context().cookies(serve.url)
       expect(cookies.find((c) => c.name === 'mock-review-client')).toBeUndefined()
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  // AC-20260918-02-10 (D8): a client, on a note THEY THEMSELVES raised (thread[0].by ===
+  // 'client', the server's own ownership gate), sees Approve and Defer and never Delete or
+  // Reject; Defer persists status:'deferred'. A4: the Defer confirm (an AlertDialog, role
+  // `alertdialog`) stacks over the note card (a Radix `Dialog`), which then goes `aria-hidden` —
+  // the confirm is the topmost dialog once open, so role locators keep working for elements
+  // INSIDE it; the note card itself is queried before the confirm opens, while it is still
+  // topmost.
+  it('AC-20260918-02-10: a client sees Approve and Defer (never Delete/Reject) on a note they raised, and Defer persists status:deferred', async () => {
+    serve = await startServe(greenHost)
+    const { url: serveUrl, host: serveHost } = serve
+    const notesPath = path.join(serveHost, 'design', 'notes.json')
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serveUrl}/?client=replace-me#/home`, { waitUntil: 'networkidle' })
+
+      // The client raises a note (op:'add'), exactly as AC-20260917-02-20's escape test does —
+      // its thread[0].by is forced to 'client' server-side, so this is a note they own.
+      await page.keyboard.press('m')
+      await expect.poll(() => page.locator('.cursor-crosshair').count(), SLOW_POLL).toBeGreaterThan(0)
+      const frame = page.locator('iframe').first()
+      const box = await frame.boundingBox()
+      if (!box) throw new Error('frame has no bounding box')
+      await page.mouse.move(box.x + 20, box.y + 20)
+      await page.mouse.down()
+      await page.mouse.move(box.x + 80, box.y + 60, { steps: 5 })
+      await page.mouse.up()
+      const newNote = page.getByRole('dialog', { name: /New note/i })
+      await expect.poll(() => newNote.isVisible(), SLOW_POLL).toBe(true)
+      await newNote.getByRole('textbox').fill('Please change this part')
+      await newNote.getByRole('button', { name: 'Save' }).click()
+
+      await page.keyboard.press('Escape')
+      const pin = page.getByRole('button', { name: /^Open note / })
+      await expect.poll(() => pin.count(), SLOW_POLL).toBeGreaterThan(0)
+      await pin.first().click()
+
+      const card = page.getByRole('dialog')
+      await expect.poll(() => card.isVisible(), SLOW_POLL).toBe(true)
+
+      await expect.poll(() => card.getByRole('button', { name: 'Approve' }).count(), SLOW_POLL).toBeGreaterThan(0)
+      await expect.poll(() => card.getByRole('button', { name: 'Defer' }).count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await card.getByRole('button', { name: /Delete/ }).count()).toBe(0)
+      expect(await card.getByRole('button', { name: /Reject/ }).count()).toBe(0)
+
+      await card.getByRole('button', { name: 'Defer' }).click()
+      const confirm = page.getByRole('alertdialog')
+      await expect.poll(() => confirm.isVisible(), SLOW_POLL).toBe(true)
+      await confirm.getByRole('button', { name: 'Defer', exact: true }).click()
+
+      await expect.poll(() => {
+        const doc = JSON.parse(readFileSync(notesPath, 'utf8')) as { notes: { status: string }[] }
+        return doc.notes[doc.notes.length - 1]?.status
+      }, SLOW_POLL).toBe('deferred')
     } finally {
       await page.close()
       await stop()

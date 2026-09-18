@@ -453,23 +453,36 @@ describe('mock-review server API (D6)', () => {
     expect(ownerCloseSessionRes.status).toBe(200)
   })
 
-  // AC-20260917-02-16 (D11): a client may never set a journey status directly through
-  // `op:'journey'`; an owner may `close` a journey conversation instead, and its status lands
-  // in notes.journeys[id].status, the key `--mark approved` reads for its exclusion rows.
-  it('AC-20260917-02-16: op:\'journey\' is refused for a client (403, no entry point), owner close on a journey persists notes.journeys[id].status', async () => {
+  // AC-20260918-02-6 (D4, rewrites AC-20260917-02-16): `op:'journey'` is retired from the wire
+  // entirely — it is no longer a member of `NotesPatchSchema`'s discriminated union, so ANY
+  // request posting it is refused 400 at the schema, for both roles, with the file left
+  // byte-identical. Pre-image: 403 for a client (op-level admission gate, no `entry`), 200 for
+  // the owner (the reducer still had a `journey` case). The owner may still end a journey
+  // conversation, now only through `close` (D4's `entry` half is `reply`, its `status` half is
+  // `close`) — that assertion is unaffected by the retirement and stays in this test.
+  it('AC-20260918-02-6: op:\'journey\' is refused 400 for both client and owner, file byte-identical; owner close on a journey still persists notes.journeys[id].status', async () => {
     serve = await startServe(greenHost)
     const notesPath = path.join(serve.host, 'design', 'notes.json')
 
-    // AC-16: a client may not set a journey status directly with op:'journey' (no entry) — 403.
+    const beforeClient = readFileSync(notesPath, 'utf8')
     const clientJourneyRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ op: 'journey', id: 'first-visit', status: 'deferred' }),
     })
-    expect(clientJourneyRes.status).toBe(403)
+    expect(clientJourneyRes.status).toBe(400)
+    expect(readFileSync(notesPath, 'utf8')).toBe(beforeClient)
 
-    // AC-16: an owner may `close` a journey conversation; its status lands in
-    // notes.journeys[id].status, the key `--mark approved` reads for its exclusion rows.
+    const beforeOwner = readFileSync(notesPath, 'utf8')
+    const ownerJourneyRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'journey', id: 'first-visit', status: 'deferred' }),
+    })
+    expect(ownerJourneyRes.status).toBe(400)
+    expect(readFileSync(notesPath, 'utf8')).toBe(beforeOwner)
+
+    // Unaffected by the retirement: an owner still ends a journey conversation through `close`.
     const ownerCloseJourneyRes = await fetch(`${serve.url}/__mock-review/notes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -478,6 +491,112 @@ describe('mock-review server API (D6)', () => {
     expect(ownerCloseJourneyRes.status).toBe(200)
     const afterJourney = JSON.parse(readFileSync(notesPath, 'utf8')) as { journeys: Record<string, { status: string }> }
     expect(afterJourney.journeys['first-visit']?.status).toBe('deferred')
+  })
+
+  // AC-20260918-02-4 (D1/D2): the new `reply` op — the wire enum for `entry.by` is `'owner' |
+  // 'session'` ONLY (no request can claim to be the client), and a client-role request's entry is
+  // ALWAYS rewritten server-side to `by: 'client'`, exactly as `clientNotesOpPatch` already forces
+  // `add`'s thread. Proven for a note id AND a journey id — the journey being the path the page
+  // itself takes (`useNoteActions.replyJourney` loses its `role` parameter under D2 and always
+  // sends `by: 'owner'`, relying on this same rewrite).
+  it('AC-20260918-02-4: a client reply (op:reply) is persisted with by:client regardless of the wire value, for a note id and a journey id', async () => {
+    serve = await startServe(greenHost)
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
+
+    const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: {
+          screen: 'home',
+          state: 'Default',
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'answered',
+          thread: [{ by: 'session', text: 'fixed' }],
+        },
+      }),
+    })
+    expect(addRes.status).toBe(200)
+    const doc = (await addRes.json()) as { notes: { id: string }[] }
+    const noteId = doc.notes[doc.notes.length - 1]?.id as string
+
+    const noteReplyRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'reply', id: noteId, entry: { by: 'owner', text: 'hi' } }),
+    })
+    expect(noteReplyRes.status).toBe(200)
+    const afterNote = JSON.parse(readFileSync(notesPath, 'utf8')) as {
+      notes: { id: string; thread: { by: string; text: string }[]; status: string }[]
+    }
+    const persistedNote = afterNote.notes.find((n) => n.id === noteId)
+    expect(persistedNote?.thread.at(-1)).toEqual({ by: 'client', text: 'hi' })
+    expect(persistedNote?.status).toBe('open')
+
+    const journeyReplyRes = await fetch(`${serve.url}/__mock-review/notes?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'reply', id: 'first-visit', entry: { by: 'owner', text: 'still off' } }),
+    })
+    expect(journeyReplyRes.status).toBe(200)
+    const afterJourneyReply = JSON.parse(readFileSync(notesPath, 'utf8')) as {
+      journeys: Record<string, { thread: { by: string; text: string }[] }>
+    }
+    expect(afterJourneyReply.journeys['first-visit']?.thread.at(-1)).toEqual({ by: 'client', text: 'still off' })
+  })
+
+  // AC-20260918-02-5 (D3): `update.fields` refuses `status` and `thread` BY NAME — a `.omit()`
+  // would be a no-op on this passthrough schema and a bare `.strict()` would also reject the
+  // page-owned geometry extras (`rect`/`viewport`/`whole`) that must keep round-tripping. After
+  // this spec no browser request can carry a note's status or thread at all.
+  it('AC-20260918-02-5: update refuses status/thread by name (400, byte-identical) while anchor fields like rect/viewport still pass', async () => {
+    serve = await startServe(greenHost)
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
+
+    const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: { screen: 'home', state: 'Default', component: null, key: null, snippet: null, status: 'open', thread: [{ by: 'owner', text: 'x' }] },
+      }),
+    })
+    expect(addRes.status).toBe(200)
+    const doc = (await addRes.json()) as { notes: { id: string }[] }
+    const id = doc.notes[doc.notes.length - 1]?.id as string
+    const before = readFileSync(notesPath, 'utf8')
+
+    const statusRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'update', id, fields: { status: 'approved' } }),
+    })
+    expect(statusRes.status).toBe(400)
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
+
+    const threadRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'update', id, fields: { thread: [] } }),
+    })
+    expect(threadRes.status).toBe(400)
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
+
+    const anchorRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'update', id, fields: { rect: { x: 0, y: 0, w: 1, h: 1 }, viewport: 'desktop' } }),
+    })
+    expect(anchorRes.status).toBe(200)
+    expect(JSON.parse(readFileSync(notesPath, 'utf8')).notes.find((n: { id: string }) => n.id === id).rect).toEqual({
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    })
   })
 
   // AC-20260917-02-6 (D5/D6): GET state's journeys carry the story fields, and `beats` is a
@@ -757,10 +876,14 @@ describe('mock-review server API (D6)', () => {
     expect(callerIdRes.status).toBe(400)
     expect(readFileSync(notesPath, 'utf8')).toBe(notesBefore)
 
+    // AC-20260918-02-5 (D3): `fields.status` is now refused at the schema (400) for EVERY id,
+    // known or not — it can no longer reach the route layer's 404 pre-check at all. An anchor
+    // field (`component`) keeps this case testing what it always meant to test: an unknown id is
+    // 404, not a silent no-op 200.
     const updateUnknownRes = await fetch(`${serve.url}/__mock-review/notes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ op: 'update', id: 'N999', fields: { status: 'approved' } }),
+      body: JSON.stringify({ op: 'update', id: 'N999', fields: { component: 'WalletSummary' } }),
     })
     expect(updateUnknownRes.status).toBe(404)
     expect(readFileSync(notesPath, 'utf8')).toBe(notesBefore)

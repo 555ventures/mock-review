@@ -18,13 +18,17 @@ import {
 } from '../components/ui/alert-dialog.js'
 import type { ThreadEntry } from '../../schemas/index.js'
 
-export type PinTone = 'open' | 'answered' | 'approved' | 'draft'
+export type PinTone = 'open' | 'answered' | 'approved' | 'deferred' | 'draft'
 
-/** ONE status palette. Red = pending an AI fix, yellow = pending your approval, blue = approved. */
+/** ONE status palette. Red = pending an AI fix, yellow = pending your approval, blue = approved,
+ * muted grey = parked (D9: a fourth, distinct tone — a deferred note is separable at a glance
+ * from an approved one, though both count as closed in every aggregate dot, see
+ * `store/selectors.ts`'s `worst()`). */
 export const TONE: Record<PinTone, { box: string; pin: string }> = {
   open: { box: 'border-red-500 bg-red-500/5', pin: 'bg-red-500 text-white' },
   answered: { box: 'border-yellow-400 bg-yellow-400/10', pin: 'bg-yellow-400 text-yellow-950' },
   approved: { box: 'border-blue-500 bg-blue-500/5', pin: 'bg-blue-500 text-white' },
+  deferred: { box: 'border-gray-400 bg-gray-400/10', pin: 'bg-gray-400 text-gray-950' },
   draft: { box: 'border-dashed border-foreground bg-foreground/5', pin: '' },
 }
 
@@ -151,7 +155,7 @@ export function NoteThread({ entries, viewerRole }: { entries: ThreadEntry[]; vi
   )
 }
 
-export type Verdict = { id: string; kind: 'approve' | 'reject' | 'delete' }
+export type Verdict = { id: string; kind: 'approve' | 'reject' | 'delete' | 'defer' }
 
 export function VerdictDialog({
   verdict,
@@ -163,7 +167,13 @@ export function VerdictDialog({
   onConfirm: (v: Verdict) => void
 }) {
   const approve = verdict?.kind === 'approve'
-  const label = verdict?.kind === 'approve' ? 'Approve' : verdict?.kind === 'delete' ? 'Delete' : 'Reject'
+  const defer = verdict?.kind === 'defer'
+  const label = approve ? 'Approve' : verdict?.kind === 'delete' ? 'Delete' : defer ? 'Defer' : 'Reject'
+  const description = approve
+    ? 'The note moves to Done.'
+    : defer
+      ? 'It stays on the list, greyed out, until someone replies again.'
+      : 'The note and its thread are removed from the screen and the list.'
   return (
     <AlertDialog open={!!verdict} onOpenChange={(o) => !o && onCancel()}>
       <AlertDialogContent>
@@ -171,13 +181,14 @@ export function VerdictDialog({
           <AlertDialogTitle>
             {label} {verdict?.id}?
           </AlertDialogTitle>
-          <AlertDialogDescription>
-            {approve ? 'The note moves to Done.' : 'The note and its thread are removed from the screen and the list.'}
-          </AlertDialogDescription>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant={approve ? 'default' : 'destructive'} onClick={() => verdict && onConfirm(verdict)}>
+          <AlertDialogAction
+            variant={approve || defer ? 'default' : 'destructive'}
+            onClick={() => verdict && onConfirm(verdict)}
+          >
             {label}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -186,18 +197,49 @@ export function VerdictDialog({
   )
 }
 
-/** The actions a note allows, by status — the one place this rule lives. */
+/** D8: the actions a note allows, by role/ownership/status — the one place this rule lives.
+ * `own` is the server's own ownership gate (`thread[0].by === 'client'`), so a client never sees
+ * a control the server would refuse anyway.
+ *
+ * | viewer | status | buttons |
+ * | --- | --- | --- |
+ * | owner | open | Delete |
+ * | owner | answered | Reject, Approve, Defer |
+ * | owner | approved/deferred | none |
+ * | client (own note) | open/answered | Approve, Defer |
+ * | client (any other) | any | none |
+ */
 export function NoteActions({
+  role,
+  own,
   status,
   onApprove,
   onReject,
   onDelete,
+  onDefer,
 }: {
+  role: 'owner' | 'client'
+  own: boolean
   status: Exclude<PinTone, 'draft'>
   onApprove: () => void
   onReject: () => void
   onDelete: () => void
+  onDefer: () => void
 }) {
+  if (role === 'client') {
+    if (own && (status === 'open' || status === 'answered'))
+      return (
+        <>
+          <Button type="button" variant="outline" onClick={onApprove}>
+            Approve
+          </Button>
+          <Button type="button" variant="outline" onClick={onDefer}>
+            Defer
+          </Button>
+        </>
+      )
+    return null
+  }
   if (status === 'open')
     return (
       <Button type="button" variant="destructive" onClick={onDelete}>
@@ -212,6 +254,9 @@ export function NoteActions({
         </Button>
         <Button type="button" variant="outline" onClick={onApprove}>
           Approve
+        </Button>
+        <Button type="button" variant="outline" onClick={onDefer}>
+          Defer
         </Button>
       </>
     )

@@ -12,6 +12,7 @@ import { applyNotesPatch, applyApprovalPatch } from '../../src/server/patches.js
 import { NotesSchema, EMPTY_NOTES, EMPTY_APPROVAL } from '../../src/schemas/index.js'
 import { NotesPatchSchema } from '../../src/schemas/patches.js'
 import type { Note, Approval, Config } from '../../src/schemas/index.js'
+import type { NotesPatch } from '../../src/schemas/patches.js'
 
 function baseNote(overrides: Partial<Note> = {}): Omit<Note, 'id'> {
   return {
@@ -242,6 +243,98 @@ describe('AC-20260917-02-14: applyNotesPatch close op (D10)', () => {
     const id = seeded.notes.notes[0]?.id as string
     const result = applyNotesPatch(seeded.notes, { op: 'close', id, status: 'deferred' })
     expect(result.notes.notes.find((n) => n.id === id)?.status).toBe('deferred')
+  })
+})
+
+// AC-20260918-02-1/-2/-3 (D1): the new `reply` op — the one operation that appends to a thread.
+// The reducer's input for `op:'reply'` is the WIDENED `AppliedNotesPatch` shape (`entry.by` can be
+// `'client'` here — only the HTTP boundary parses the narrow wire enum), so these casts through
+// `NotesPatch` mirror the file's existing `as unknown as Note` idiom rather than reaching for a
+// type this spec has not yet added.
+describe('AC-20260918-02-1/-2: applyNotesPatch reply op (D1)', () => {
+  it('AC-20260918-02-1: a reply from the client to an answered note appends the entry and reopens it (thread 1 -> 2, answered -> open)', () => {
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ status: 'answered', thread: [{ by: 'session', text: 'fixed' }] }) as unknown as Note,
+    })
+    const id = seeded.notes.notes[0]?.id as string
+    expect(seeded.notes.notes[0]?.thread).toHaveLength(1)
+
+    const result = applyNotesPatch(seeded.notes, {
+      op: 'reply',
+      id,
+      entry: { by: 'client', text: 'still wrong' },
+    } as unknown as NotesPatch)
+    const note = result.notes.notes.find((n) => n.id === id)
+    expect(note?.thread).toHaveLength(2)
+    expect(note?.thread?.[1]).toEqual({ by: 'client', text: 'still wrong' })
+    expect(note?.status).toBe('open')
+  })
+
+  it('AC-20260918-02-2: a reply from the session sets status to answered from any source status (open, deferred)', () => {
+    for (const from of ['open', 'deferred'] as const) {
+      const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: from }) as unknown as Note })
+      const id = seeded.notes.notes[0]?.id as string
+      const result = applyNotesPatch(seeded.notes, {
+        op: 'reply',
+        id,
+        entry: { by: 'session', text: 'moved it' },
+      } as unknown as NotesPatch)
+      expect(result.notes.notes.find((n) => n.id === id)?.status).toBe('answered')
+    }
+  })
+})
+
+// AC-20260918-02-3 (D1): `ReplyEntrySchema`'s `text` is `z.string().trim().min(1)` on this op
+// ONLY — a whitespace-only reply is refused at the schema, never reaching the reducer.
+describe('AC-20260918-02-3: NotesPatchSchema refuses a whitespace-only reply text', () => {
+  it('AC-20260918-02-3: entry.text of "   " fails safeParse for op:reply with an issue on entry.text (not merely an unrecognised op)', () => {
+    const result = NotesPatchSchema.safeParse({
+      op: 'reply',
+      id: 'N1',
+      entry: { by: 'owner', text: '   ' },
+    })
+    expect(result.success).toBe(false)
+    // Distinguishes "the reply op doesn't exist yet" (an issue on `op`, e.g. an invalid
+    // discriminator) from "the op exists but text is refused" (an issue on `entry.text`) — this
+    // op is not a NotesPatchSchema member yet, so this fails for the wrong reason until D1 lands.
+    const paths = result.success ? [] : result.error.issues.map((i) => i.path.join('.'))
+    expect(paths).toContain('entry.text')
+  })
+})
+
+// AC-20260918-02-9 (D7): rule 6 gains exactly one trigger — a NOTE reply whose resulting status is
+// `open` un-approves that note's screen. A session reply resolves to `answered` and therefore
+// never touches approval, and `applyNotesPatch` returns `approval` BY IDENTITY when unchanged —
+// contract-relevant, not stylistic: `plugin.ts` suppresses the approval write on it.
+describe('AC-20260918-02-9: reply op un-approves on reopen (rule 6), returns approval by identity when unchanged', () => {
+  const approvedHome: Approval = {
+    ...EMPTY_APPROVAL,
+    screens: {
+      home: { hash: 'abc', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
+    },
+  }
+
+  it('a client reply to a note on a currently-approved screen deletes approval.screens[name]', () => {
+    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'answered' }) as unknown as Note })
+    const id = seeded.notes.notes[0]?.id as string
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'reply', id, entry: { by: 'client', text: 'nope' } } as unknown as NotesPatch,
+      approvedHome,
+    )
+    expect(result.approval.screens.home).toBeUndefined()
+  })
+
+  it('a session reply leaves approval unchanged BY IDENTITY (same object reference)', () => {
+    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'open' }) as unknown as Note })
+    const id = seeded.notes.notes[0]?.id as string
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'reply', id, entry: { by: 'session', text: 'fixed' } } as unknown as NotesPatch,
+      approvedHome,
+    )
+    expect(result.approval).toBe(approvedHome)
   })
 })
 

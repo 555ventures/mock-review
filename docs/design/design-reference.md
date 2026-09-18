@@ -2,6 +2,29 @@
 
 ## Amendments
 
+### 2026-09-18 — specs/20260918/02-one-reply-and-the-page-ends-a-note.md
+
+"One reply, and the page ends a note" gives a note a fourth pin tone and gives both roles the
+controls that end one. `deferred` becomes a distinct muted-grey pin tone (§4, §13 rule 1), not
+merely an alias of `approved`'s blue — `TONE.deferred` is `border-gray-400 bg-gray-400/10` /
+`bg-gray-400 text-gray-950`; a deferred note's row and its thread dialog title both carry the word
+"Deferred". `NoteActions` (§6.2) now reads role and ownership, not role alone: a client, on a note
+they themselves raised (`thread[0].by === 'client'`) and while it is open or answered, sees
+**Approve** and **Defer** and never Delete or Reject; an owner sees Delete while open and now
+**Reject · Approve · Defer** while answered (was Reject · Approve only). `VerdictDialog` (§6.3)
+gains a third kind, `defer`, titled `Defer {id}?` with the body "It stays on the list, greyed out,
+until someone replies again."; its `AlertDialogAction` is `variant="default"`, alongside approve
+(reject and delete keep `variant="destructive"`). The aggregate `Tone`/status dots are unchanged —
+`worst()` keeps bucketing `deferred` as closed, so a screen or journey holding only deferred notes
+still renders the same blue dot as one holding only approved notes (§13 rule 2).
+
+This entry also records the `Notice` banner (`src/ui/reviewer.tsx`), landed by the direct fix that
+preceded this series and previously undocumented: a fixed `top-0` `Alert variant="destructive"`
+showing the sentence a refused write (or an unreadable `design/*.json` document) carried, with a
+**Dismiss** button unless the notice is an unreadable-document one, which stays until the file is
+fixed by hand. It sits on the same footing as `ForbiddenNotice` (§0.1) — the frozen prototype has
+no surface for either.
+
 ### 2026-09-17 — specs/20260917/03-the-panel-and-the-dots-tell-the-truth.md
 
 "The panel and the dots tell the truth" redefines what the notes panel's PROJECT group holds and
@@ -231,13 +254,16 @@ The overlay layer lives inside the same scaled wrapper, so note rectangles map 1
 
 ## 4. Note pins, ghosts, draft box, marking overlay
 
-All tones come from one table, `TONE` in `src/review/notes-ui.tsx:16-21`:
+All tones come from one table, `TONE` in `src/review/notes-ui.tsx:16-21`. **Amended 2026-09-18**
+(see Amendments): `TONE` gains a fourth, `deferred`, entry — a distinct muted-grey tone, not an
+alias of `approved`'s blue.
 
 | tone | meaning | box classes | pin classes |
 | --- | --- | --- | --- |
 | `open` | red — pending an AI fix | `border-red-500 bg-red-500/5` | `bg-red-500 text-white` |
 | `answered` | yellow — pending your approval | `border-yellow-400 bg-yellow-400/10` | `bg-yellow-400 text-yellow-950` |
 | `approved` | blue — approved | `border-blue-500 bg-blue-500/5` | `bg-blue-500 text-white` |
+| `deferred` | muted grey — parked | `border-gray-400 bg-gray-400/10` | `bg-gray-400 text-gray-950` |
 | `draft` | an unsaved note being written | `border-dashed border-foreground bg-foreground/5` | *(none — the Badge's default)* |
 
 - **Note box** (`src/review/ReviewLayer.tsx:220-230`):
@@ -364,13 +390,16 @@ Open when there is a selected note, the card is open and no draft dialog is up (
   `Button type="submit" form="form-note-reply"` **Reply**, disabled while blank (`:646-650`).
 - `onInteractOutside` is blocked while a verdict dialog is open (`:623`).
 
-**NoteActions** (`src/review/notes-ui.tsx:126-137`) — the one place this rule lives:
+**NoteActions** (`src/review/notes-ui.tsx:126-137`) — the one place this rule lives. **Amended
+2026-09-18** (see Amendments): the rule now reads role and ownership, not role alone —
 
-| status | buttons (left of Reply) |
-| --- | --- |
-| `open` (red) | `Button variant="destructive"` **Delete** |
-| `answered` (yellow) | `Button variant="destructive"` **Reject**, `Button variant="outline"` **Approve** |
-| `approved` (blue) | none — Reply only |
+| viewer | status | buttons (left of Reply) |
+| --- | --- | --- |
+| owner | `open` (red) | `Button variant="destructive"` **Delete** |
+| owner | `answered` (yellow) | `Button variant="destructive"` **Reject**, `Button variant="outline"` **Approve**, `Button variant="outline"` **Defer** |
+| owner | `approved` (blue) / `deferred` (grey) | none — Reply only |
+| client, on a note they raised | `open` / `answered` | `Button variant="outline"` **Approve**, `Button variant="outline"` **Defer** |
+| client, any other note | any | none — Reply only |
 
 Atlas: `30-note-thread-answered-yellow-reject-approve.png`, `31-note-thread-reply-typed.png`,
 `32-note-thread-open-red-outdated-anchor-alert.png`,
@@ -378,11 +407,13 @@ Atlas: `30-note-thread-answered-yellow-reject-approve.png`, `31-note-thread-repl
 
 ### 6.3 Verdict dialog (`src/review/notes-ui.tsx:100-121`)
 
-One `AlertDialog` for all three verdicts. Title `{label} {id}?` where label is
-`Approve` | `Delete` | `Reject`. Description: *"The note moves to Done."* for approve, otherwise
-*"The note and its thread are removed from the screen and the list."* Footer: `AlertDialogCancel`
-**Cancel** and `AlertDialogAction` with `variant="default"` for approve, `variant="destructive"`
-for reject and delete.
+One `AlertDialog` for all verdicts. Title `{label} {id}?` where label is
+`Approve` | `Delete` | `Reject` | `Defer`. Description: *"The note moves to Done."* for approve,
+*"The note and its thread are removed from the screen and the list."* for reject/delete. Footer:
+`AlertDialogCancel` **Cancel** and `AlertDialogAction` with `variant="default"` for approve,
+`variant="destructive"` for reject and delete. **Amended 2026-09-18** (see Amendments): a fourth
+kind, `defer`, titled `Defer {id}?`, description *"It stays on the list, greyed out, until someone
+replies again."*, `AlertDialogAction variant="default"`.
 
 Atlas: `33-verdict-dialog-approve.png`, `34-verdict-dialog-reject-destructive.png`,
 `35-verdict-dialog-delete-destructive.png`.
@@ -616,7 +647,9 @@ Every rule below is implemented; each cites its line.
 
 1. **Three tones, one palette.** red = pending an AI fix, yellow = pending your approval, blue =
    approved (`notes-ui.tsx:15-21`). The same `TONE.pin` colours the dot, the pin badge and the box
-   border everywhere.
+   border everywhere. **Amended 2026-09-18** (see Amendments): `notes-ui.tsx`'s `PinTone`/`TONE`
+   gain a fourth, muted-grey `deferred` tone for a parked note's pin, row and dialog title — the
+   aggregate status dots (rules 2-5 below) are unaffected; they still bucket `deferred` as closed.
 2. **Status derivation is worst-of.** `worst()` returns `null` for an **empty** list, `open` if any
    note is open, else `answered` if any is answered, else `approved`
    (`src/ui/store/selectors.ts`). **Amended 2026-09-17** (see Amendments, D3): the prototype's
@@ -636,11 +669,17 @@ Every rule below is implemented; each cites its line.
 6. **A new note, or a note turning red, un-approves its screen.** On every commit the store diffs
    the notes, collects those that are new or have just become `open`, and drops their screens from
    `approvedScreens` (`store.tsx:69-73`).
-7. **Any reply re-opens.** Replying to a note sets `status: "open"` and appends an `owner` entry
-   (`ReviewLayer.tsx:619`); replying to a journey sets the journey to `open`
-   (`store.tsx:82-84`).
+7. **Who speaks last decides whose turn it is.** Replying appends the entry and sets `status` from
+   attribution: a session reply answers (`answered`); a reply from anyone else re-opens (`open`) —
+   same rule for a note and for a journey conversation (`src/server/patches.ts`'s `reply` case).
+   **Amended 2026-09-18** (see Amendments; specs/20260918/02): the prototype's `ReviewLayer.tsx`
+   only ever appended an `owner` entry and only ever re-opened; the rebuild is the first version
+   where a client or the session can actually reply, so attribution has to decide.
 8. **Approve** sets a note to `approved` (`ReviewLayer.tsx:658`); **reject and delete both remove
-   the note** and clear the selection (`ReviewLayer.tsx:659`).
+   the note** and clear the selection (`ReviewLayer.tsx:659`). **Amended 2026-09-18** (see
+   Amendments): **Defer** sets a note to `deferred`, the new fourth status; Approve and Defer both
+   go through `op:'close'` (accepts any source status, never touches approval) and, unlike reject
+   and delete, leave the thread dialog open and the selection unchanged.
 9. **Note ids** are `N` + zero-padded max-existing + 1 (`store.tsx:89-90`).
 10. **Every mutation persists immediately** with a `POST /__notes` of the whole document
     (`store.tsx:75`), which the dev-server plugin writes to `notes.json`

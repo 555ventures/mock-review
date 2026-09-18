@@ -1,6 +1,6 @@
 ---
 date: 2026-09-18
-status: hardened
+status: implementing
 tier: critical
 area: server
 design: false
@@ -8,8 +8,10 @@ breaking: false
 depends_on: [specs/20260918/01-writes-never-tear-never-lose.md]
 depended_on_by: [specs/20260918/03-the-page-has-no-operator-controls.md]
 brief: n/a
+build_base: main
 spiked: 2026-09-18
 open_markers: 0
+diff_base: 39ca11a8639b3ee3e7e611b2b1aae7ea8cb7c65c
 ---
 
 # One reply, and the page ends a note
