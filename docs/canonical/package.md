@@ -18,8 +18,7 @@ reports and never over the page-normalised ones. The client's confirm is If-Matc
 `{op:'clientOk', id, beats}` writes `approval.journeys[id] = {client:'ok', beats, at}` and answers
 409 when the story moved under them. `approvedAt` is no longer written by anything; the
 `approveJourney` op is gone. A note or journey conversation has four statuses — `open`, `answered`,
-`approved`, `deferred` — and the narrow `close` op is how a client ends a point they themselves
-raised.
+`approved`, `deferred` — and the narrow `close` op is how a note or journey conversation is ended.
 
 ## Verbs
 
@@ -64,14 +63,14 @@ does not yet take the lock.
 Default documents are created with an exclusive create (`wx`), so two verbs starting together
 cannot clobber each other: the loser sees the file already present and writes nothing.
 
-| File                    | Created by                                                                                                        | Written by                                                                                       | Rule                                                                                                                                                                                                                                                                                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `design/notes.json`     | any host verb (`check`, `sweep`, `answer`, `serve`) when absent: `{"contractVersion":2,"notes":[],"journeys":{}}` | `answer` (appends `{by:"session",text}`, sets `status: "answered"`); the reviewer page (spec 02) | never overwritten when present; the CLI never sets `approved` and never deletes; a present file that does not parse makes a page write answer 409, never a rewrite; a present file at `contractVersion` `1` or `2` is accepted and rewritten at `2` by the first writer that touches it; a read-only verb leaves the file byte-identical |
-| `design/approval.json`  | any host verb when absent: `{"contractVersion":2,"screens":{},"journeys":{},"theme":null}`                        | the reviewer page (spec 02); the plugin's `client waive`                                         | the CLI never writes approval state; same 409 rule as `notes.json`; same `1`-or-`2` accept-and-rewrite rule as `notes.json`                                                                                                                                                                                                              |
-| `design/decisions.json` | `answer --decision` when absent: `{"contractVersion":2,"decisions":[]}`                                           | `answer --decision` appends `{screen, text, at}`                                                 | a present file that fails to parse or validate is a refusal (exit 2), never replaced; a present file at `contractVersion` `1` or `2` is accepted and rewritten at `2` by the first writer that touches it; a read-only verb leaves the file byte-identical                                                                               |
-| `design/.serve.json`    | `serve` after `listen()`: `{url, pid}`                                                                            | `serve`                                                                                          | deleted on SIGINT/SIGTERM/exit; a stale file is overwritten by the next `serve`; gitignored                                                                                                                                                                                                                                              |
-| `design/.lock`          | any package write to `notes.json` or `approval.json`: `{pid, at}`                                                 | the writer holding it                                                                            | present only while a write is in flight; removed on release and by a once-per-module exit handler; broken when its holder pid is gone or its mtime is older than 10 s; gitignored as `design/.lock*`                                                                                                                                     |
-| `design/screenshots/`   | `check --look`                                                                                                    | `check --look`                                                                                   | one PNG per screen × state × viewport × scheme, named `<screen>-<state>-<WxH>-<scheme>.png`, the state in its `examples`-key casing                                                                                                                                                                                                      |
+| File                    | Created by                                                                                                        | Written by                                                                                                                                             | Rule                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `design/notes.json`     | any host verb (`check`, `sweep`, `answer`, `serve`) when absent: `{"contractVersion":2,"notes":[],"journeys":{}}` | `answer` (applies `{op:'reply', entry:{by:"session",text}}` through the shared reducer, so `status` becomes `"answered"`); the reviewer page (spec 02) | never overwritten when present; the CLI never sets `approved` and never deletes; a present file that does not parse makes a page write answer 409, never a rewrite; a present file at `contractVersion` `1` or `2` is accepted and rewritten at `2` by the first writer that touches it; a read-only verb leaves the file byte-identical |
+| `design/approval.json`  | any host verb when absent: `{"contractVersion":2,"screens":{},"journeys":{},"theme":null}`                        | the reviewer page (spec 02); the plugin's `client waive`                                                                                               | the CLI never writes approval state; same 409 rule as `notes.json`; same `1`-or-`2` accept-and-rewrite rule as `notes.json`                                                                                                                                                                                                              |
+| `design/decisions.json` | `answer --decision` when absent: `{"contractVersion":2,"decisions":[]}`                                           | `answer --decision` appends `{screen, text, at}`                                                                                                       | a present file that fails to parse or validate is a refusal (exit 2), never replaced; a present file at `contractVersion` `1` or `2` is accepted and rewritten at `2` by the first writer that touches it; a read-only verb leaves the file byte-identical                                                                               |
+| `design/.serve.json`    | `serve` after `listen()`: `{url, pid}`                                                                            | `serve`                                                                                                                                                | deleted on SIGINT/SIGTERM/exit; a stale file is overwritten by the next `serve`; gitignored                                                                                                                                                                                                                                              |
+| `design/.lock`          | any package write to `notes.json` or `approval.json`: `{pid, at}`                                                 | the writer holding it                                                                                                                                  | present only while a write is in flight; removed on release and by a once-per-module exit handler; broken when its holder pid is gone or its mtime is older than 10 s; gitignored as `design/.lock*`                                                                                                                                     |
+| `design/screenshots/`   | `check --look`                                                                                                    | `check --look`                                                                                                                                         | one PNG per screen × state × viewport × scheme, named `<screen>-<state>-<WxH>-<scheme>.png`, the state in its `examples`-key casing                                                                                                                                                                                                      |
 
 Liveness: `check` reports `serve.url` = the portfile's `url` only when
 `GET <url>/__mock-review/ping` answers 200 within 500 ms; any error or timeout is `null`.
@@ -162,20 +161,20 @@ journey-existence probe runs it before taking the file lock, and the locked re-r
 authoritative. A write that cannot acquire `design/.lock` answers `503 {error}` with the lock
 sentence — retryable, distinct from the `409` an unreadable document answers.
 
-| Route               | Method | Body / answer                                                                                                                                                                      |
-| ------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ping`              | GET    | 200, no body — the liveness probe `check` uses                                                                                                                                     |
-| `state`             | GET    | `{screens, shells, journeys, themes, config, inventory, violations, notes, approval, role}`; `screens[]` and `inventory[]` each carry their module's `examples` keys               |
-| `notes`             | POST   | `{op:'add', note} \| {op:'update', id, fields} \| {op:'remove', id} \| {op:'journey', id, status?, entry?} \| {op:'close', id, status: 'approved'\|'deferred'}` → the new document |
-| `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'clientOk', id, beats} \| {op:'theme', key}` → the new document                                                              |
-| `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                                         |
-| `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                                         |
-| `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                                      |
+| Route               | Method | Body / answer                                                                                                                                                                                        |
+| ------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ping`              | GET    | 200, no body — the liveness probe `check` uses                                                                                                                                                       |
+| `state`             | GET    | `{screens, shells, journeys, themes, config, inventory, violations, notes, approval, role}`; `screens[]` and `inventory[]` each carry their module's `examples` keys                                 |
+| `notes`             | POST   | `{op:'add', note} \| {op:'update', id, fields} \| {op:'remove', id} \| {op:'reply', id, entry:{by:'owner'\|'session', text}} \| {op:'close', id, status: 'approved'\|'deferred'}` → the new document |
+| `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'clientOk', id, beats} \| {op:'theme', key}` → the new document                                                                                |
+| `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                                                           |
+| `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                                                           |
+| `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                                                        |
 
 Refusals: 400 for a body that is not JSON, for a patch that fails its schema, for an `add` carrying
-its own `id`, for approving a screen with no row in the current state (never a written empty hash),
+its own `id`, for an `update` whose `fields` carry `status` or `thread` (refused by name), for a `reply` whose trimmed `text` is empty, for approving a screen with no row in the current state (never a written empty hash),
 and for `clientOk` against an unknown journey or one whose `beats` is still `null`; 404 for an
-`update`, `remove` or `close` of an unknown note or journey conversation (checked before any
+`update`, `remove`, `reply` or `close` of an unknown note or journey conversation (checked before any
 client-ownership gate); 409 when the target file exists but does not parse, or when a `clientOk`'s
 `beats` no longer matches the hash `GET state` would serve now (`design/approval.json` left
 byte-identical); 403 by role, and for a client's `close` of a note or journey conversation whose
@@ -191,8 +190,9 @@ or `Cf-Connecting-Ip`; anything else is refused with 403. The `Referer` is never
 frame URL carries no token — the cookie is what reaches the modules the frame itself loads. The
 cookie is validated against the config on every request, so it survives a restart and dies when the
 token changes; the page then shows one line saying the link is no longer valid. A client may add
-notes (stored with `by: 'client'`), reply to journeys and confirm one; approving anything else is
-the owner's. `ping`, the page's static assets and Vite's own module routes are never gated, so a
+notes (stored with `by: 'client'`), reply to any note or journey (the server stores the entry with
+`by: 'client'` whatever the wire says — the wire enum has no `'client'`), confirm a journey, and
+Approve or Defer a note they raised; approving anything else is the owner's. `ping`, the page's static assets and Vite's own module routes are never gated, so a
 client can read the mock's source: that is accepted. Raw TCP forwards (`ssh -L`) present as loopback
 and read as owner — HTTP tunnels are the supported way to share a link.
 
@@ -230,6 +230,19 @@ and schemes, and any existing screenshots. A new note on a screen, or a note the
 deletes that screen's approval — including when an edit moves a note between screens, which
 un-approves both. Any reply on a journey reopens it without touching approval. The server owns these
 rules, so the CLI and the page cannot disagree.
+
+### One reply, one close
+
+A thread is appended only through `op:'reply'`, which both roles and the `answer` CLI share, and no
+thread is ever sent from a browser. The author decides the resulting status from any current status —
+a reply by the session answers the note, a reply by anyone else reopens it — and a note reopened by
+a reply un-approves its screen. `op:'update'` carries anchor fields only and refuses `status` and
+`thread` by name; `op:'journey'` is retired, its two halves being `reply` and `close`. A note is
+ended only by `op:'close'`, which the page issues for Approve and for Defer: the client may end a
+note they raised (Approve · Defer while it is open or answered), the owner may end any answered note
+(Reject · Approve · Defer) and delete an open one. A deferred note renders in its own muted-grey
+pin tone, its panel row and dialog title carry the word `Deferred`, and it still counts as closed in
+every aggregate dot.
 
 ## Check pipeline order
 
