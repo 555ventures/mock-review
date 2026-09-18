@@ -18,7 +18,9 @@ export type ScreenReportResult = {
  * `meta`/`examples` loaded through the Vite runner, a `render` finding per throwing example
  * (`message: "<examples key>: <error.message>"` per D17's ruling on D5 vs the former AC-8
  * literal), a `size` warning over 150 lines, and a `states` warning per `meta.states` entry with
- * no case-insensitively matching `examples` key. A screen whose module import itself throws
+ * no matching `examples` key under the `resolveStates` rule (spec 03 D4: exact match first, then
+ * a unique normalised match; an ambiguous match is refused and reported too). A screen whose
+ * module import itself throws
  * (not per-example) reports exactly one `render` finding, `"module failed to load:
  * <error.message>"` (D17), and skips meta/examples processing entirely — no `meta: missing`
  * follow-on finding (D19(d)). A screen whose module *loads* but has no `meta` still reports
@@ -27,8 +29,8 @@ export type ScreenReportResult = {
  */
 export declare function screenReport(cwd: string, runner: Runner, discovered: DiscoveredFile[]): Promise<ScreenReportResult>;
 /**
- * D7: the default example for journey resolution — the one named like `meta.states[0]`
- * (case-insensitively), or failing that the first `examples` entry.
+ * D7: the default example for journey resolution — the one named like `meta.states[0]` under the
+ * `resolveState` rule (spec 03 D4/D5), or failing that the first `examples` entry.
  */
 export declare function pickDefaultHtml(screen: Screen, htmlByScreen: Map<string, Record<string, string>>): string | undefined;
 //# sourceMappingURL=screens.d.ts.map

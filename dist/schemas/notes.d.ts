@@ -1,4 +1,8 @@
 import { z } from 'zod';
+/** D4: READ-BACK SCHEMA. It validates only what this package itself reads or writes; anything
+ * else passes through, and `contractVersion` is checked as "known", not "equal". This rule
+ * LOWERS the frequency of a swallowed read; it does NOT close it, because a missing required key
+ * is not an extra key. */
 /** D1: one reply in a note's or journey's thread. `by` is a free-form attribution string
  * (`"session"` for `answer`, `"client"` for the page's client role — spec 02). */
 export declare const ThreadEntrySchema: z.ZodObject<{
@@ -20,6 +24,7 @@ export declare const NoteSchema: z.ZodObject<{
         open: "open";
         answered: "answered";
         approved: "approved";
+        deferred: "deferred";
     }>;
     thread: z.ZodArray<z.ZodObject<{
         by: z.ZodString;
@@ -34,6 +39,7 @@ export declare const JourneyConversationSchema: z.ZodObject<{
         open: "open";
         answered: "answered";
         approved: "approved";
+        deferred: "deferred";
     }>;
     thread: z.ZodArray<z.ZodObject<{
         by: z.ZodString;
@@ -42,7 +48,7 @@ export declare const JourneyConversationSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type JourneyConversation = z.infer<typeof JourneyConversationSchema>;
 export declare const NotesSchema: z.ZodObject<{
-    contractVersion: z.ZodLiteral<1>;
+    contractVersion: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>;
     notes: z.ZodArray<z.ZodObject<{
         id: z.ZodString;
         screen: z.ZodNullable<z.ZodString>;
@@ -54,6 +60,7 @@ export declare const NotesSchema: z.ZodObject<{
             open: "open";
             answered: "answered";
             approved: "approved";
+            deferred: "deferred";
         }>;
         thread: z.ZodArray<z.ZodObject<{
             by: z.ZodString;
@@ -66,6 +73,7 @@ export declare const NotesSchema: z.ZodObject<{
             open: "open";
             answered: "answered";
             approved: "approved";
+            deferred: "deferred";
         }>;
         thread: z.ZodArray<z.ZodObject<{
             by: z.ZodString;

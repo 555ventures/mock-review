@@ -5,8 +5,8 @@
 // byte-identical (D19c).
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js';
-import { DecisionsSchema, NotesSchema } from '../schemas/index.js';
+import { ensureDesignFiles, readDesignDoc, readJson, writeJsonAtomic } from '../files/json.js';
+import { CONTRACT_VERSION, DecisionsSchema } from '../schemas/index.js';
 import { fail } from './io.js';
 export function answerVerb(cwd, flags) {
     ensureDesignFiles(cwd);
@@ -17,7 +17,15 @@ export function answerVerb(cwd, flags) {
         fail('usage: answer requires exactly one of --note or --journey');
     }
     const notesPath = path.join(cwd, 'design', 'notes.json');
-    const notes = readJson(notesPath, NotesSchema);
+    // D5: refuse rather than crash with a raw zod stack when design/notes.json exists but does not
+    // parse — the shared refusal sentence, at exit 2 (mirrors sweep.ts; unlike check.ts's
+    // `themeFor`, which stays silent on the same verdict).
+    const notesRead = readDesignDoc(cwd, 'notes');
+    if (!notesRead.ok)
+        fail(notesRead.error);
+    // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
+    // the cast is safe because `kind: 'notes'` above guarantees `doc` is a `Notes`.
+    const notes = notesRead.doc;
     let screenForDecision = null;
     let printedId;
     let target;
@@ -51,15 +59,15 @@ export function answerVerb(cwd, flags) {
             }
         }
         else {
-            decisions = { contractVersion: 1, decisions: [] };
+            decisions = { contractVersion: CONTRACT_VERSION, decisions: [] };
         }
     }
     target.status = 'answered';
     target.thread.push({ by: 'session', text });
-    writeJsonAtomic(notesPath, notes);
+    writeJsonAtomic(notesPath, { ...notes, contractVersion: CONTRACT_VERSION });
     if (decision !== undefined && decisions) {
         decisions.decisions.push({ screen: screenForDecision, text: decision, at: new Date().toISOString() });
-        writeJsonAtomic(decisionsPath, decisions);
+        writeJsonAtomic(decisionsPath, { ...decisions, contractVersion: CONTRACT_VERSION });
     }
     return `answered ${printedId}`;
 }

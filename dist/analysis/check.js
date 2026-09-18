@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { CheckSchema } from '../schemas/index.js';
+import { CheckSchema, CONTRACT_VERSION } from '../schemas/index.js';
 import { ensureDesignFiles } from '../files/json.js';
 import { discoverHost } from './discover.js';
 import { withRunner } from './vite-runner.js';
@@ -9,6 +9,7 @@ import { docFindings } from './docs.js';
 import { screenReport, pickDefaultHtml } from './screens.js';
 import { shellReport } from './shells.js';
 import { journeyReport } from './journeys.js';
+import { beatlessStep } from './beats.js';
 import { loadConfig, NULL_CONFIG } from './config.js';
 import { serveUrl } from './liveness.js';
 /**
@@ -57,6 +58,17 @@ export async function runCheck(cwd) {
         const message = err instanceof Error ? err.message : String(err);
         findings.push({ kind: 'config', severity: 'error', file: 'vite.config.ts', message });
     }
+    for (const journey of journeys) {
+        const step = beatlessStep(journey);
+        if (step !== null) {
+            findings.push({
+                kind: 'beats',
+                severity: 'warn',
+                file: 'src/journeys.ts',
+                message: `journey ${journey.id} step ${step} has no beat — \`--mark journey-drawn\` will refuse this step`,
+            });
+        }
+    }
     const screenAbs = discovered.screens.map((s) => ({ ...s, abs: path.join(cwd, s.file) }));
     findings.push(...layerFindings(screenAbs));
     const docTargets = [...discovered.components, ...discovered.shells].map((f) => ({
@@ -67,7 +79,7 @@ export async function runCheck(cwd) {
     findings.push(...typeFindings(cwd));
     const serve = { url: await serveUrl(cwd) };
     const check = {
-        contractVersion: 1,
+        contractVersion: CONTRACT_VERSION,
         ok: !findings.some((f) => f.severity === 'error'),
         findings,
         screens,

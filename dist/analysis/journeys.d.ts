@@ -2,13 +2,17 @@ import type { Journey } from '../schemas/index.js';
 export type JourneyInput = {
     id: string;
     title: string;
+    persona?: string | undefined;
     steps: {
         screen: string;
+        beat?: string | undefined;
+        state?: string | undefined;
     }[];
     edges: {
         from: number;
         to: number;
-        label?: string;
+        label?: string | undefined;
+        say?: string | undefined;
     }[];
 };
 /**

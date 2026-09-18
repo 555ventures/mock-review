@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { ConfigSchema, NullConfigSchema } from './config.js';
 import { NoteSchema, ThreadEntrySchema, NotesSchema } from './notes.js';
 import { ApprovalSchema } from './approval.js';
-import { ScreenSchema, ShellSchema, JourneySchema, StepSchema, EdgeSchema } from './check.js';
+import { ScreenSchema, ShellSchema, JourneySchema } from './check.js';
 import { InventoryRowSchema } from './sweep.js';
 /** D5/D23: `add`'s `note` shape — `NoteSchema.omit({id:true})` plus a `superRefine` that rejects
  * a caller-supplied `id` outright. Plain `.omit({id:true})` alone is not enough: `NoteSchema` is
@@ -10,10 +10,28 @@ import { InventoryRowSchema } from './sweep.js';
  * so an `id` the caller sends would otherwise still survive as an ordinary passthrough key; a
  * blanket `.strict()` would fix that but also reject those same legitimate extras. The refine
  * targets `id` specifically, so `rect`/`viewport`/`whole` keep passing through untouched. */
-const AddNoteSchema = NoteSchema.omit({ id: true }).superRefine((note, ctx) => {
+/** D6: a note is either product-wide (`project: true`, no screen) or anchored to a screen.
+ * Returns the violated rule's message, or null when the pair is legal. Exported so the route
+ * layer (`src/server/plugin.ts`) can apply the same rule to a MERGED note on `op:'update'` — the
+ * read-back shapes in `src/schemas/notes.ts` are deliberately untouched (see Decisions D6). */
+export function scopeViolation(note) {
+    const isProject = note.project === true;
+    if (isProject && note.screen !== null)
+        return 'a project note carries no screen';
+    if (!isProject && note.screen === null)
+        return 'a note with no screen must be project:true';
+    return null;
+}
+const AddNoteSchema = NoteSchema.omit({ id: true })
+    .superRefine((note, ctx) => {
     if (Object.prototype.hasOwnProperty.call(note, 'id')) {
         ctx.addIssue({ code: 'custom', message: 'add may not specify id', path: ['id'] });
     }
+})
+    .superRefine((note, ctx) => {
+    const msg = scopeViolation(note);
+    if (msg)
+        ctx.addIssue({ code: 'custom', message: msg, path: [note.project === true ? 'screen' : 'project'] });
 });
 /** D6/D23/Contracts: `POST notes` body. `add`'s `note` never carries an `id` at all (see
  * `AddNoteSchema` — the server always assigns `N`+padded sequence, AC-20260915-02-7; a
@@ -43,8 +61,15 @@ export const NotesPatchSchema = z.discriminatedUnion('op', [
         .object({
         op: z.literal('journey'),
         id: z.string(),
-        status: z.enum(['open', 'answered', 'approved']).optional(),
+        status: z.enum(['open', 'answered', 'approved', 'deferred']).optional(),
         entry: ThreadEntrySchema.optional(),
+    })
+        .strict(),
+    z
+        .object({
+        op: z.literal('close'),
+        id: z.string(),
+        status: z.enum(['approved', 'deferred']),
     })
         .strict(),
 ]);
@@ -64,14 +89,9 @@ export const ApprovalPatchSchema = z.discriminatedUnion('op', [
         .strict(),
     z
         .object({
-        op: z.literal('approveJourney'),
-        id: z.string(),
-    })
-        .strict(),
-    z
-        .object({
         op: z.literal('clientOk'),
         id: z.string(),
+        beats: z.string(),
     })
         .strict(),
     z
@@ -81,12 +101,11 @@ export const ApprovalPatchSchema = z.discriminatedUnion('op', [
     })
         .strict(),
 ]);
-/** D6/Contracts: `GET state`'s journeys carry the plugin-queued `persona`/step `state`/edge `say`
- * fields (spec 02 UI §1/§8.2) on top of the analysis-layer `Journey` shape. */
+/** D6: the base `JourneySchema` now carries `persona`/step `state`/edge `say` itself (D1); this
+ * server-only wrapper adds only what `GET state` adds on top — the story hash, `null` when the
+ * journey has no confirmable story (D4/D5). */
 export const ServerJourneySchema = JourneySchema.extend({
-    persona: z.string().optional(),
-    steps: z.array(StepSchema.extend({ state: z.string().optional() })),
-    edges: z.array(EdgeSchema.extend({ say: z.string().optional() })),
+    beats: z.string().nullable(),
 });
 /** D18(b): `GET state`'s inventory rows gain the component/shell module's own `examples` keys
  * (the Components page's example picker, reference §10) — `['Default']` when the module can't be
@@ -102,6 +121,12 @@ export const ServerInventoryRowSchema = InventoryRowSchema.extend({
 export const ServerScreenSchema = ScreenSchema.extend({
     examples: z.array(z.string()),
 });
+/** D2: whether a design document could be read. `ok: false` means the file EXISTS and could not
+ * be used — never that it is absent (`ensureDesignFiles` creates both when missing). */
+export const DocOutcomeSchema = z.discriminatedUnion('ok', [
+    z.object({ ok: z.literal(true) }).strict(),
+    z.object({ ok: z.literal(false), error: z.string() }).strict(),
+]);
 /** D6: `GET state`'s full response shape. */
 export const ServerStateSchema = z
     .object({
@@ -115,6 +140,7 @@ export const ServerStateSchema = z
     notes: NotesSchema,
     approval: ApprovalSchema,
     role: z.enum(['owner', 'client']),
+    documents: z.object({ notes: DocOutcomeSchema, approval: DocOutcomeSchema }).strict(),
 })
     .strict();
 //# sourceMappingURL=patches.js.map

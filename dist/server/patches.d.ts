@@ -17,6 +17,10 @@ export type ApprovalPatchCtx = {
     config: Config | NullConfig;
     statesOf: (name: string) => string[];
     screenshotsFor: (name: string) => string[];
+    /** D7: the served journey's story hash (`ServerJourney.beats`), or `null` for an unknown
+     * journey or one with no confirmable story — derivation lives here, verification stays in the
+     * endpoint (`plugin.ts`'s `handlePostApproval`), mirroring `hash`/`approveScreen`. */
+    beatsHash: (journeyId: string) => string | null;
 };
 /** D6/D7/D16: `applyApprovalPatch(approval, patch, ctx)` -> the new `Approval` document. */
 export declare function applyApprovalPatch(approval: Approval, patch: ApprovalPatch, ctx: ApprovalPatchCtx): Approval;

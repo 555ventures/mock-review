@@ -33,6 +33,7 @@ export function journeyReport(journeys, htmlOf) {
         return {
             id: journey.id,
             title: journey.title,
+            ...(journey.persona !== undefined ? { persona: journey.persona } : {}),
             steps: journey.steps,
             edges: journey.edges,
             resolved: unresolved.length === 0,

@@ -7,7 +7,7 @@ export declare const DecisionEntrySchema: z.ZodObject<{
 }, z.core.$strict>;
 export type DecisionEntry = z.infer<typeof DecisionEntrySchema>;
 export declare const DecisionsSchema: z.ZodObject<{
-    contractVersion: z.ZodLiteral<1>;
+    contractVersion: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>;
     decisions: z.ZodArray<z.ZodObject<{
         screen: z.ZodNullable<z.ZodString>;
         text: z.ZodString;

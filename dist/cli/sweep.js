@@ -5,8 +5,9 @@ import path from 'node:path';
 import { discoverHost } from '../analysis/discover.js';
 import { importsOf } from '../analysis/imports.js';
 import { inventory } from '../analysis/inventory.js';
-import { ensureDesignFiles, readJson } from '../files/json.js';
-import { NotesSchema } from '../schemas/index.js';
+import { ensureDesignFiles, readDesignDoc } from '../files/json.js';
+import { CONTRACT_VERSION } from '../schemas/index.js';
+import { fail } from './io.js';
 /** The 1-based line of the first line containing `needle`, or `1` when the file is missing or the
  * needle is not found — matches D11's `<line of … or 1>` fallback. */
 function lineOf(filePath, needle) {
@@ -27,8 +28,15 @@ export function sweepVerb(cwd) {
         specifiers: importsOf(path.join(cwd, s.file)),
     }));
     const inv = inventory(cwd, discovered.components, discovered.shells, screenSpecifiers);
-    const notesPath = path.join(cwd, 'design', 'notes.json');
-    const notes = readJson(notesPath, NotesSchema);
+    // D5: refuse rather than crash with a raw zod stack when design/notes.json exists but does not
+    // parse — the shared refusal sentence, at exit 2, unlike `check`'s `themeFor`, which stays
+    // silent on the same verdict.
+    const notesRead = readDesignDoc(cwd, 'notes');
+    if (!notesRead.ok)
+        fail(notesRead.error);
+    // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
+    // the cast is safe because `kind: 'notes'` above guarantees `doc` is a `Notes`.
+    const notes = notesRead.doc;
     const journeysFile = path.join(cwd, 'src', 'journeys.ts');
     const journeyItems = Object.entries(notes.journeys)
         .filter(([, conv]) => conv.status === 'open')
@@ -61,7 +69,7 @@ export function sweepVerb(cwd) {
         };
     })
         .sort(byFileThenId);
-    return { contractVersion: 1, inventory: inv, queue: [...journeyItems, ...noteItems] };
+    return { contractVersion: CONTRACT_VERSION, inventory: inv, queue: [...journeyItems, ...noteItems] };
 }
 /** File Plan: text form. One line per queue item, and the queue empty case is one exact line. */
 export function formatSweepText(sweep) {

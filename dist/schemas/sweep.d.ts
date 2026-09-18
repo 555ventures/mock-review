@@ -28,7 +28,7 @@ export declare const QueueItemSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type QueueItem = z.infer<typeof QueueItemSchema>;
 export declare const SweepSchema: z.ZodObject<{
-    contractVersion: z.ZodLiteral<1>;
+    contractVersion: z.ZodLiteral<2>;
     inventory: z.ZodArray<z.ZodObject<{
         name: z.ZodString;
         kind: z.ZodEnum<{

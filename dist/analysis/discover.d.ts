@@ -14,7 +14,10 @@ export type HostFiles = {
 /**
  * D3: filesystem globbing relative to `cwd`, the host app dir. Screens/components/shells/themes
  * are read from their exact directories only (never recursive), so `src/components/ui/**` and
- * `design/examples/**` are never visited in the first place.
+ * `design/examples/**` are never visited in the first place. Files the `shadcn` vite scaffold
+ * writes into `src/components/` itself (not the mock author) are skipped the same way
+ * `components/ui/**` is, so doc findings, the sweep inventory and the reviewer's catalog never
+ * see them (D1).
  */
 export declare function discoverHost(cwd: string): HostFiles;
 //# sourceMappingURL=discover.d.ts.map

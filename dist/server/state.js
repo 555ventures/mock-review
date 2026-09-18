@@ -7,10 +7,12 @@ import { discoverHost } from '../analysis/discover.js';
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js';
 import { screenReport, pickDefaultHtml } from '../analysis/screens.js';
 import { shellReport } from '../analysis/shells.js';
+import { resolveState } from '../ui/frame/stateKey.js';
 import { journeyReport } from '../analysis/journeys.js';
+import { beatHash } from '../analysis/beats.js';
 import { inventory } from '../analysis/inventory.js';
-import { ensureDesignFiles, readJson } from '../files/json.js';
-import { ApprovalSchema, EMPTY_APPROVAL, EMPTY_NOTES, NotesSchema } from '../schemas/index.js';
+import { ensureDesignFiles, readDesignDoc } from '../files/json.js';
+import { EMPTY_APPROVAL, EMPTY_NOTES } from '../schemas/index.js';
 /** D18(b): the component/shell module's own `examples` keys, `['Default']` when the module can't
  * be loaded at all (a readable module with a genuinely empty `examples` map keeps `[]`). */
 async function moduleExamplesMap(cwd, runner, files) {
@@ -27,13 +29,12 @@ async function moduleExamplesMap(cwd, runner, files) {
     }
     return map;
 }
-/** D21: a journey `Step.state` is written in `meta.states` casing (D4); this normalises it once,
- * server-side, to its case-matched `examples` key (D3's actual state-list source), so no page or
- * plugin consumer ever needs to compare states case-insensitively again. A state with no matching
- * example key (an unresolved journey step) passes through unchanged. */
+/** D21: a journey `Step.state` is written in `meta.states` spelling; it is resolved once,
+ * server-side, to its example key by `resolveStates`' rule (exact, then unique normalised — spec
+ * 03 D4/D8), so no page or plugin consumer ever needs to compare states case-insensitively again.
+ * An unresolved or ambiguous state passes through unchanged. */
 function normaliseStepState(exampleKeys, state) {
-    const match = exampleKeys.find((key) => key.toLowerCase() === state.toLowerCase());
-    return match ?? state;
+    return resolveState(exampleKeys, state) ?? state;
 }
 /**
  * D6/D20: builds one `ServerState` for `cwd`. `role` is decided by the caller (plugin.ts, from
@@ -81,24 +82,20 @@ export async function buildState(cwd, role, runner) {
             const screen = screens.find((s) => s.name === screenName);
             return screen ? pickDefaultHtml(screen, screenResult.htmlByScreen) : undefined;
         });
-        journeys = resolved.map((journey, i) => {
-            const input = journeyInputs[i];
-            const rawSteps = input?.steps ?? journey.steps;
+        // D5: `beats` is hashed here, over `journeyReport`'s raw steps — BEFORE the state-normalising
+        // map below rewrites each step's `state` to the host's example key. The driver hashes the
+        // seed's raw spelling, and `--mark journey-drawn` already enforces `check --json` steps ==
+        // seed beats, so raw is the only spelling that can ever equal the driver's own hash (D5, A2).
+        journeys = resolved.map((journey) => {
+            const rawSteps = journey.steps;
+            const beats = beatHash(rawSteps);
             const steps = rawSteps.map((step) => {
                 if (step.state === undefined)
                     return step;
                 const screen = screens.find((s) => s.name === step.screen);
                 return { ...step, state: normaliseStepState(screen?.examples ?? [], step.state) };
             });
-            return {
-                ...journey,
-                ...(input?.persona !== undefined ? { persona: input.persona } : {}),
-                steps,
-                edges: journey.edges.map((edge, ei) => {
-                    const say = input?.edges[ei]?.say;
-                    return say !== undefined ? { ...edge, say } : edge;
-                }),
-            };
+            return { ...journey, steps, beats };
         });
         const specifiers = Array.from(screenResult.specifiersByScreen.entries()).map(([name, specs]) => ({
             name,
@@ -111,23 +108,22 @@ export async function buildState(cwd, role, runner) {
     catch (err) {
         violations.push(err instanceof Error ? err.message : String(err));
     }
-    const notesPath = path.join(cwd, 'design', 'notes.json');
-    const approvalPath = path.join(cwd, 'design', 'approval.json');
-    let notes = EMPTY_NOTES;
-    try {
-        notes = readJson(notesPath, NotesSchema);
-    }
-    catch {
-        // ensureDesignFiles just created it when absent; a still-unreadable file falls back to empty
-        // rather than failing the whole state build.
-    }
-    let approval = EMPTY_APPROVAL;
-    try {
-        approval = readJson(approvalPath, ApprovalSchema);
-    }
-    catch {
-        // see above.
-    }
+    // D1/D3: one verdict, from `readDesignDoc` — never this file's own `try { readJson(...) }
+    // catch`. `ok: false` means the file EXISTS and could not be used; `ensureDesignFiles` above
+    // already created it when absent, so a still-failing read here is a genuine parse/shape
+    // failure, never a missing file. On failure the wire `notes`/`approval` value stays the
+    // documented EMPTY_* PLACEHOLDER — it is not a claim that the file is actually empty, and the
+    // caller must read `documents.<doc>.ok` to know whether to trust it. Every other field
+    // (`screens`, `shells`, `journeys`, `themes`, `config`, `inventory`) is unaffected by either
+    // read failing (D3) — they're built entirely above, before this block runs.
+    const notesRead = readDesignDoc(cwd, 'notes');
+    // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
+    // the cast is safe because `kind: 'notes'` above guarantees `doc` is a `Notes`.
+    const notes = notesRead.ok ? notesRead.doc : EMPTY_NOTES;
+    const notesOutcome = notesRead.ok ? { ok: true } : { ok: false, error: notesRead.error };
+    const approvalRead = readDesignDoc(cwd, 'approval');
+    const approval = approvalRead.ok ? approvalRead.doc : EMPTY_APPROVAL;
+    const approvalOutcome = approvalRead.ok ? { ok: true } : { ok: false, error: approvalRead.error };
     return {
         screens,
         shells,
@@ -139,6 +135,7 @@ export async function buildState(cwd, role, runner) {
         notes,
         approval,
         role,
+        documents: { notes: notesOutcome, approval: approvalOutcome },
     };
 }
 //# sourceMappingURL=state.js.map

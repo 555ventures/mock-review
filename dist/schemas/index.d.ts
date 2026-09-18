@@ -1,3 +1,4 @@
+export * from './version.js';
 export * from './contract.js';
 export * from './config.js';
 export * from './check.js';

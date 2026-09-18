@@ -1,12 +1,12 @@
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js';
+import { ensureDesignFiles, readDesignDocOrThrow, UnparseableDesignFileError, writeJsonAtomic } from '../files/json.js';
 import { runnerOf } from '../analysis/vite-runner.js';
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js';
 import { discoverHost } from '../analysis/discover.js';
-import { ApprovalSchema, NotesSchema } from '../schemas/index.js';
-import { ApprovalPatchSchema, NotesPatchSchema } from '../schemas/patches.js';
+import { CONTRACT_VERSION } from '../schemas/index.js';
+import { ApprovalPatchSchema, NotesPatchSchema, scopeViolation } from '../schemas/patches.js';
 import { applyApprovalPatch, applyNotesPatch } from './patches.js';
 import { buildState } from './state.js';
 import { buildRegistry } from './registry.js';
@@ -162,61 +162,48 @@ function ctxFromState(cwd, state) {
         config: state.config,
         statesOf: (name) => state.screens.find((s) => s.name === name)?.states ?? [],
         screenshotsFor: (name) => screenshotsFor(cwd, name),
+        beatsHash: (journeyId) => state.journeys.find((j) => j.id === journeyId)?.beats ?? null,
     };
 }
 function forceClientThread(thread) {
     return thread.map((entry) => ({ ...entry, by: 'client' }));
 }
-/** D6: a client-role request may `POST notes` only with `op: 'add'` (thread entries forced to
- * `by: 'client'`) or `op: 'journey'` with an `entry` (also forced to `by: 'client'`) — everything
- * else is 403. Returns `null` when the patch is not one a client may send. */
-function clientNotesPatch(patch) {
+/** D6/D11: op-level admission for a client-role request, decided with no document access — an op
+ * a client may never issue (`update`, `remove`, a bare `journey` with no `entry`) is 403
+ * regardless of whether the target id exists, so a never-permitted op can never be used to probe
+ * existence. Checked BEFORE the 404 pre-check, restoring the original op-then-404 ordering.
+ * `add` and `journey` (with an `entry`) are transformed here (thread entries forced to `client`);
+ * `close` is admitted at this stage unconditionally — its per-target ownership gate needs the
+ * current document and runs later, inside the write lock, AFTER the 404 pre-check
+ * (`clientOwnsCloseTarget` below): D11's 404-before-403 governs THAT gate specifically, not
+ * op-level admission. Returns `null` when the op itself is never allowed for a client. */
+function clientNotesOpPatch(patch) {
     if (patch.op === 'add') {
         return { ...patch, note: { ...patch.note, thread: forceClientThread(patch.note.thread) } };
     }
-    if (patch.op === 'journey' && patch.entry) {
-        return { ...patch, entry: { ...patch.entry, by: 'client' } };
+    if (patch.op === 'journey') {
+        return patch.entry ? { ...patch, entry: { ...patch.entry, by: 'client' } } : null;
     }
+    if (patch.op === 'close')
+        return patch;
     return null;
+}
+/** D11: `close`'s ownership gate — a client may close only a note or journey conversation they
+ * themselves opened (`thread[0].by === 'client'`). Called only after the 404 pre-check has
+ * already confirmed the target exists (note, or a known journey — possibly just seeded with a
+ * default `{status:'open', thread:[]}` entry by the caller), so this never leaks existence. */
+function clientOwnsCloseTarget(id, notes) {
+    const note = notes.notes.find((n) => n.id === id);
+    const thread = note ? note.thread : notes.journeys[id]?.thread;
+    return thread?.[0]?.by === 'client';
 }
 /** D6: a client-role request may `POST approval` only with `op: 'clientOk'`. */
 function clientApprovalPatch(patch) {
     return patch.op === 'clientOk' ? patch : null;
 }
-/** A design file exists but doesn't parse (bad JSON, or JSON that fails its schema) — thrown by
- * the `*OrThrow` readers below so a write handler can refuse instead of silently treating a
- * corrupt file as empty and overwriting it. `relPath` is the design-relative path named in the
- * refusal body. */
-class UnparseableDesignFileError extends Error {
-    relPath;
-    constructor(relPath) {
-        super(`${relPath} exists but does not parse — refusing to write until it's fixed by hand`);
-        this.relPath = relPath;
-    }
-}
-/** The write path's own strict reader — `ensureDesignFiles` (called by both write handlers)
- * guarantees the file exists, so a `readJson` failure here means its content doesn't parse, not
- * that it's absent; the canonical doc says `notes.json` is never overwritten when present (mirrors
- * spec 01's `answer --decision`, which refuses an invalid `decisions.json` with exit 2 rather than
- * rewriting it), so this throws instead of falling back to an empty document the caller would
- * then persist over the real (corrupt) content. */
-function readNotesDocOrThrow(cwd) {
-    try {
-        return readJson(path.join(cwd, 'design', 'notes.json'), NotesSchema);
-    }
-    catch {
-        throw new UnparseableDesignFileError(path.join('design', 'notes.json'));
-    }
-}
-/** See `readNotesDocOrThrow` — the same strictness for `approval.json`. */
-function readApprovalDocOrThrow(cwd) {
-    try {
-        return readJson(path.join(cwd, 'design', 'approval.json'), ApprovalSchema);
-    }
-    catch {
-        throw new UnparseableDesignFileError(path.join('design', 'approval.json'));
-    }
-}
+/** D1: `UnparseableDesignFileError` and the two `*OrThrow` readers now live in `src/files/json.js`
+ * beside `ensureDesignFiles` — this file only consumes them, so the write path and every other
+ * reader in the package can never drift on what "unreadable" means. */
 /** D23/review-2: both write handlers answer 409 (not 400) for an unparseable design file — the
  * request body itself is fine, the conflict is with the target resource's current on-disk state
  * (the textbook use of 409), and 400 would wrongly suggest the client sent something bad. */
@@ -275,9 +262,13 @@ async function handlePostNotes(req, res, cwd, runner) {
         sendJson(res, 400, { error: 'invalid notes patch' });
         return;
     }
+    // D6/D11: op-level admission runs BEFORE the 404 pre-check — an op a client may never issue
+    // (e.g. `remove`, `update`, a bare `journey`) is 403 regardless of whether the target id
+    // exists, so it never leaks existence. `close`'s own per-target ownership gate is the one
+    // check that runs AFTER 404 (below, inside the lock), per D11.
     let patch = parsed.data;
     if (role === 'client') {
-        patch = clientNotesPatch(parsed.data);
+        patch = clientNotesOpPatch(parsed.data);
         if (!patch) {
             res.statusCode = 403;
             res.end();
@@ -289,12 +280,14 @@ async function handlePostNotes(req, res, cwd, runner) {
         let notes;
         let approval;
         try {
-            notes = readNotesDocOrThrow(cwd);
+            // `readDesignDocOrThrow`'s return type is keyed on the runtime `kind` argument, not
+            // narrowed by it — each cast is safe because the literal `kind` above guarantees the shape.
+            notes = readDesignDocOrThrow(cwd, 'notes');
             // review-2: `applyNotesPatch`'s rule-6 un-approve reads `approval` too and the patch may
             // write it back (see below) — an unparsable `approval.json` is just as much a reason to
             // refuse this write as an unparsable `notes.json`, or rule 6 would silently run against an
             // empty approval document and the real (corrupt) file would never surface to anyone.
-            approval = readApprovalDocOrThrow(cwd);
+            approval = readDesignDocOrThrow(cwd, 'approval');
         }
         catch (err) {
             if (err instanceof UnparseableDesignFileError) {
@@ -311,12 +304,63 @@ async function handlePostNotes(req, res, cwd, runner) {
             res.end();
             return;
         }
-        const result = applyNotesPatch(notes, appliedPatch, approval);
-        writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), result.notes);
-        if (result.approval !== approval) {
-            writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), result.approval);
+        // D6: `op:'update'`'s write-path scope invariant — checked against the MERGED note (existing
+        // + patch fields), not the patch fields alone, so a patch that would leave the note claiming
+        // both kinds (or neither) is refused 400. Runs after the 404 pre-check above (the id is known
+        // to exist by this point) and before `applyNotesPatch` ever sees the patch. `AddNoteSchema`'s
+        // own `superRefine` covers `op:'add'`; the read-back schemas (`src/schemas/notes.ts`) stay
+        // permissive on purpose (D6) — an existing contradictory note still loads and renders, it just
+        // can't be updated into staying contradictory.
+        if (appliedPatch.op === 'update') {
+            const existing = notes.notes.find((n) => n.id === appliedPatch.id);
+            if (existing) {
+                const mergedScreen = appliedPatch.fields.screen !== undefined ? appliedPatch.fields.screen : existing.screen;
+                const mergedProject = appliedPatch.fields.project !== undefined ? appliedPatch.fields.project : existing.project;
+                if (scopeViolation({ screen: mergedScreen, project: mergedProject })) {
+                    sendJson(res, 400, { error: 'invalid notes patch' });
+                    return;
+                }
+            }
         }
-        sendJson(res, 200, result.notes);
+        // D10/D11: `close` may target a note or a journey conversation. A note match is checked
+        // first; when the id is not a note and not yet a `notes.journeys` entry, this mirrors how
+        // `op:'journey'` treats a missing entry — except `close` must first confirm the id names a
+        // REAL journey (`state.journeys`), since unlike `op:'journey'` it must answer 404 for an id
+        // that is neither a note nor a journey at all (AC-20260917-02-15's "exists nowhere" case).
+        // Only once the id is confirmed real is a default `{status:'open', thread:[]}` entry seeded
+        // so the reducer below has something to update — mirroring `op:'journey'`'s own default.
+        if (appliedPatch.op === 'close') {
+            const isNote = notes.notes.some((n) => n.id === appliedPatch.id);
+            if (!isNote && !(appliedPatch.id in notes.journeys)) {
+                const state = await buildState(cwd, role, runner);
+                const isJourney = state.journeys.some((j) => j.id === appliedPatch.id);
+                if (!isJourney) {
+                    res.statusCode = 404;
+                    res.end();
+                    return;
+                }
+                notes = { ...notes, journeys: { ...notes.journeys, [appliedPatch.id]: { status: 'open', thread: [] } } };
+            }
+            // D11: the ownership gate — a client may close only a note or journey conversation they
+            // themselves opened. Runs only after the 404 pre-check above has confirmed the target
+            // exists, so it never leaks existence.
+            if (role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
+                res.statusCode = 403;
+                res.end();
+                return;
+            }
+        }
+        const result = applyNotesPatch(notes, appliedPatch, approval);
+        // D2: stamped at the write site, not in the pure `applyNotesPatch` reducer — stamping inside
+        // it would break `unapproveScreen`'s no-op identity check and rewrite `approval.json` on
+        // every note patch.
+        const stampedNotes = { ...result.notes, contractVersion: CONTRACT_VERSION };
+        writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), stampedNotes);
+        if (result.approval !== approval) {
+            const stampedApproval = { ...result.approval, contractVersion: CONTRACT_VERSION };
+            writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedApproval);
+        }
+        sendJson(res, 200, stampedNotes);
     });
 }
 async function handlePostApproval(req, res, cwd, runner) {
@@ -357,9 +401,32 @@ async function handlePostApproval(req, res, cwd, runner) {
             sendJson(res, 400, { error: `unknown screen ${appliedPatch.name}` });
             return;
         }
+        // D7: the client confirm is If-Match on the story hash — three guards, in this order, all
+        // inside the write lock where `buildState`'s result (`state.journeys`) is already in hand.
+        // (1) unknown journey; (2) a journey with nothing confirmable yet (`beats === null`); (3) the
+        // hash the client echoed no longer matches what would be served now (the seed moved under
+        // them since they read it) — 409, file left byte-identical. Only once all three pass does the
+        // reducer write.
+        if (appliedPatch.op === 'clientOk') {
+            const journey = state.journeys.find((j) => j.id === appliedPatch.id);
+            if (!journey) {
+                sendJson(res, 400, { error: `unknown journey ${appliedPatch.id}` });
+                return;
+            }
+            if (journey.beats === null) {
+                sendJson(res, 400, {
+                    error: `journey ${appliedPatch.id} has no beats — every step needs a sentence before a client can confirm it`,
+                });
+                return;
+            }
+            if (appliedPatch.beats !== journey.beats) {
+                sendJson(res, 409, { error: 'story changed since it was shown — reload' });
+                return;
+            }
+        }
         let approval;
         try {
-            approval = readApprovalDocOrThrow(cwd);
+            approval = readDesignDocOrThrow(cwd, 'approval');
         }
         catch (err) {
             if (err instanceof UnparseableDesignFileError) {
@@ -369,8 +436,10 @@ async function handlePostApproval(req, res, cwd, runner) {
             throw err;
         }
         const next = applyApprovalPatch(approval, appliedPatch, ctxFromState(cwd, state));
-        writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), next);
-        sendJson(res, 200, next);
+        // D2: stamped at the write site, not inside the pure `applyApprovalPatch` reducer.
+        const stampedNext = { ...next, contractVersion: CONTRACT_VERSION };
+        writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedNext);
+        sendJson(res, 200, stampedNext);
     });
 }
 async function handleEvents(req, res, server, cwd, runner) {
