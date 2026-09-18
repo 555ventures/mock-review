@@ -17,7 +17,7 @@ import { discoverHost } from '../analysis/discover.js'
 import { CONTRACT_VERSION } from '../schemas/index.js'
 import type { Approval, Config, NullConfig, Notes, ThreadEntry } from '../schemas/index.js'
 import { ApprovalPatchSchema, NotesPatchSchema, scopeViolation } from '../schemas/patches.js'
-import type { ApprovalPatch, NotesPatch, ServerState } from '../schemas/patches.js'
+import type { AppliedNotesPatch, ApprovalPatch, NotesPatch, ServerState } from '../schemas/patches.js'
 import { applyApprovalPatch, applyNotesPatch, type ApprovalPatchCtx } from './patches.js'
 import { buildState } from './state.js'
 import { buildRegistry } from './registry.js'
@@ -193,21 +193,23 @@ function forceClientThread(thread: ThreadEntry[]): ThreadEntry[] {
   return thread.map((entry) => ({ ...entry, by: 'client' }))
 }
 
-/** D6/D11: op-level admission for a client-role request, decided with no document access — an op
- * a client may never issue (`update`, `remove`, a bare `journey` with no `entry`) is 403
- * regardless of whether the target id exists, so a never-permitted op can never be used to probe
- * existence. Checked BEFORE the 404 pre-check, restoring the original op-then-404 ordering.
- * `add` and `journey` (with an `entry`) are transformed here (thread entries forced to `client`);
- * `close` is admitted at this stage unconditionally — its per-target ownership gate needs the
- * current document and runs later, inside the write lock, AFTER the 404 pre-check
- * (`clientOwnsCloseTarget` below): D11's 404-before-403 governs THAT gate specifically, not
- * op-level admission. Returns `null` when the op itself is never allowed for a client. */
-function clientNotesOpPatch(patch: NotesPatch): NotesPatch | null {
+/** D2/D6/D11: op-level admission for a client-role request, decided with no document access — an
+ * op a client may never issue (`update`, `remove`) is 403 regardless of whether the target id
+ * exists, so a never-permitted op can never be used to probe existence. Checked BEFORE the 404
+ * pre-check, restoring the original op-then-404 ordering. `add` and `reply` are transformed here
+ * (thread entries forced to `by: 'client'` — the wire enum never admits `'client'` itself, so no
+ * request can forge this attribution); `close` is admitted at this stage unconditionally — its
+ * per-target ownership gate needs the current document and runs later, inside the write lock,
+ * AFTER the 404 pre-check (`clientOwnsCloseTarget` below): D11's 404-before-403 governs THAT gate
+ * specifically, not op-level admission. Returns `null` when the op itself is never allowed for a
+ * client. Returns `AppliedNotesPatch`, not `NotesPatch` — the widened type `by: 'client'` needs to
+ * land in (D2/Contracts). */
+function clientNotesOpPatch(patch: NotesPatch): AppliedNotesPatch | null {
   if (patch.op === 'add') {
     return { ...patch, note: { ...patch.note, thread: forceClientThread(patch.note.thread) } }
   }
-  if (patch.op === 'journey') {
-    return patch.entry ? { ...patch, entry: { ...patch.entry, by: 'client' } } : null
+  if (patch.op === 'reply') {
+    return { ...patch, entry: { ...patch.entry, by: 'client' } }
   }
   if (patch.op === 'close') return patch
   return null
@@ -311,7 +313,7 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
   // (e.g. `remove`, `update`, a bare `journey`) is 403 regardless of whether the target id
   // exists, so it never leaks existence. `close`'s own per-target ownership gate is the one
   // check that runs AFTER 404 (below, inside the lock), per D11.
-  let patch: NotesPatch | null = parsed.data
+  let patch: AppliedNotesPatch | null = parsed.data
   if (role === 'client') {
     patch = clientNotesOpPatch(parsed.data)
     if (!patch) {
@@ -327,12 +329,13 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
     // lock is held — it renders through Vite, and holding `design/.lock` across that would make
     // every CLI write in the repo queue behind a page render. So it is hoisted above the lock as
     // an UNLOCKED pre-read: decide here, off an unlocked read of `notes.json`, whether `close`'s
-    // target is missing from both `notes.notes` and `notes.journeys` — the only case that ever
-    // needs the probe — and if so run `buildState` now. An unreadable pre-read just means "no
-    // probe": the locked re-read below will hit the same `UnparseableDesignFileError` and refuse
-    // through the normal 409 path.
+    // (D1: or `reply`'s — it resolves an id note-first exactly as `close` does) target is missing
+    // from both `notes.notes` and `notes.journeys` — the only case that ever needs the probe —
+    // and if so run `buildState` now. An unreadable pre-read just means "no probe": the locked
+    // re-read below will hit the same `UnparseableDesignFileError` and refuse through the normal
+    // 409 path.
     let closeProbeIsJourney: boolean | undefined
-    if (appliedPatch.op === 'close') {
+    if (appliedPatch.op === 'close' || appliedPatch.op === 'reply') {
       let preNotes: Notes | undefined
       try {
         preNotes = readDesignDocOrThrow(cwd, 'notes') as Notes
@@ -404,18 +407,16 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
           }
         }
 
-        // D10/D11: `close` may target a note or a journey conversation. A note match is checked
-        // first; when the id is not a note and not yet a `notes.journeys` entry, this mirrors how
-        // `op:'journey'` treats a missing entry — except `close` must first confirm the id names
-        // a REAL journey, since unlike `op:'journey'` it must answer 404 for an id that is
-        // neither a note nor a journey at all (AC-20260917-02-15's "exists nowhere" case). D4:
-        // the locked re-read is authoritative — if the target is now present (seeded by another
-        // writer between the pre-read and this read), it's acted on directly and the probe is
-        // never consulted. The probe's answer is consulted only when this re-read ALSO finds
-        // neither. Only once the id is confirmed real is a default `{status:'open', thread:[]}`
-        // entry seeded so the reducer below has something to update — mirroring `op:'journey'`'s
-        // own default.
-        if (appliedPatch.op === 'close') {
+        // D1/D10/D11: `close` and `reply` alike may target a note or a journey conversation. A
+        // note match is checked first; when the id is not a note and not yet a `notes.journeys`
+        // entry, both ops must first confirm the id names a REAL journey — unknown everywhere
+        // answers 404 (AC-20260917-02-15's "exists nowhere" case, AC-20260918-02-1's unknown-id
+        // case). D4: the locked re-read is authoritative — if the target is now present (seeded
+        // by another writer between the pre-read and this read), it's acted on directly and the
+        // probe is never consulted. The probe's answer is consulted only when this re-read ALSO
+        // finds neither. Only once the id is confirmed real is a default `{status:'open',
+        // thread:[]}` entry seeded so the reducer below has something to update/append to.
+        if (appliedPatch.op === 'close' || appliedPatch.op === 'reply') {
           const isNote = notes.notes.some((n) => n.id === appliedPatch.id)
           if (!isNote && !(appliedPatch.id in notes.journeys)) {
             const isJourney = closeProbeIsJourney ?? false
@@ -427,10 +428,11 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
             notes = { ...notes, journeys: { ...notes.journeys, [appliedPatch.id]: { status: 'open', thread: [] } } }
           }
 
-          // D11: the ownership gate — a client may close only a note or journey conversation
-          // they themselves opened. Runs only after the 404 pre-check above has confirmed the
-          // target exists, so it never leaks existence.
-          if (role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
+          // D11: the ownership gate — a client may CLOSE only a note or journey conversation
+          // they themselves opened. `reply` carries no such gate (D2's whole point: a client
+          // replying, including to someone else's note, is never refused). Runs only after the
+          // 404 pre-check above has confirmed the target exists, so it never leaks existence.
+          if (appliedPatch.op === 'close' && role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
             res.statusCode = 403
             res.end()
             return

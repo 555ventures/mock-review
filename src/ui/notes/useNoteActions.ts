@@ -4,7 +4,7 @@
 import { useCallback } from 'react'
 import { ForbiddenError, RefusedError, fetchState, patchApproval, patchNotes } from '../sync/api.js'
 import { getStore } from '../store/store.js'
-import type { Note, ThreadEntry } from '../../schemas/index.js'
+import type { Note } from '../../schemas/index.js'
 import type { Rect, Viewport } from './anchor.js'
 
 async function refresh(): Promise<void> {
@@ -63,19 +63,30 @@ export function useNoteActions() {
     [],
   )
 
+  // D1/D2: a reply is its own op, shared by both roles and the CLI. The page always sends
+  // `by: 'owner'` — the wire enum never admits `'client'` — and the server rewrites it for a
+  // client request (`clientNotesOpPatch`). No thread leaves the browser any more.
   const replyNote = useCallback(async (id: string, text: string): Promise<void> => {
     await run(async () => {
-      const store = getStore()
-      const existing = store.getState().data?.notes.notes.find((n) => n.id === id)
-      const thread: ThreadEntry[] = [...(existing?.thread ?? []), { by: 'owner', text }]
-      await patchNotes({ op: 'update', id, fields: { status: 'open', thread } })
+      await patchNotes({ op: 'reply', id, entry: { by: 'owner', text } })
       await refresh()
     }, undefined)
   }, [])
 
+  // D5: Approve goes through `close`, which accepts any source status and never touches
+  // approval by identity — the whole-thread `update` this used to send was the lost-update race
+  // with a concurrent CLI `answer`.
   const approveNote = useCallback(async (id: string): Promise<void> => {
     await run(async () => {
-      await patchNotes({ op: 'update', id, fields: { status: 'approved' } })
+      await patchNotes({ op: 'close', id, status: 'approved' })
+      await refresh()
+    }, undefined)
+  }, [])
+
+  // D8/D9: Defer also goes through `close`, landing the note in the new `deferred` pin tone.
+  const deferNote = useCallback(async (id: string): Promise<void> => {
+    await run(async () => {
+      await patchNotes({ op: 'close', id, status: 'deferred' })
       await refresh()
     }, undefined)
   }, [])
@@ -97,18 +108,20 @@ export function useNoteActions() {
     [],
   )
 
-  const replyJourney = useCallback(async (id: string, text: string, by: 'owner' | 'client' = 'owner'): Promise<void> => {
+  // D2: `useNoteActions.replyJourney` loses its `role`/`by` parameter — the page always sends
+  // `by: 'owner'`, exactly as `replyNote`.
+  const replyJourney = useCallback(async (id: string, text: string): Promise<void> => {
     await run(async () => {
-      await patchNotes({ op: 'journey', id, entry: { by, text } })
+      await patchNotes({ op: 'reply', id, entry: { by: 'owner', text } })
       await refresh()
     }, undefined)
   }, [])
 
-  // D9: approving a journey closes its conversation (blue tone, rule 33) only — the
-  // `approveJourney` approval op is gone, and nothing renders `approvedAt` any more.
+  // D4/D9: approving a journey closes its conversation (blue tone, rule 33) only — `close`
+  // already accepts journeys from any status; the `journey` op is retired entirely.
   const approveJourney = useCallback(async (id: string): Promise<void> => {
     await run(async () => {
-      await patchNotes({ op: 'journey', id, status: 'approved' })
+      await patchNotes({ op: 'close', id, status: 'approved' })
       await refresh()
     }, undefined)
   }, [])
@@ -141,6 +154,7 @@ export function useNoteActions() {
     addNote,
     replyNote,
     approveNote,
+    deferNote,
     removeNote,
     reanchorNote,
     replyJourney,

@@ -14,7 +14,12 @@ describe('mock-review answer (built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
-  it('AC-20260915-01-16: answer --note flips an open note to answered and appends the thread entry, leaving other notes untouched', () => {
+  // AC-20260918-02-8 (D6, rewrites AC-20260915-01-16): `answer` no longer hand-mutates
+  // `notes.json` — it builds `{op:'reply', id, entry:{by:'session', text}}` and parses it through
+  // `NotesPatchSchema` exactly like the page, so the wire's `text.trim().min(1)` rule applies to
+  // the CLI too. The padded input is trimmed before it reaches the thread — the pre-image kept the
+  // padding verbatim, having never parsed the wire schema at all.
+  it('AC-20260918-02-8: answer --note trims padded text through the shared reducer, flips an open note to answered, and leaves other notes untouched', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     const otherNote = {
       id: 'N2',
@@ -35,7 +40,7 @@ describe('mock-review answer (built dist/)', () => {
       {},
     )
 
-    const r = run(host, ['answer', '--note', 'N1', '--text', 'moved it'])
+    const r = run(host, ['answer', '--note', 'N1', '--text', '  moved it  '])
     expect(r.status).toBe(0)
     expect(r.stdout.trim()).toBe('answered N1')
 
@@ -46,6 +51,24 @@ describe('mock-review answer (built dist/)', () => {
     expect(n1?.status).toBe('answered')
     expect(n1?.thread).toEqual([{ by: 'session', text: 'moved it' }])
     expect(notes.notes.find((n) => n.id === 'N2')).toEqual(otherNote)
+  })
+
+  // AC-20260918-02-8 (D6): the shared reducer's `ReplyEntrySchema.text` refuses a whitespace-only
+  // reply — `answer` must exit 2 on it just as the page's schema-level refusal would, rather than
+  // pushing an empty-looking entry onto the thread.
+  it('AC-20260918-02-8: answer --note --text "   " (whitespace only) exits 2 and leaves notes.json byte-identical', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-answer-')
+    seedNotes(
+      host,
+      [{ id: 'N1', screen: 'home', state: 'default', component: null, key: null, snippet: null, status: 'open', thread: [] }],
+      {},
+    )
+    const notesPath = path.join(host, 'design', 'notes.json')
+    const before = readFileSync(notesPath, 'utf8')
+
+    const r = run(host, ['answer', '--note', 'N1', '--text', '   '])
+    expect(r.status).toBe(2)
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
   })
 
   it('AC-20260917-01-4: answer --note on a v1 notes.json exits 0, rewrites contractVersion to 2, and leaves every other key as expected', () => {
@@ -187,5 +210,17 @@ describe('mock-review answer (built dist/)', () => {
 
     const r = run(host, ['answer', '--text', 'x'])
     expect(r.status).toBe(2)
+  })
+
+  // AC-20260918-02-12 (D6, reuses AC-20260915-01-17: answer on): a journey id with no
+  // conversation yet still exits 2 — `answer` has no Vite and cannot ask whether a journey id is
+  // real, so it cannot seed a default conversation the way `POST notes` does for `close`/`reply`.
+  it('AC-20260918-02-12: answer --journey on a journey with no conversation exits 2 with "mock-review: no conversation for journey J"', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-answer-')
+    seedNotes(host, [], {})
+
+    const r = run(host, ['answer', '--journey', 'first-visit', '--text', 'x'])
+    expect(r.status).toBe(2)
+    expect(r.stderr.trim()).toBe('mock-review: no conversation for journey first-visit')
   })
 })

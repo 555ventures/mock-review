@@ -1,6 +1,6 @@
 ---
 date: 2026-09-18
-status: hardened
+status: done
 tier: critical
 area: server
 design: false
@@ -8,8 +8,10 @@ breaking: false
 depends_on: [specs/20260918/01-writes-never-tear-never-lose.md]
 depended_on_by: [specs/20260918/03-the-page-has-no-operator-controls.md]
 brief: n/a
+build_base: main
 spiked: 2026-09-18
 open_markers: 0
+diff_base: 39ca11a8639b3ee3e7e611b2b1aae7ea8cb7c65c
 ---
 
 # One reply, and the page ends a note
@@ -271,6 +273,20 @@ none of which this spec narrows — `dist/` is rebuilt at release, never in a bu
 
 Rejected: keeping `op:'journey'` as an alias for `reply`. It would preserve a second append path
 with its own attribution rule, which is the shape that produced the divergence this spec closes.
+
+Build deviations (2026-09-18, folded at close):
+
+- The pre-existing `AC-20260917-02-20 (escape)` browser test produced its refusal through a client
+  Reply (`op:'update'` → 403) — the exact bug this spec removes — so it went red once D1/D2 admitted
+  the reply. It was rewritten in place, same title and intent (a refused write surfaces one notice),
+  with the refusal now coming from a client Re-anchor, whose `op:'update'` the server still refuses
+  for a client. That this Re-anchor control is offered to a client at all is a pre-existing gap,
+  not this spec's scope.
+- The `other` layer's one row (`docs/design/design-reference.md`, D10) was authored by the ui-wave
+  worker alongside the UI it documents, not in a separate wave.
+- Review iteration 1 found the deferred note's panel row lacked the word `Deferred` that D9
+  promises; fixed (the row's "what" string takes the dialog title's `Deferred · ` prefix) and
+  pinned by an AC-20260918-02-11 browser test.
 
 ## Canonical Delta
 

@@ -347,7 +347,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
               tone={journeyTone(journey.id, data?.notes.journeys ?? EMPTY_JOURNEYS)}
               role={role}
               beats={journey.beats ?? null}
-              onReply={(text) => void actions.replyJourney(journey.id, text, role)}
+              onReply={(text) => void actions.replyJourney(journey.id, text)}
               onApprove={() => void actions.approveJourney(journey.id)}
               onConfirm={() => void actions.clientOk(journey.id, journey.beats ?? '')}
             />
@@ -393,6 +393,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
         onReply={(text) => selectedNote && void actions.replyNote(selectedNote.id, text)}
         onVerdict={(v: Verdict) => {
           if (v.kind === 'approve') void actions.approveNote(v.id)
+          else if (v.kind === 'defer') void actions.deferNote(v.id)
           else {
             void actions.removeNote(v.id)
             getStore().setUi({ selected: null, cardOpen: false })

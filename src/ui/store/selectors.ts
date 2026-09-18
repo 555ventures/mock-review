@@ -14,15 +14,6 @@ export function sameState(a: string | null | undefined, b: string | null | undef
   return a === b
 }
 
-/** D12: `deferred` is a CLOSED status that this spec renders exactly as `approved`. It is a crash
- * guard, not a rendering decision — nothing on the page can produce it here (only the `close` op,
- * whose page caller is the client-page spec). THAT spec owns the real muted-grey tone and the
- * `Deferred` badge, widens `Tone`/`PinTone`/`TONE`, amends design-reference §4 and §13, and
- * DELETES this function; the compiler lists its call sites. */
-export function toneOf(status: Note['status']): Tone {
-  return status === 'deferred' ? 'approved' : status
-}
-
 /** Rule 2 (amended 2026-09-17): worst-of over the lifecycle. `null` means the list is EMPTY —
  * never "nothing pending". Any status that is not `open`/`answered` counts as closed, so a
  * status added later (`deferred`, spec 02) needs no new branch here — it is not `open` and not
@@ -51,11 +42,13 @@ export function stateTone(screen: string, state: string, notes: readonly Note[])
 
 /** Rule 5 (amended): a journey's own conversation status, and nothing else. `null` when the
  * journey has no conversation entry. Never reads `approval.journeys`; never aggregates the notes
- * of the screens its steps visit. Routes through spec 02's `toneOf` so the status union stays
- * closed at four members without widening `Tone`/`PinTone`. */
+ * of the screens its steps visit. D9: `deferred` is a fourth PIN tone owned by `notes-ui.tsx`'s
+ * `TONE` table, not a widened aggregate `Tone` — the aggregate stays at three members, so a
+ * `deferred` conversation collapses to `approved` here, inline, now that `toneOf` is gone. */
 export function journeyTone(id: string, journeys: Record<string, JourneyConversation>): Tone | null {
   const conv = journeys[id]
-  return conv ? toneOf(conv.status) : null
+  if (!conv) return null
+  return conv.status === 'deferred' ? 'approved' : conv.status
 }
 
 /** Every note anchored to `screen`, any state (the notes panel's "THIS SCREEN" group). */

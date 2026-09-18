@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ConfigSchema, NullConfigSchema } from './config.js'
-import { NoteSchema, ThreadEntrySchema, NotesSchema } from './notes.js'
+import { NoteSchema, NotesSchema, type ThreadEntry } from './notes.js'
 import { ApprovalSchema } from './approval.js'
 import { ScreenSchema, ShellSchema, JourneySchema } from './check.js'
 import { InventoryRowSchema } from './sweep.js'
@@ -33,6 +33,30 @@ const AddNoteSchema = NoteSchema.omit({ id: true })
     if (msg) ctx.addIssue({ code: 'custom', message: msg, path: [note.project === true ? 'screen' : 'project'] })
   })
 
+/** D1/Contracts: `op:'reply'`'s entry shape. `by` is bounded HERE (the wire); the read-back
+ * `ThreadEntrySchema.by` stays `z.string()` under the read-back permissiveness rule (spec 04 D4).
+ * `'client'` is deliberately NOT on the wire FOR THIS OP: the server writes it from the role
+ * (D2), so no reply can forge an attribution the page renders as the client's words. */
+const ReplyEntrySchema = z
+  .object({
+    by: z.enum(['owner', 'session']),
+    text: z.string().trim().min(1),
+  })
+  .strict()
+
+/** D3: `update.fields` refuses `status` and `thread` BY NAME. `.omit()` cannot do this — the
+ * `.passthrough()` catchall re-admits them (A3, executed) — and `.strict()` would also reject
+ * `rect`/`viewport`/`whole`, the page-owned geometry `update` must keep accepting. */
+const UpdateFieldsSchema = NoteSchema.omit({ id: true })
+  .partial()
+  .superRefine((fields, ctx) => {
+    for (const key of ['status', 'thread'] as const) {
+      if (Object.prototype.hasOwnProperty.call(fields, key)) {
+        ctx.addIssue({ code: 'custom', message: `update may not set ${key}`, path: [key] })
+      }
+    }
+  })
+
 /** D6/D23/Contracts: `POST notes` body. `add`'s `note` never carries an `id` at all (see
  * `AddNoteSchema` — the server always assigns `N`+padded sequence, AC-20260915-02-7; a
  * caller-supplied id is a validation failure, not a value the server might honor); `update`'s
@@ -48,7 +72,7 @@ export const NotesPatchSchema = z.discriminatedUnion('op', [
     .object({
       op: z.literal('update'),
       id: z.string(),
-      fields: NoteSchema.omit({ id: true }).partial(),
+      fields: UpdateFieldsSchema,
     })
     .strict(),
   z
@@ -59,10 +83,9 @@ export const NotesPatchSchema = z.discriminatedUnion('op', [
     .strict(),
   z
     .object({
-      op: z.literal('journey'),
+      op: z.literal('reply'),
       id: z.string(),
-      status: z.enum(['open', 'answered', 'approved', 'deferred']).optional(),
-      entry: ThreadEntrySchema.optional(),
+      entry: ReplyEntrySchema,
     })
     .strict(),
   z
@@ -75,6 +98,14 @@ export const NotesPatchSchema = z.discriminatedUnion('op', [
 ])
 
 export type NotesPatch = z.infer<typeof NotesPatchSchema>
+
+/** D2/Contracts: the wire enum and the reducer's input are deliberately DIFFERENT types.
+ * `clientNotesOpPatch` rewrites a client's entry to `by: 'client'`, which the wire enum does not
+ * admit — and the repo forbids `as`, so the rewrite needs somewhere legal to land.
+ * `applyNotesPatch` takes this widened form; only the HTTP boundary parses the narrow one. */
+export type AppliedNotesPatch =
+  | Exclude<NotesPatch, { op: 'reply' }>
+  | (Omit<Extract<NotesPatch, { op: 'reply' }>, 'entry'> & { entry: ThreadEntry })
 
 /** D6/Contracts: `POST approval` body. */
 export const ApprovalPatchSchema = z.discriminatedUnion('op', [

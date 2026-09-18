@@ -145,7 +145,12 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
     }
   }, 60_000)
 
-  it('AC-20260915-02-19: answer over the CLI turns the pin yellow live (no reload), and Approve turns it blue', async () => {
+  // AC-20260918-02-7 (D5, rewrites AC-20260915-02-19): the owner's Approve button now sends
+  // `op:'close'` — the pre-image sent `op:'update'` with the whole recomputed thread, which is
+  // the lost-update race D5 closes. Captured with `page.waitForRequest` on the real POST the
+  // click fires; the served note's thread length must be unchanged by an op that never carries a
+  // thread at all.
+  it('AC-20260918-02-7 (AC-20260915-02-19): answer over the CLI turns the pin yellow live (no reload), and Approve sends op:close and turns it blue with the thread unchanged in length', async () => {
     serve = await startServe(greenHost)
     const { url: serveUrl, host: serveHost } = serve
     const notesPath = path.join(serveHost, 'design', 'notes.json')
@@ -229,13 +234,34 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
       await expect.poll(() => approveButton.isVisible(), SLOW_POLL).toBe(true)
       await expect.poll(() => dialog.getByRole('button', { name: 'Reject' }).isVisible(), SLOW_POLL).toBe(true)
 
+      const threadLengthBefore = (JSON.parse(readFileSync(notesPath, 'utf8')) as NotesDoc).notes.find(
+        (n) => n.id === 'N001',
+      )?.thread.length
+
       await approveButton.click()
-      await page.getByRole('button', { name: 'Approve', exact: true }).last().click()
+      // AC-20260918-02-7: capture the real request the confirm's Approve click fires — its body
+      // must carry `op:'close'`, never `op:'update'` (which is how the lost-update race with a
+      // concurrent CLI answer used to happen: `update` sent the page's own, possibly-stale,
+      // recomputed thread).
+      const [approveRequest] = await Promise.all([
+        page.waitForRequest(
+          (req) => req.url().includes('/__mock-review/notes') && req.method() === 'POST',
+          SLOW_POLL,
+        ),
+        page.getByRole('button', { name: 'Approve', exact: true }).last().click(),
+      ])
+      const approveBody = JSON.parse(approveRequest.postData() ?? '{}') as { op?: string }
+      expect(approveBody.op).toBe('close')
 
       await expect.poll(() => {
         const doc = JSON.parse(readFileSync(notesPath, 'utf8')) as NotesDoc
         return doc.notes.find((n) => n.id === 'N001')?.status
       }, SLOW_POLL).toBe('approved')
+
+      // AC-20260918-02-7: `close` never carries a thread — the served note's thread length must
+      // be exactly what it was before Approve was clicked.
+      const afterApproveDoc = JSON.parse(readFileSync(notesPath, 'utf8')) as NotesDoc
+      expect(afterApproveDoc.notes.find((n) => n.id === 'N001')?.thread.length).toBe(threadLengthBefore)
 
       // TONE.approved.pin is `bg-blue-500 text-white`; Tailwind v4's blue-500 is
       // `oklch(62.3% 0.214 259.815)` (this repo's installed tailwindcss theme.css). D26 fixed the

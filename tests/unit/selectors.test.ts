@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process'
 import { globSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { screenTone, stateTone, journeyTone, notesHere, projectNotes, toneOf, worst } from '../../src/ui/store/selectors.js'
+import { screenTone, stateTone, journeyTone, notesHere, projectNotes, worst } from '../../src/ui/store/selectors.js'
 import type { Note } from '../../src/schemas/index.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -115,14 +115,19 @@ describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
     expect(notesHere('home', notes).map((n) => n.id)).toEqual(['N1'])
   })
 
-  // AC-20260917-02-17 (D12): `toneOf` is the one crash guard for the new `deferred` status —
-  // `deferred -> approved`, identity on the other three.
-  // Continues green under AC-20260917-03-20 — toneOf is untouched by D10's supersession.
-  it('AC-20260917-02-17 / AC-20260917-03-20: toneOf(\'deferred\') returns \'approved\', and is the identity on open/answered/approved', () => {
-    expect(toneOf('deferred')).toBe('approved')
-    expect(toneOf('open')).toBe('open')
-    expect(toneOf('answered')).toBe('answered')
-    expect(toneOf('approved')).toBe('approved')
+  // AC-20260918-02-11 (D9, supersedes AC-20260917-02-17): `deferred` becomes a fourth PIN tone —
+  // owned by `notes-ui.tsx`'s `TONE` table, not by a widened aggregate `Tone`/`toneOf` here.
+  // `toneOf` is DELETED by D9 (its call sites are all File Plan rows — the compiler enumerates
+  // them once the function is gone), so this file no longer imports or asserts on it; instead it
+  // asserts the thing D9 actually promises: `TONE.deferred` exists and is muted-grey, distinct
+  // from `TONE.approved`'s blue.
+  it('AC-20260918-02-11: TONE.deferred is a distinct muted-grey pin tone, not merely an alias of TONE.approved', async () => {
+    const { TONE } = await import('../../src/ui/notes/notes-ui.js')
+    const tone = TONE as Record<string, { box: string; pin: string } | undefined>
+    expect(tone.deferred).toBeDefined()
+    expect(tone.deferred).not.toEqual(tone.approved)
+    expect(tone.deferred?.pin).not.toContain('blue')
+    expect(tone.deferred?.box).not.toContain('blue')
   })
 
   // AC-20260917-03-19 (D10): supersedes spec 02's AC-20260917-02-17 pin of `null` for this exact

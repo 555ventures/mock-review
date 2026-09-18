@@ -7,7 +7,9 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { ensureDesignFiles, readDesignDoc, readJson, withDesignLock, writeJsonAtomic } from '../files/json.js'
 import { CONTRACT_VERSION, DecisionsSchema } from '../schemas/index.js'
-import type { Decisions, Notes, ThreadEntry } from '../schemas/index.js'
+import type { Decisions, Notes } from '../schemas/index.js'
+import { NotesPatchSchema } from '../schemas/patches.js'
+import { applyNotesPatch } from '../server/patches.js'
 import { fail } from './io.js'
 
 export type AnswerFlags = {
@@ -16,8 +18,6 @@ export type AnswerFlags = {
   text: string | undefined
   decision: string | undefined
 }
-
-type ThreadTarget = { status: 'open' | 'answered' | 'approved' | 'deferred'; thread: ThreadEntry[] }
 
 // D5: only `ensureDesignFiles` and the two USAGE refusals (missing `--text`, and the
 // `--note`/`--journey` XOR) stay outside `withDesignLock`. Everything else — the document read,
@@ -47,21 +47,35 @@ export async function answerVerb(cwd: string, flags: AnswerFlags): Promise<strin
 
     let screenForDecision: string | null = null
     let printedId: string
-    let target: ThreadTarget
+    let targetId: string
 
+    // D6: `answer` has no Vite and cannot ask whether a journey id is real (unlike `POST notes`,
+    // which can seed a default conversation for one) — a journey target must already have a
+    // conversation, as before. A note or journey missing here still fails exactly as before.
     if (note !== undefined) {
       const found = notes.notes.find((n) => n.id === note)
       if (!found) fail(`no note ${note}`)
       screenForDecision = found.screen
       printedId = note
-      target = found
+      targetId = note
     } else {
       const journeyId = journey as string
       const found = notes.journeys[journeyId]
       if (!found) fail(`no conversation for journey ${journeyId}`)
       printedId = journeyId
-      target = found
+      targetId = journeyId
     }
+
+    // D6: builds the same wire shape the page sends and parses it through the shared
+    // `NotesPatchSchema`, so `ReplyEntrySchema.text`'s trim/non-empty rule applies to the CLI
+    // exactly as it does to a browser reply — a whitespace-only `--text` refuses here too.
+    const parsedPatch = NotesPatchSchema.safeParse({
+      op: 'reply',
+      id: targetId,
+      entry: { by: 'session', text },
+    })
+    if (!parsedPatch.success) fail('invalid notes patch')
+    const patch = parsedPatch.data
 
     // D19(c): validate `decisions.json` (when present) before mutating or writing anything, so an
     // invalid file leaves notes.json (and decisions.json) byte-identical.
@@ -79,9 +93,12 @@ export async function answerVerb(cwd: string, flags: AnswerFlags): Promise<strin
       }
     }
 
-    target.status = 'answered'
-    target.thread.push({ by: 'session', text })
-    writeJsonAtomic(notesPath, { ...notes, contractVersion: CONTRACT_VERSION })
+    // D6/D7: the reducer decides status from attribution — `by:'session'` always resolves to
+    // `answered`, so rule 6 (un-approve on reopen) can never fire here; `answer` never reads or
+    // writes `design/approval.json`. `withDesignLock`'s own lock is this call's serialization —
+    // `applyNotesPatch` is the shared reducer both the page and the CLI now go through (D6).
+    const result = applyNotesPatch(notes, patch)
+    writeJsonAtomic(notesPath, { ...result.notes, contractVersion: CONTRACT_VERSION })
 
     if (decision !== undefined && decisions) {
       decisions.decisions.push({ screen: screenForDecision, text: decision, at: new Date().toISOString() })

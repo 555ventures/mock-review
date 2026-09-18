@@ -7,7 +7,7 @@
 // note, D7) consistent for every write that goes through them.
 import type { Approval, Config, NullConfig, Note, Notes } from '../schemas/index.js'
 import { EMPTY_APPROVAL } from '../schemas/index.js'
-import type { ApprovalPatch, NotesPatch } from '../schemas/patches.js'
+import type { AppliedNotesPatch, ApprovalPatch } from '../schemas/patches.js'
 
 /** D5: `N` + zero-padded (3 digits) max existing numeric id + 1. */
 function nextNoteId(existing: readonly Note[]): string {
@@ -47,10 +47,14 @@ function unapproveScreen(approval: Approval, name: string): Approval {
  * D6/D16: `applyNotesPatch(notes, patch, approval = EMPTY_APPROVAL)` -> `{ notes, approval }`.
  * `approval` is read (never required) so rule 6 can un-approve a screen in the same call; a
  * caller with no approval document yet (e.g. a pure unit test) may omit it.
+ *
+ * D2/Contracts: `patch` is `AppliedNotesPatch`, not the wire `NotesPatch` — the HTTP boundary
+ * (`plugin.ts`) rewrites a client's `reply.entry.by` to `'client'`, a value the wire enum does
+ * not admit, before calling this reducer. Only the route layer parses the narrow wire type.
  */
 export function applyNotesPatch(
   notes: Notes,
-  patch: NotesPatch,
+  patch: AppliedNotesPatch,
   approval: Approval = EMPTY_APPROVAL,
 ): { notes: Notes; approval: Approval } {
   switch (patch.op) {
@@ -100,16 +104,32 @@ export function applyNotesPatch(
       return { notes: nextNotes, approval }
     }
 
-    case 'journey': {
-      const existing = notes.journeys[patch.id] ?? { status: 'open' as const, thread: [] }
-      let status = patch.status ?? existing.status
-      let thread = existing.thread
-      // D7 rule 7: any reply (an `entry`) reopens the journey's conversation regardless of any
-      // `status` the caller also passed.
-      if (patch.entry) {
-        thread = [...thread, patch.entry]
-        status = 'open'
+    case 'reply': {
+      // D1: `id` resolves note-first, exactly as `close` does — the route layer (`plugin.ts`)
+      // has already confirmed the id names a real note or a real journey (seeding a default
+      // `{status:'open', thread:[]}` conversation when it was a journey with none yet) before
+      // this reducer ever runs, so both branches below are total over what actually reaches them.
+      // D1/D7 rule 6/7: attribution alone decides the resulting status, from ANY current status —
+      // a session reply answers, anyone else's reply reopens.
+      const status = patch.entry.by === 'session' ? ('answered' as const) : ('open' as const)
+
+      const idx = notes.notes.findIndex((n) => n.id === patch.id)
+      if (idx !== -1) {
+        const existing = notes.notes[idx]
+        if (!existing) return { notes, approval }
+        const updated: Note = { ...existing, thread: [...existing.thread, patch.entry], status }
+        const nextArr = notes.notes.slice()
+        nextArr[idx] = updated
+        const nextNotes: Notes = { ...notes, notes: nextArr }
+
+        // D7 rule 6: a NOTE reply whose resulting status is `open` un-approves that note's screen.
+        // Journey replies never touch approval (below).
+        const nextApproval = status === 'open' && updated.screen !== null ? unapproveScreen(approval, updated.screen) : approval
+        return { notes: nextNotes, approval: nextApproval }
       }
+
+      const existingJourney = notes.journeys[patch.id] ?? { status: 'open' as const, thread: [] }
+      const thread = [...existingJourney.thread, patch.entry]
       const nextNotes: Notes = { ...notes, journeys: { ...notes.journeys, [patch.id]: { status, thread } } }
       return { notes: nextNotes, approval }
     }
