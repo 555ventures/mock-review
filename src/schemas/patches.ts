@@ -11,11 +11,27 @@ import { InventoryRowSchema } from './sweep.js'
  * so an `id` the caller sends would otherwise still survive as an ordinary passthrough key; a
  * blanket `.strict()` would fix that but also reject those same legitimate extras. The refine
  * targets `id` specifically, so `rect`/`viewport`/`whole` keep passing through untouched. */
-const AddNoteSchema = NoteSchema.omit({ id: true }).superRefine((note, ctx) => {
-  if (Object.prototype.hasOwnProperty.call(note, 'id')) {
-    ctx.addIssue({ code: 'custom', message: 'add may not specify id', path: ['id'] })
-  }
-})
+/** D6: a note is either product-wide (`project: true`, no screen) or anchored to a screen.
+ * Returns the violated rule's message, or null when the pair is legal. Exported so the route
+ * layer (`src/server/plugin.ts`) can apply the same rule to a MERGED note on `op:'update'` — the
+ * read-back shapes in `src/schemas/notes.ts` are deliberately untouched (see Decisions D6). */
+export function scopeViolation(note: { screen: string | null; project?: true | undefined }): string | null {
+  const isProject = note.project === true
+  if (isProject && note.screen !== null) return 'a project note carries no screen'
+  if (!isProject && note.screen === null) return 'a note with no screen must be project:true'
+  return null
+}
+
+const AddNoteSchema = NoteSchema.omit({ id: true })
+  .superRefine((note, ctx) => {
+    if (Object.prototype.hasOwnProperty.call(note, 'id')) {
+      ctx.addIssue({ code: 'custom', message: 'add may not specify id', path: ['id'] })
+    }
+  })
+  .superRefine((note, ctx) => {
+    const msg = scopeViolation(note)
+    if (msg) ctx.addIssue({ code: 'custom', message: msg, path: [note.project === true ? 'screen' : 'project'] })
+  })
 
 /** D6/D23/Contracts: `POST notes` body. `add`'s `note` never carries an `id` at all (see
  * `AddNoteSchema` — the server always assigns `N`+padded sequence, AC-20260915-02-7; a

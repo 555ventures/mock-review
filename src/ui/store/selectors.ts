@@ -23,33 +23,39 @@ export function toneOf(status: Note['status']): Tone {
   return status === 'deferred' ? 'approved' : status
 }
 
-/** Rule 2: worst-of — open beats answered beats nothing pending. `deferred` is explicitly closed
- * (D12) rather than left to fall through the `if`/`if`/`return null` order below. */
+/** Rule 2 (amended 2026-09-17): worst-of over the lifecycle. `null` means the list is EMPTY —
+ * never "nothing pending". Any status that is not `open`/`answered` counts as closed, so a
+ * status added later (`deferred`, spec 02) needs no new branch here — it is not `open` and not
+ * `answered`, so it lands in the closed bucket, which is why D10 retires spec 02's explicit
+ * deferred line rather than keeping both. */
 export function worst(notes: readonly Note[]): Tone | null {
+  if (notes.length === 0) return null
   if (notes.some((n) => n.status === 'open')) return 'open'
   if (notes.some((n) => n.status === 'answered')) return 'answered'
-  if (notes.some((n) => n.status === 'deferred')) return null
-  return null
+  return 'approved'
 }
 
-/** Rule 3: a screen's tone is worst-of its notes across every state; with nothing pending it is
- * `approved` only once `approval.screens[name]` exists, else `answered`. */
-export function screenTone(name: string, notes: readonly Note[], approval: Approval): Tone {
+/** Rule 3 (amended): worst-of this screen's notes; with no notes at all, `approved` when the
+ * owner explicitly approved the screen, else `null` (no dot). */
+export function screenTone(name: string, notes: readonly Note[], approval: Approval): Tone | null {
   const w = worst(notes.filter((n) => n.screen === name))
   if (w) return w
-  return name in approval.screens ? 'approved' : 'answered'
+  return name in approval.screens ? 'approved' : null
 }
 
-/** Rule 4: a state's tone is worst-of its notes, with no approval concept — nothing pending means
- * no dot at all. */
+/** Rule 4 (amended): worst-of that state's notes; an all-approved state is `approved`, an empty
+ * one is `null`. */
 export function stateTone(screen: string, state: string, notes: readonly Note[]): Tone | null {
   return worst(notes.filter((n) => n.screen === screen && sameState(n.state, state)))
 }
 
-/** Rule 5: a journey with no conversation entry defaults to `answered`. */
-export function journeyTone(id: string, journeys: Record<string, JourneyConversation>): Tone {
-  const status = journeys[id]?.status
-  return status === undefined ? 'answered' : toneOf(status)
+/** Rule 5 (amended): a journey's own conversation status, and nothing else. `null` when the
+ * journey has no conversation entry. Never reads `approval.journeys`; never aggregates the notes
+ * of the screens its steps visit. Routes through spec 02's `toneOf` so the status union stays
+ * closed at four members without widening `Tone`/`PinTone`. */
+export function journeyTone(id: string, journeys: Record<string, JourneyConversation>): Tone | null {
+  const conv = journeys[id]
+  return conv ? toneOf(conv.status) : null
 }
 
 /** Every note anchored to `screen`, any state (the notes panel's "THIS SCREEN" group). */
@@ -57,10 +63,10 @@ export function notesHere(screen: string, notes: readonly Note[]): Note[] {
   return notes.filter((n) => n.screen === screen)
 }
 
-/** Every note not anchored to `screen` — everything else in the project, including project notes
- * (the notes panel's "PROJECT" group). */
-export function notesRest(screen: string, notes: readonly Note[]): Note[] {
-  return notes.filter((n) => n.screen !== screen)
+/** D1: the notes panel's PROJECT group — product-wide notes only, screen-independent. Replaces
+ * `notesRest`, which selected "every note not on this screen". */
+export function projectNotes(notes: readonly Note[]): Note[] {
+  return notes.filter((n) => n.project === true)
 }
 
 /** D3/D16: the duck-typed screen-module shape (`meta.states` + `examples`) — `Object.keys(examples)`

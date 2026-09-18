@@ -9,7 +9,7 @@ import { loadConfig, NULL_CONFIG } from '../analysis/config.js'
 import { discoverHost } from '../analysis/discover.js'
 import { ApprovalSchema, CONTRACT_VERSION, NotesSchema } from '../schemas/index.js'
 import type { Approval, Config, NullConfig, Notes, ThreadEntry } from '../schemas/index.js'
-import { ApprovalPatchSchema, NotesPatchSchema } from '../schemas/patches.js'
+import { ApprovalPatchSchema, NotesPatchSchema, scopeViolation } from '../schemas/patches.js'
 import type { ApprovalPatch, NotesPatch, ServerState } from '../schemas/patches.js'
 import { applyApprovalPatch, applyNotesPatch, type ApprovalPatchCtx } from './patches.js'
 import { buildState } from './state.js'
@@ -364,6 +364,26 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
       res.statusCode = 404
       res.end()
       return
+    }
+
+    // D6: `op:'update'`'s write-path scope invariant — checked against the MERGED note (existing
+    // + patch fields), not the patch fields alone, so a patch that would leave the note claiming
+    // both kinds (or neither) is refused 400. Runs after the 404 pre-check above (the id is known
+    // to exist by this point) and before `applyNotesPatch` ever sees the patch. `AddNoteSchema`'s
+    // own `superRefine` covers `op:'add'`; the read-back schemas (`src/schemas/notes.ts`) stay
+    // permissive on purpose (D6) — an existing contradictory note still loads and renders, it just
+    // can't be updated into staying contradictory.
+    if (appliedPatch.op === 'update') {
+      const existing = notes.notes.find((n) => n.id === appliedPatch.id)
+      if (existing) {
+        const mergedScreen = appliedPatch.fields.screen !== undefined ? appliedPatch.fields.screen : existing.screen
+        const mergedProject =
+          appliedPatch.fields.project !== undefined ? appliedPatch.fields.project : existing.project
+        if (scopeViolation({ screen: mergedScreen, project: mergedProject })) {
+          sendJson(res, 400, { error: 'invalid notes patch' })
+          return
+        }
+      }
     }
 
     // D10/D11: `close` may target a note or a journey conversation. A note match is checked

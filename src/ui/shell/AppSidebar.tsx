@@ -80,6 +80,7 @@ export function AppSidebar({ route }: { route: Route }) {
             <SidebarMenu>
               {journeys.map((j) => {
                 const on = activeJourney?.id === j.id
+                const jTone = journeyTone(j.id, journeysConv)
                 return (
                   <SidebarMenuItem key={j.id}>
                     <SidebarMenuButton asChild tooltip={j.persona} isActive={on && activeIdx < 0}>
@@ -92,9 +93,7 @@ export function AppSidebar({ route }: { route: Route }) {
                         <span>{j.title}</span>
                       </a>
                     </SidebarMenuButton>
-                    <SidebarMenuBadge>
-                      <StatusDot tone={journeyTone(j.id, journeysConv)} />
-                    </SidebarMenuBadge>
+                    <SidebarMenuBadge>{jTone && <StatusDot tone={jTone} />}</SidebarMenuBadge>
                     {on && (
                       <SidebarMenuSub className="mr-0 gap-0.5 pr-0">
                         {j.steps.map((s, i) => {
@@ -125,6 +124,7 @@ export function AppSidebar({ route }: { route: Route }) {
             <SidebarMenu>
               {screens.map((screen) => {
                 const on = curScreen === screen.name
+                const sTone = screenTone(screen.name, notes, approval)
                 return (
                   <SidebarMenuItem key={screen.name}>
                     <SidebarMenuButton asChild tooltip={screenLabel(screen.name)} isActive={on}>
@@ -133,9 +133,7 @@ export function AppSidebar({ route }: { route: Route }) {
                         <span>{screenLabel(screen.name)}</span>
                       </a>
                     </SidebarMenuButton>
-                    <SidebarMenuBadge>
-                      <StatusDot tone={screenTone(screen.name, notes, approval)} />
-                    </SidebarMenuBadge>
+                    <SidebarMenuBadge>{sTone && <StatusDot tone={sTone} />}</SidebarMenuBadge>
                     {on && (
                       <SidebarMenuSub className="mr-0 gap-0.5 pr-0">
                         {screenStates(screen).map((s) => {

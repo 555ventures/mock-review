@@ -1,8 +1,13 @@
 // AC-20260915-02-5: D3's label rules — screenLabel/stateLabel/stepLabel live in
 // src/ui/store/labels.ts per the File Plan; statesOf is listed under src/ui/store/selectors.ts
-// in the same File Plan row (`worst, screenTone, stateTone, journeyTone, notesHere, notesRest,
+// in the same File Plan row (`worst, screenTone, stateTone, journeyTone, notesHere, projectNotes,
 // statesOf, labels`), so this file imports it from there even though the AC that exercises it
 // (AC-5) is routed to this test file by the File Plan's tests/unit/labels.test.ts row.
+// Collision closure (specs/20260917/03, D1): `notesRest` (named above until this spec) is retired
+// and replaced by `projectNotes` — the notes panel's PROJECT group membership rule, screen-
+// independent (`project: true` only), no `screen` argument. `journeyTone` is also reshaped by that
+// spec (`Tone | null`, D4). Neither change touches this file's own assertions (screenLabel/
+// stateLabel/stepLabel/statesOf), so only this header comment moves.
 import { describe, expect, it } from 'vitest'
 import { screenLabel, stateLabel, stepLabel } from '../../src/ui/store/labels.js'
 import { statesOf } from '../../src/ui/store/selectors.js'

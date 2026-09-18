@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyNotesPatch, applyApprovalPatch } from '../../src/server/patches.js'
 import { NotesSchema, EMPTY_NOTES, EMPTY_APPROVAL } from '../../src/schemas/index.js'
+import { NotesPatchSchema } from '../../src/schemas/patches.js'
 import type { Note, Approval, Config } from '../../src/schemas/index.js'
 
 function baseNote(overrides: Partial<Note> = {}): Omit<Note, 'id'> {
@@ -241,5 +242,70 @@ describe('AC-20260917-02-14: applyNotesPatch close op (D10)', () => {
     const id = seeded.notes.notes[0]?.id as string
     const result = applyNotesPatch(seeded.notes, { op: 'close', id, status: 'deferred' })
     expect(result.notes.notes.find((n) => n.id === id)?.status).toBe('deferred')
+  })
+})
+
+// AC-20260917-03-10/-12 (D6): the write-path scope invariant — a note is either product-wide
+// (`project: true`, no screen) or anchored to a screen, never both and never neither. Enforced on
+// `AddNoteSchema` only; the read-back document schemas (`NotesSchema`/`NoteSchema`) stay
+// permissive on purpose (D6's own rationale: a refinement there would blank an existing host's
+// panel with no error surfaced, since `buildState` swallows a parse failure into `EMPTY_NOTES`).
+describe('AC-20260917-03-10/-12: the notes scope invariant (D6)', () => {
+  it('AC-20260917-03-10: NotesPatchSchema rejects an add whose note carries both screen and project:true, with the exact issue message', () => {
+    const result = NotesPatchSchema.safeParse({
+      op: 'add',
+      note: {
+        screen: 'home',
+        state: null,
+        component: null,
+        key: null,
+        snippet: null,
+        status: 'open',
+        thread: [],
+        project: true,
+      },
+    })
+    expect(result.success).toBe(false)
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message)
+    expect(messages).toContain('a project note carries no screen')
+  })
+
+  it('AC-20260917-03-10: NotesPatchSchema rejects an add whose note carries screen:null with no project marker, with the exact issue message', () => {
+    const result = NotesPatchSchema.safeParse({
+      op: 'add',
+      note: {
+        screen: null,
+        state: null,
+        component: null,
+        key: null,
+        snippet: null,
+        status: 'open',
+        thread: [],
+      },
+    })
+    expect(result.success).toBe(false)
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message)
+    expect(messages).toContain('a note with no screen must be project:true')
+  })
+
+  it('AC-20260917-03-12: NotesSchema still accepts a contradictory note (screen + project:true) already on disk — the read-back path stays permissive', () => {
+    const result = NotesSchema.safeParse({
+      contractVersion: 2,
+      notes: [
+        {
+          id: 'N001',
+          screen: 'home',
+          state: null,
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'open',
+          thread: [],
+          project: true,
+        },
+      ],
+      journeys: {},
+    })
+    expect(result.success).toBe(true)
   })
 })

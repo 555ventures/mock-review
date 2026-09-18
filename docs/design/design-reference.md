@@ -1,5 +1,32 @@
 # Mock reviewer — binding design reference
 
+## Amendments
+
+### 2026-09-17 — specs/20260917/03-the-panel-and-the-dots-tell-the-truth.md
+
+"The panel and the dots tell the truth" redefines what the notes panel's PROJECT group holds and
+what every sidebar/panel status dot means. The PROJECT group is redefined from "not this screen" to
+`project === true` exactly (D1); selecting a note never navigates to another screen, since D1 removes
+the only panel rows that could ever target one (D2); tone derivation gains a fourth outcome —
+`worst()` can now return `'approved'`, not just fall back to `null` (D3); a journey's tone comes only
+from that journey's own conversation and no longer defaults to `answered` when untouched (D4); both
+dot call sites and the notes-panel's screen header render nothing at a null tone instead of a bare
+grey circle (D5); the write path refuses a note that claims `project: true` while also carrying a
+`screen` (D6); this document is amended in place instead of silently rewritten (D7); the PROJECT
+group's empty text and add-note target rename to match its new meaning (D8); the journey panel's own
+status line follows the same null-hides rule as the sidebar (D9); and the approve-screen header now
+also renders — title and control, no dot — at a null tone, because under D3 an untouched screen is
+`null`, never `answered` (D11).
+
+Every passage below that the prototype's capture got right for 2026-09-15 but that this spec
+supersedes has been rewritten in place, each citing back to this entry rather than silently
+asserting the new behaviour as if it had always been true. Retired: §5's old membership rule for the
+second group and its old empty-group copy, the `stepLabel` branch of the "what" string (§5), §13
+rules 2–5, §13 rule 18's other-screen clause, and §14's claim that `approvedScreens` was the sole
+route to a blue screen dot.
+
+---
+
 Frozen from the prototype at
 `/home/jj/projects/claude-plugins/.claude/worktrees/agent-ae25a43a1031bd49a/prototypes/react-mocks`
 (captured 2026-09-15). Every claim below cites `file:line` in that tree. The screenshots named
@@ -263,9 +290,13 @@ panel 2 `defaultSize="40"`, both `minSize="15"`, separated by a `ResizableHandle
 | key | heading | contents | empty text |
 | --- | --- | --- | --- |
 | `here` | THIS SCREEN | every note whose `screen` is the current screen, any state | "No notes on this screen." |
-| `rest` | PROJECT | every note whose `screen` is *not* the current screen (project notes included) | "No other notes." |
+| `project` | PROJECT | every note with `project === true` — screen-independent by construction | "No project notes." |
 
-(`:430-433`, `:559`, `:566`.) Headings are `label` uppercased by CSS.
+(`:430-433`, `:559`, `:566`.) Headings are `label` uppercased by CSS. **Amended 2026-09-17** (see
+Amendments, D1/D8): the second group's key and its old membership rule — any note not anchored to
+the current screen — are retired; a note pinned to another screen appears **nowhere** in this panel
+now, and is reached only through that screen's own sidebar entry. The empty text changed with the
+meaning, since the old copy described that retired rule.
 
 **Group header** (`:558-564`): `sticky top-0 z-10 flex items-center gap-2 bg-sidebar/95 px-3 py-2
 backdrop-blur`, holding the label
@@ -284,8 +315,11 @@ The "what" string (`:570-572`):
 - part = `Project note` (project) | `Whole screen` (whole) | `Screen` (anchor `__screen`) | the
   component name;
 - in **THIS SCREEN** for the current state, or for a project note → just the part;
-- otherwise → `{stateLabel or stepLabel} · {part}` — `stateLabel` when the note is on this screen,
-  `stepLabel` ("Account – Payment failed") when it is elsewhere.
+- otherwise (THIS SCREEN, a different state) → `{stateLabel} · {part}`.
+
+**Amended 2026-09-17** (see Amendments, D1): the `stepLabel` branch is retired — every row in **THIS
+SCREEN** is on this screen and every row in **PROJECT** is a project note, so no row in this panel
+can ever name another screen's step.
 
 Atlas: `11-screen-console-account-default.png`, `25-note-being-drawn-drag-rectangle.png`,
 `59-approved-blue-pin-and-row.png`.
@@ -583,14 +617,22 @@ Every rule below is implemented; each cites its line.
 1. **Three tones, one palette.** red = pending an AI fix, yellow = pending your approval, blue =
    approved (`notes-ui.tsx:15-21`). The same `TONE.pin` colours the dot, the pin badge and the box
    border everywhere.
-2. **Status derivation is worst-of.** `worst()` returns `open` if any note is open, else `answered`
-   if any is answered, else null (`store.tsx:24-25`).
-3. **Screen tone** = worst-of that screen's notes across *all* states; with nothing pending it is
-   `approved` only when the owner explicitly approved the screen, otherwise `answered`
-   (`store.tsx:28-29`). Journey notes never take part (there are none).
-4. **State tone** = worst-of that state's notes, with no approval concept: nothing pending → no dot
-   (`store.tsx:31-32`).
-5. **Journey tone** defaults to `answered` when the journey has no thread (`store.tsx:23`).
+2. **Status derivation is worst-of.** `worst()` returns `null` for an **empty** list, `open` if any
+   note is open, else `answered` if any is answered, else `approved`
+   (`src/ui/store/selectors.ts`). **Amended 2026-09-17** (see Amendments, D3): the prototype's
+   `worst()` had no `approved` branch, so "nothing pending" and "everything approved" both fell
+   through to the same `null`; the rebuild's `worst()` distinguishes them.
+3. **Screen tone** = worst-of that screen's notes across *all* states when that is non-null;
+   otherwise `approved` when the owner explicitly approved the screen, else no dot
+   (`src/ui/store/selectors.ts`). Journey notes never take part. **Amended 2026-09-17** (see
+   Amendments, D3): an all-approved screen now renders blue from its own notes, not only from
+   `approvedScreens` (see §14).
+4. **State tone** = worst-of that state's notes; nothing pending → no dot
+   (`src/ui/store/selectors.ts`).
+5. **Journey tone** comes from that journey's own conversation and nothing else: no conversation
+   entry → no dot, otherwise the tone of that conversation's status (`src/ui/store/selectors.ts`).
+   **Amended 2026-09-17** (see Amendments, D4): the prototype defaulted an untouched journey to
+   `answered`; the rebuild renders no dot instead, so the sidebar and the journey panel agree.
 6. **A new note, or a note turning red, un-approves its screen.** On every commit the store diffs
    the notes, collects those that are new or have just become `open`, and drops their screens from
    `approvedScreens` (`store.tsx:69-73`).
@@ -623,10 +665,13 @@ Every rule below is implemented; each cites its line.
     whole reviewer inside the frame (`:121-136`).
 17. **Boxes are re-measured** on frame scroll (capture phase, so inner scrollers count), on content
     resize and on mutation, coalesced through two `requestAnimationFrame`s (`:137-167`).
-18. **Selecting a note navigates.** A project note just opens; a note on another screen sets a
-    module-level `pendingOpen` and changes the hash, and the remounted layer opens it
-    (`:314-338`); a note in another state changes the hash (`:324`). Selection scrolls only the
-    sidebar list, never the page, and only when the click came from the mock (`:325-332`).
+18. **Selecting a note navigates only within this screen.** A project note just opens; a note in
+    another state of **this** screen changes the hash (`:324`). **Amended 2026-09-17** (see
+    Amendments, D1/D2): the prototype's other-screen clause — a module-level `pendingOpen` written
+    when a row targeted a different screen, drained by an effect on the remounted layer — is
+    retired; D1 removes the only panel rows that could ever target another screen, so that branch
+    became unreachable and was deleted along with `pendingOpen`. Selection scrolls only the sidebar
+    list, never the page, and only when the click came from the mock (`:325-332`).
 19. **Opening a note keeps a non-empty draft** (collapsed to its box) and discards an empty one
     (`:319,323,405`).
 20. **The mock is inert while a dialog is open.** `isolated = popoverOpen || !!confirm` is passed to
@@ -696,13 +741,17 @@ Note record (`src/review/store.tsx:8-17`):
 | `thread[].by` | renders as "AI" or "You" (`notes-ui:90`) |
 | `viewport` | which device owns the note (others get a ghost); appended to the dialog description (`:90,626`) |
 | `whole` | suppresses the box; row/dialog subject becomes "Whole screen" (`:214,570,625`) |
-| `project` | row/dialog subject "Project note", description "Project", always listed in the PROJECT group (`:570,625-626,432`) |
+| `project` | row/dialog subject "Project note", description "Project", listed in the PROJECT group exactly when `project === true` (`:570,625-626,432`) — **amended 2026-09-17**, see Amendments, D1: membership is no longer "any screen but this one" |
 
 Journey thread (`store.tsx:22`): `status` → the sidebar dot and whether Approve shows; `thread` →
 the panel conversation.
 
-`approvedScreens` (`store.tsx:47`): a screen id map; the only thing that turns a clean screen blue
-(`store.tsx:29`).
+`approvedScreens` (`store.tsx:47`): a screen id map read by `screenTone` only when that screen's own
+notes resolve to no tone at all — `approved` when the screen is present in the map, no dot otherwise
+(`src/ui/store/selectors.ts`). **Amended 2026-09-17** (see Amendments, D3): it is no longer the sole
+path to a blue screen dot — the prototype's `worst()` could never itself return `approved`, so
+`approvedScreens` was the only way there; the rebuild's `worst()` can (§13 rule 2), so a screen whose
+notes are all `approved` also renders blue without ever touching `approvedScreens`.
 
 Journey definition (`src/journeys.ts:11-15`): `title` (sidebar row, breadcrumb, pill, palette),
 `persona` (sidebar tooltip/`title`, palette keyword), `steps[]` (sidebar sub-rows, breadcrumb
@@ -723,9 +772,12 @@ list and its per-component "Used on" screens and counts; `violations` → the de
    `notes.json`: it renders only when the screen's tone is `answered`, and both screens carry an
    `open` note (`console-account` N002/N006/N009, `console-home` N008). Reaching it would require
    deleting or approving existing notes, which this freeze did not do.
-2. **Notes-panel empty states** ("No notes on this screen." / "No other notes.",
-   `ReviewLayer.tsx:566`) — both screens have notes and the project always has notes from the other
-   screen, so neither group is ever empty in this data set.
+2. **Notes-panel empty states** ("No notes on this screen." / "No project notes.",
+   `ReviewLayer.tsx:566`) — this screen's group is never empty in the shipped data set. **Amended
+   2026-09-17** (see Amendments, D1/D8): the PROJECT group's emptiness now depends only on whether
+   any `project === true` note exists at all, never on another screen having notes — the
+   prototype's "the project always has notes from the other screen" reasoning described the
+   retired membership rule.
 3. **Layer-violations Alert** on the Components page (`ComponentsPage.tsx:109-114`) — the current
    tree has no violations, so the alert never renders.
 4. **"(control not found)"** hint styling (`JourneyPill.tsx:28`) — every edge's control resolves in
