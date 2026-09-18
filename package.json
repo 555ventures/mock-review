@@ -36,6 +36,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "login": "npm login --auth-type=web",
     "check": "npm run typecheck && npm run lint && npm run test"
   },
   "peerDependencies": {
