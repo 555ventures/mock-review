@@ -6,7 +6,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { z } from 'zod'
-import { EMPTY_APPROVAL, EMPTY_NOTES } from '../schemas/index.js'
+import { ApprovalSchema, EMPTY_APPROVAL, EMPTY_NOTES, NotesSchema } from '../schemas/index.js'
+import type { Approval, Notes } from '../schemas/index.js'
 
 /** Reads and parses a JSON file, validating it against `schema`. Throws (zod's error, or a
  * `SyntaxError`/`ENOENT` from the underlying read) on any failure — callers decide how to turn
@@ -15,6 +16,48 @@ export function readJson<T>(filePath: string, schema: z.ZodType<T>): T {
   const raw = readFileSync(filePath, 'utf8')
   const value = JSON.parse(raw) as unknown
   return schema.parse(value)
+}
+
+/** D1: a design document that EXISTS but cannot be used: malformed JSON, an unknown
+ * `contractVersion`, or a shape this package has not learned. `relPath` is the design-relative
+ * path named in every refusal. */
+export class UnparseableDesignFileError extends Error {
+  constructor(public readonly relPath: string) {
+    super(`${relPath} exists but does not parse — refusing to write until it's fixed by hand`)
+  }
+}
+
+export type DocRead<T> = { ok: true; doc: T } | { ok: false; error: string }
+
+const DESIGN_DOC_REL_PATH: { notes: string; approval: string } = {
+  notes: 'design/notes.json',
+  approval: 'design/approval.json',
+}
+
+/** D1: THE predicate. Every reader of `design/notes.json` and `design/approval.json` in this
+ * package derives its behaviour from this one function, then chooses its own policy explicitly.
+ * Callers never write their own `try { readJson(...) } catch`. */
+export function readDesignDoc(cwd: string, kind: 'notes' | 'approval'): DocRead<Notes | Approval> {
+  const relPath = DESIGN_DOC_REL_PATH[kind]
+  const filePath = path.join(cwd, relPath)
+  try {
+    const doc = kind === 'notes' ? readJson(filePath, NotesSchema) : readJson(filePath, ApprovalSchema)
+    return { ok: true, doc }
+  } catch {
+    return { ok: false, error: new UnparseableDesignFileError(relPath).message }
+  }
+}
+
+/** D1: the write path's form: same verdict, expressed as the throw both POST handlers already
+ * turn into a 409. Exists so the two paths cannot drift. */
+export function readDesignDocOrThrow(cwd: string, kind: 'notes' | 'approval'): Notes | Approval {
+  const relPath = DESIGN_DOC_REL_PATH[kind]
+  const filePath = path.join(cwd, relPath)
+  try {
+    return kind === 'notes' ? readJson(filePath, NotesSchema) : readJson(filePath, ApprovalSchema)
+  } catch {
+    throw new UnparseableDesignFileError(relPath)
+  }
 }
 
 /** Writes `obj` as JSON to `filePath` atomically: write a sibling `.tmp` file, then `rename` it

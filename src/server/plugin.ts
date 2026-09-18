@@ -3,11 +3,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Plugin, ViteDevServer } from 'vite'
-import { ensureDesignFiles, readJson, writeJsonAtomic } from '../files/json.js'
+import { ensureDesignFiles, readDesignDocOrThrow, UnparseableDesignFileError, writeJsonAtomic } from '../files/json.js'
 import { runnerOf, type Runner } from '../analysis/vite-runner.js'
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js'
 import { discoverHost } from '../analysis/discover.js'
-import { ApprovalSchema, CONTRACT_VERSION, NotesSchema } from '../schemas/index.js'
+import { CONTRACT_VERSION } from '../schemas/index.js'
 import type { Approval, Config, NullConfig, Notes, ThreadEntry } from '../schemas/index.js'
 import { ApprovalPatchSchema, NotesPatchSchema, scopeViolation } from '../schemas/patches.js'
 import type { ApprovalPatch, NotesPatch, ServerState } from '../schemas/patches.js'
@@ -221,38 +221,9 @@ function clientApprovalPatch(patch: ApprovalPatch): ApprovalPatch | null {
   return patch.op === 'clientOk' ? patch : null
 }
 
-/** A design file exists but doesn't parse (bad JSON, or JSON that fails its schema) — thrown by
- * the `*OrThrow` readers below so a write handler can refuse instead of silently treating a
- * corrupt file as empty and overwriting it. `relPath` is the design-relative path named in the
- * refusal body. */
-class UnparseableDesignFileError extends Error {
-  constructor(public readonly relPath: string) {
-    super(`${relPath} exists but does not parse — refusing to write until it's fixed by hand`)
-  }
-}
-
-/** The write path's own strict reader — `ensureDesignFiles` (called by both write handlers)
- * guarantees the file exists, so a `readJson` failure here means its content doesn't parse, not
- * that it's absent; the canonical doc says `notes.json` is never overwritten when present (mirrors
- * spec 01's `answer --decision`, which refuses an invalid `decisions.json` with exit 2 rather than
- * rewriting it), so this throws instead of falling back to an empty document the caller would
- * then persist over the real (corrupt) content. */
-function readNotesDocOrThrow(cwd: string): Notes {
-  try {
-    return readJson(path.join(cwd, 'design', 'notes.json'), NotesSchema)
-  } catch {
-    throw new UnparseableDesignFileError(path.join('design', 'notes.json'))
-  }
-}
-
-/** See `readNotesDocOrThrow` — the same strictness for `approval.json`. */
-function readApprovalDocOrThrow(cwd: string): Approval {
-  try {
-    return readJson(path.join(cwd, 'design', 'approval.json'), ApprovalSchema)
-  } catch {
-    throw new UnparseableDesignFileError(path.join('design', 'approval.json'))
-  }
-}
+/** D1: `UnparseableDesignFileError` and the two `*OrThrow` readers now live in `src/files/json.js`
+ * beside `ensureDesignFiles` — this file only consumes them, so the write path and every other
+ * reader in the package can never drift on what "unreadable" means. */
 
 /** D23/review-2: both write handlers answer 409 (not 400) for an unparseable design file — the
  * request body itself is fine, the conflict is with the target resource's current on-disk state
@@ -341,12 +312,14 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
     let notes: Notes
     let approval: Approval
     try {
-      notes = readNotesDocOrThrow(cwd)
+      // `readDesignDocOrThrow`'s return type is keyed on the runtime `kind` argument, not
+      // narrowed by it — each cast is safe because the literal `kind` above guarantees the shape.
+      notes = readDesignDocOrThrow(cwd, 'notes') as Notes
       // review-2: `applyNotesPatch`'s rule-6 un-approve reads `approval` too and the patch may
       // write it back (see below) — an unparsable `approval.json` is just as much a reason to
       // refuse this write as an unparsable `notes.json`, or rule 6 would silently run against an
       // empty approval document and the real (corrupt) file would never surface to anyone.
-      approval = readApprovalDocOrThrow(cwd)
+      approval = readDesignDocOrThrow(cwd, 'approval') as Approval
     } catch (err) {
       if (err instanceof UnparseableDesignFileError) {
         sendUnparseable(res, err)
@@ -506,7 +479,7 @@ async function handlePostApproval(
 
     let approval: Approval
     try {
-      approval = readApprovalDocOrThrow(cwd)
+      approval = readDesignDocOrThrow(cwd, 'approval') as Approval
     } catch (err) {
       if (err instanceof UnparseableDesignFileError) {
         sendUnparseable(res, err)

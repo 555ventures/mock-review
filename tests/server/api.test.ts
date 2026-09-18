@@ -11,6 +11,8 @@ import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
 import { copyFixtureHost, installPackageInto, run } from '../helpers/cli.js'
 import { startServe, startServeIn, stopServe, type Serve } from '../helpers/serve.js'
+import { ServerStateSchema } from '../../src/schemas/patches.js'
+import { EMPTY_APPROVAL } from '../../src/schemas/index.js'
 
 const ENTRY_URL = '/@id/__x00__mock-review:entry'
 
@@ -104,6 +106,60 @@ describe('mock-review server API (D6)', () => {
       headers: { Cookie: 'mock-review-client=replace-me' },
     })
     expect(clientState.role).toBe('client')
+  })
+
+  // D2/D3: `documents` is a required, always-emitted field on `GET state` — one verdict per
+  // design document, never a claim buried in whether `notes`/`approval` look empty.
+  it('AC-20260917-04-3: GET state on the green fixture host includes documents {notes:{ok:true},approval:{ok:true}}; ServerStateSchema.parse succeeds on it, and fails when documents is omitted (required, not optional)', async () => {
+    serve = await startServe(greenHost)
+    const res = await fetch(`${serve.url}/__mock-review/state`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, unknown>
+
+    expect(body.documents).toEqual({ notes: { ok: true }, approval: { ok: true } })
+    expect(() => ServerStateSchema.parse(body)).not.toThrow()
+
+    const withoutDocuments = { ...body }
+    delete withoutDocuments.documents
+    expect(() => ServerStateSchema.parse(withoutDocuments)).toThrow()
+  })
+
+  // D3: a failed read is reported through `documents`, and the served `approval`/`notes` stay the
+  // documented EMPTY_* placeholder — never a claim the file itself is empty — while the sibling
+  // document's own verdict and content are untouched.
+  it('AC-20260917-04-4: a truncated design/approval.json reports documents.approval.ok false with a non-empty error naming the file, approval falls back to EMPTY_APPROVAL, and notes stays ok:true with the real on-disk document served', async () => {
+    serve = await startServe(greenHost)
+    const approvalPath = path.join(serve.host, 'design', 'approval.json')
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
+    const realNotes = JSON.parse(readFileSync(notesPath, 'utf8')) as unknown
+    writeFileSync(approvalPath, '{"contractVersion":')
+
+    const state = await getState(serve.url)
+    const anyState = state as unknown as {
+      documents: { notes: { ok: boolean }; approval: { ok: boolean; error?: string } }
+    }
+    expect(anyState.documents.approval.ok).toBe(false)
+    expect(anyState.documents.approval.error).toBeTruthy()
+    expect(anyState.documents.approval.error).toContain('design/approval.json')
+    expect(state.approval).toEqual(EMPTY_APPROVAL)
+    expect(anyState.documents.notes.ok).toBe(true)
+    expect(state.notes).toEqual(realNotes)
+  })
+
+  // D3: a failed design-document read must never empty an analysis-derived field — screens,
+  // shells, journeys and config all come from the discovery/analysis layer, not from
+  // design/notes.json or design/approval.json.
+  it('AC-20260917-04-5: an unreadable design/notes.json never empties screens, shells, journeys or config on the green fixture host', async () => {
+    serve = await startServe(greenHost)
+    const notesPath = path.join(serve.host, 'design', 'notes.json')
+    writeFileSync(notesPath, '{"contractVersion":')
+
+    const state = await getState(serve.url)
+    const anyState = state as unknown as { shells: unknown[]; config: { name: string | null } }
+    expect(state.screens).toHaveLength(2)
+    expect(anyState.shells.length).toBeGreaterThan(0)
+    expect(state.journeys).toHaveLength(1)
+    expect(anyState.config.name).not.toBeNull()
   })
 
   it('AC-20260915-02-9: POST notes {op:add} persists to design/notes.json with no leftover .tmp, and answer over the CLI reaches an SSE notes event within 2s', async () => {
