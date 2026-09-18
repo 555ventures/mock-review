@@ -3,7 +3,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Plugin, ViteDevServer } from 'vite'
-import { ensureDesignFiles, readDesignDocOrThrow, UnparseableDesignFileError, writeJsonAtomic } from '../files/json.js'
+import {
+  DesignLockedError,
+  ensureDesignFiles,
+  readDesignDocOrThrow,
+  UnparseableDesignFileError,
+  withDesignLock,
+  writeJsonAtomic,
+} from '../files/json.js'
 import { runnerOf, type Runner } from '../analysis/vite-runner.js'
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js'
 import { discoverHost } from '../analysis/discover.js'
@@ -232,6 +239,13 @@ function sendUnparseable(res: ServerResponse, err: UnparseableDesignFileError): 
   sendJson(res, 409, { error: err.message })
 }
 
+/** D4: `withDesignLock` refused to acquire `design/.lock` within its acquire window — a retryable
+ * 503, distinct from the 409 `sendUnparseable` answers for a document that read fine but doesn't
+ * parse. */
+function sendLocked(res: ServerResponse, err: DesignLockedError): void {
+  sendJson(res, 503, { error: err.message })
+}
+
 /** D24: the standard refusal body for every gated route but `GET /` (which answers plain text). */
 function sendRefused(res: ServerResponse): void {
   sendJson(res, 403, { error: 'client token required' })
@@ -309,99 +323,141 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
   const appliedPatch = patch
 
   await withWriteLock(async () => {
-    let notes: Notes
-    let approval: Approval
-    try {
-      // `readDesignDocOrThrow`'s return type is keyed on the runtime `kind` argument, not
-      // narrowed by it — each cast is safe because the literal `kind` above guarantees the shape.
-      notes = readDesignDocOrThrow(cwd, 'notes') as Notes
-      // review-2: `applyNotesPatch`'s rule-6 un-approve reads `approval` too and the patch may
-      // write it back (see below) — an unparsable `approval.json` is just as much a reason to
-      // refuse this write as an unparsable `notes.json`, or rule 6 would silently run against an
-      // empty approval document and the real (corrupt) file would never surface to anyone.
-      approval = readDesignDocOrThrow(cwd, 'approval') as Approval
-    } catch (err) {
-      if (err instanceof UnparseableDesignFileError) {
-        sendUnparseable(res, err)
-        return
+    // D4: the journey-existence probe (`buildState`) must never run while the cross-process file
+    // lock is held — it renders through Vite, and holding `design/.lock` across that would make
+    // every CLI write in the repo queue behind a page render. So it is hoisted above the lock as
+    // an UNLOCKED pre-read: decide here, off an unlocked read of `notes.json`, whether `close`'s
+    // target is missing from both `notes.notes` and `notes.journeys` — the only case that ever
+    // needs the probe — and if so run `buildState` now. An unreadable pre-read just means "no
+    // probe": the locked re-read below will hit the same `UnparseableDesignFileError` and refuse
+    // through the normal 409 path.
+    let closeProbeIsJourney: boolean | undefined
+    if (appliedPatch.op === 'close') {
+      let preNotes: Notes | undefined
+      try {
+        preNotes = readDesignDocOrThrow(cwd, 'notes') as Notes
+      } catch {
+        preNotes = undefined
       }
-      throw err
-    }
-
-    // D23: `update`/`remove` for an id with no row in the current document answer 404 and change
-    // nothing — never a silent no-op 200.
-    if (
-      (appliedPatch.op === 'update' || appliedPatch.op === 'remove') &&
-      !notes.notes.some((n) => n.id === appliedPatch.id)
-    ) {
-      res.statusCode = 404
-      res.end()
-      return
-    }
-
-    // D6: `op:'update'`'s write-path scope invariant — checked against the MERGED note (existing
-    // + patch fields), not the patch fields alone, so a patch that would leave the note claiming
-    // both kinds (or neither) is refused 400. Runs after the 404 pre-check above (the id is known
-    // to exist by this point) and before `applyNotesPatch` ever sees the patch. `AddNoteSchema`'s
-    // own `superRefine` covers `op:'add'`; the read-back schemas (`src/schemas/notes.ts`) stay
-    // permissive on purpose (D6) — an existing contradictory note still loads and renders, it just
-    // can't be updated into staying contradictory.
-    if (appliedPatch.op === 'update') {
-      const existing = notes.notes.find((n) => n.id === appliedPatch.id)
-      if (existing) {
-        const mergedScreen = appliedPatch.fields.screen !== undefined ? appliedPatch.fields.screen : existing.screen
-        const mergedProject =
-          appliedPatch.fields.project !== undefined ? appliedPatch.fields.project : existing.project
-        if (scopeViolation({ screen: mergedScreen, project: mergedProject })) {
-          sendJson(res, 400, { error: 'invalid notes patch' })
-          return
+      if (preNotes) {
+        const isNote = preNotes.notes.some((n) => n.id === appliedPatch.id)
+        if (!isNote && !(appliedPatch.id in preNotes.journeys)) {
+          const state = await buildState(cwd, role, runner)
+          closeProbeIsJourney = state.journeys.some((j) => j.id === appliedPatch.id)
         }
       }
     }
 
-    // D10/D11: `close` may target a note or a journey conversation. A note match is checked
-    // first; when the id is not a note and not yet a `notes.journeys` entry, this mirrors how
-    // `op:'journey'` treats a missing entry — except `close` must first confirm the id names a
-    // REAL journey (`state.journeys`), since unlike `op:'journey'` it must answer 404 for an id
-    // that is neither a note nor a journey at all (AC-20260917-02-15's "exists nowhere" case).
-    // Only once the id is confirmed real is a default `{status:'open', thread:[]}` entry seeded
-    // so the reducer below has something to update — mirroring `op:'journey'`'s own default.
-    if (appliedPatch.op === 'close') {
-      const isNote = notes.notes.some((n) => n.id === appliedPatch.id)
-      if (!isNote && !(appliedPatch.id in notes.journeys)) {
-        const state = await buildState(cwd, role, runner)
-        const isJourney = state.journeys.some((j) => j.id === appliedPatch.id)
-        if (!isJourney) {
+    try {
+      await withDesignLock(cwd, async () => {
+        let notes: Notes
+        let approval: Approval
+        try {
+          // `readDesignDocOrThrow`'s return type is keyed on the runtime `kind` argument, not
+          // narrowed by it — each cast is safe because the literal `kind` above guarantees the
+          // shape. This is the AUTHORITATIVE read — taken under the lock, it is acted on
+          // whatever the unlocked pre-read above saw, including a target seeded by someone else
+          // between the two reads.
+          notes = readDesignDocOrThrow(cwd, 'notes') as Notes
+          // review-2: `applyNotesPatch`'s rule-6 un-approve reads `approval` too and the patch may
+          // write it back (see below) — an unparsable `approval.json` is just as much a reason to
+          // refuse this write as an unparsable `notes.json`, or rule 6 would silently run against
+          // an empty approval document and the real (corrupt) file would never surface to anyone.
+          approval = readDesignDocOrThrow(cwd, 'approval') as Approval
+        } catch (err) {
+          if (err instanceof UnparseableDesignFileError) {
+            sendUnparseable(res, err)
+            return
+          }
+          throw err
+        }
+
+        // D23: `update`/`remove` for an id with no row in the current document answer 404 and
+        // change nothing — never a silent no-op 200.
+        if (
+          (appliedPatch.op === 'update' || appliedPatch.op === 'remove') &&
+          !notes.notes.some((n) => n.id === appliedPatch.id)
+        ) {
           res.statusCode = 404
           res.end()
           return
         }
-        notes = { ...notes, journeys: { ...notes.journeys, [appliedPatch.id]: { status: 'open', thread: [] } } }
-      }
 
-      // D11: the ownership gate — a client may close only a note or journey conversation they
-      // themselves opened. Runs only after the 404 pre-check above has confirmed the target
-      // exists, so it never leaks existence.
-      if (role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
-        res.statusCode = 403
-        res.end()
+        // D6: `op:'update'`'s write-path scope invariant — checked against the MERGED note
+        // (existing + patch fields), not the patch fields alone, so a patch that would leave the
+        // note claiming both kinds (or neither) is refused 400. Runs after the 404 pre-check
+        // above (the id is known to exist by this point) and before `applyNotesPatch` ever sees
+        // the patch. `AddNoteSchema`'s own `superRefine` covers `op:'add'`; the read-back schemas
+        // (`src/schemas/notes.ts`) stay permissive on purpose (D6) — an existing contradictory
+        // note still loads and renders, it just can't be updated into staying contradictory.
+        if (appliedPatch.op === 'update') {
+          const existing = notes.notes.find((n) => n.id === appliedPatch.id)
+          if (existing) {
+            const mergedScreen =
+              appliedPatch.fields.screen !== undefined ? appliedPatch.fields.screen : existing.screen
+            const mergedProject =
+              appliedPatch.fields.project !== undefined ? appliedPatch.fields.project : existing.project
+            if (scopeViolation({ screen: mergedScreen, project: mergedProject })) {
+              sendJson(res, 400, { error: 'invalid notes patch' })
+              return
+            }
+          }
+        }
+
+        // D10/D11: `close` may target a note or a journey conversation. A note match is checked
+        // first; when the id is not a note and not yet a `notes.journeys` entry, this mirrors how
+        // `op:'journey'` treats a missing entry — except `close` must first confirm the id names
+        // a REAL journey, since unlike `op:'journey'` it must answer 404 for an id that is
+        // neither a note nor a journey at all (AC-20260917-02-15's "exists nowhere" case). D4:
+        // the locked re-read is authoritative — if the target is now present (seeded by another
+        // writer between the pre-read and this read), it's acted on directly and the probe is
+        // never consulted. The probe's answer is consulted only when this re-read ALSO finds
+        // neither. Only once the id is confirmed real is a default `{status:'open', thread:[]}`
+        // entry seeded so the reducer below has something to update — mirroring `op:'journey'`'s
+        // own default.
+        if (appliedPatch.op === 'close') {
+          const isNote = notes.notes.some((n) => n.id === appliedPatch.id)
+          if (!isNote && !(appliedPatch.id in notes.journeys)) {
+            const isJourney = closeProbeIsJourney ?? false
+            if (!isJourney) {
+              res.statusCode = 404
+              res.end()
+              return
+            }
+            notes = { ...notes, journeys: { ...notes.journeys, [appliedPatch.id]: { status: 'open', thread: [] } } }
+          }
+
+          // D11: the ownership gate — a client may close only a note or journey conversation
+          // they themselves opened. Runs only after the 404 pre-check above has confirmed the
+          // target exists, so it never leaks existence.
+          if (role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
+            res.statusCode = 403
+            res.end()
+            return
+          }
+        }
+
+        const result = applyNotesPatch(notes, appliedPatch, approval)
+
+        // D2: stamped at the write site, not in the pure `applyNotesPatch` reducer — stamping
+        // inside it would break `unapproveScreen`'s no-op identity check and rewrite
+        // `approval.json` on every note patch.
+        const stampedNotes: Notes = { ...result.notes, contractVersion: CONTRACT_VERSION }
+        writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), stampedNotes)
+        if (result.approval !== approval) {
+          const stampedApproval: Approval = { ...result.approval, contractVersion: CONTRACT_VERSION }
+          writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedApproval)
+        }
+
+        sendJson(res, 200, stampedNotes)
+      })
+    } catch (err) {
+      if (err instanceof DesignLockedError) {
+        sendLocked(res, err)
         return
       }
+      throw err
     }
-
-    const result = applyNotesPatch(notes, appliedPatch, approval)
-
-    // D2: stamped at the write site, not in the pure `applyNotesPatch` reducer — stamping inside
-    // it would break `unapproveScreen`'s no-op identity check and rewrite `approval.json` on
-    // every note patch.
-    const stampedNotes: Notes = { ...result.notes, contractVersion: CONTRACT_VERSION }
-    writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), stampedNotes)
-    if (result.approval !== approval) {
-      const stampedApproval: Approval = { ...result.approval, contractVersion: CONTRACT_VERSION }
-      writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedApproval)
-    }
-
-    sendJson(res, 200, stampedNotes)
   })
 }
 
@@ -477,23 +533,36 @@ async function handlePostApproval(
       }
     }
 
-    let approval: Approval
+    // D4: the file lock wraps only this read→apply→write span — `buildState` and the validation
+    // guards above run unlocked, still inside the in-process `withWriteLock`, so a cross-process
+    // lock is never held across a Vite render.
     try {
-      approval = readDesignDocOrThrow(cwd, 'approval') as Approval
+      await withDesignLock(cwd, async () => {
+        let approval: Approval
+        try {
+          approval = readDesignDocOrThrow(cwd, 'approval') as Approval
+        } catch (err) {
+          if (err instanceof UnparseableDesignFileError) {
+            sendUnparseable(res, err)
+            return
+          }
+          throw err
+        }
+        const next = applyApprovalPatch(approval, appliedPatch, ctxFromState(cwd, state))
+
+        // D2: stamped at the write site, not inside the pure `applyApprovalPatch` reducer.
+        const stampedNext: Approval = { ...next, contractVersion: CONTRACT_VERSION }
+        writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedNext)
+
+        sendJson(res, 200, stampedNext)
+      })
     } catch (err) {
-      if (err instanceof UnparseableDesignFileError) {
-        sendUnparseable(res, err)
+      if (err instanceof DesignLockedError) {
+        sendLocked(res, err)
         return
       }
       throw err
     }
-    const next = applyApprovalPatch(approval, appliedPatch, ctxFromState(cwd, state))
-
-    // D2: stamped at the write site, not inside the pure `applyApprovalPatch` reducer.
-    const stampedNext: Approval = { ...next, contractVersion: CONTRACT_VERSION }
-    writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedNext)
-
-    sendJson(res, 200, stampedNext)
   })
 }
 

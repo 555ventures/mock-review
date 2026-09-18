@@ -4,7 +4,8 @@ Canonical reference for the headless CLI, the reviewer page and its server, the 
 write, and the release procedure. Source of truth:
 `specs/20260915/01-schemas-cli-and-bare-serve.md` (D1–D19),
 `specs/20260915/02-the-reviewer-page.md` (D1–D27) and
-`specs/20260917/02-the-story-travels.md` (D1–D13). The
+`specs/20260917/02-the-story-travels.md` (D1–D13) and
+`specs/20260918/01-writes-never-tear-never-lose.md` (D1–D7). The
 binding contract is the spec plugin's `spec/templates/mock/contract.json` (contractVersion 2);
 every shape below has a zod schema in `src/schemas/`, and `CONTRACT_VERSION` in
 `src/schemas/index.ts` is the one place the number lives.
@@ -45,7 +46,23 @@ deleted and the exit code is not 0.
 
 ## File layer
 
-All writes go through `writeJsonAtomic` (write `<path>.tmp`, then `rename`).
+All writes go through `writeJsonAtomic`, which writes a per-process, per-write temporary file
+(`<path>.<pid>.<hex>.tmp`) and then `rename`s it: the rename makes a write atomic, and the unique
+name makes concurrent writes atomic. A failed rename unlinks its temporary file before rethrowing.
+
+The package has three writers of `design/notes.json` and `design/approval.json` — the `serve`
+server, the `answer` CLI, and the plugin's `client waive` — and serialises every package write to
+those two documents through one exclusive `design/.lock`, held by one process at a time. One lock
+covers both documents, because a notes mutation can write approval in the same critical section. A
+lock is broken automatically when its holder pid is gone or its mtime is older than ten seconds; a
+lock with an empty or unparseable body counts as held. A verb that cannot acquire it within two
+seconds refuses with `design/ is locked by pid <N> — another mock-review write is in progress;
+retry` rather than waiting — exit 2 from a CLI verb, `503` from a server write. Readers do not take
+the lock. `design/.lock` is gitignored and never committed. The plugin's own `client waive` write
+does not yet take the lock.
+
+Default documents are created with an exclusive create (`wx`), so two verbs starting together
+cannot clobber each other: the loser sees the file already present and writes nothing.
 
 | File                    | Created by                                                                                                        | Written by                                                                                       | Rule                                                                                                                                                                                                                                                                                                                                     |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -53,6 +70,7 @@ All writes go through `writeJsonAtomic` (write `<path>.tmp`, then `rename`).
 | `design/approval.json`  | any host verb when absent: `{"contractVersion":2,"screens":{},"journeys":{},"theme":null}`                        | the reviewer page (spec 02); the plugin's `client waive`                                         | the CLI never writes approval state; same 409 rule as `notes.json`; same `1`-or-`2` accept-and-rewrite rule as `notes.json`                                                                                                                                                                                                              |
 | `design/decisions.json` | `answer --decision` when absent: `{"contractVersion":2,"decisions":[]}`                                           | `answer --decision` appends `{screen, text, at}`                                                 | a present file that fails to parse or validate is a refusal (exit 2), never replaced; a present file at `contractVersion` `1` or `2` is accepted and rewritten at `2` by the first writer that touches it; a read-only verb leaves the file byte-identical                                                                               |
 | `design/.serve.json`    | `serve` after `listen()`: `{url, pid}`                                                                            | `serve`                                                                                          | deleted on SIGINT/SIGTERM/exit; a stale file is overwritten by the next `serve`; gitignored                                                                                                                                                                                                                                              |
+| `design/.lock`          | any package write to `notes.json` or `approval.json`: `{pid, at}`                                                 | the writer holding it                                                                            | present only while a write is in flight; removed on release and by a once-per-module exit handler; broken when its holder pid is gone or its mtime is older than 10 s; gitignored as `design/.lock*`                                                                                                                                     |
 | `design/screenshots/`   | `check --look`                                                                                                    | `check --look`                                                                                   | one PNG per screen × state × viewport × scheme, named `<screen>-<state>-<WxH>-<scheme>.png`, the state in its `examples`-key casing                                                                                                                                                                                                      |
 
 Liveness: `check` reports `serve.url` = the portfile's `url` only when
@@ -99,7 +117,7 @@ fixture omits the key entirely. Schema normalisation this way is part of the rea
 drift from it — a document that parses with a default filled in is `ok: true`, and the filled value
 is what gets served, not the raw bytes. The rule is hygiene, not a fix: it lowers how often a
 document drifts out of readability but does not close the class, because the failure that started
-this — a *missing required key* — is not an unknown key, and no `.passthrough()` ever covers it.
+this — a _missing required key_ — is not an unknown key, and no `.passthrough()` ever covers it.
 Reportability, not leniency, is what closes it; a future reader must not "fix" this class with
 another `.optional()`.
 
@@ -138,7 +156,11 @@ optimisation; nothing requires it. `mockReview()` takes no options.
 ### Server API
 
 All endpoints live under `/__mock-review/`, and every write goes through `writeJsonAtomic` under one
-in-process lock.
+in-process lock, and inside it the cross-process `design/.lock` around the read→apply→write span
+only. `buildState` never runs while `design/.lock` is held: a `close` that needs the
+journey-existence probe runs it before taking the file lock, and the locked re-read is
+authoritative. A write that cannot acquire `design/.lock` answers `503 {error}` with the lock
+sentence — retryable, distinct from the `409` an unreadable document answers.
 
 | Route               | Method | Body / answer                                                                                                                                                                      |
 | ------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

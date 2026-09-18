@@ -162,8 +162,32 @@ describe('mock-review server API (D6)', () => {
     expect(anyState.config.name).not.toBeNull()
   })
 
-  it('AC-20260915-02-9: POST notes {op:add} persists to design/notes.json with no leftover .tmp, and answer over the CLI reaches an SSE notes event within 2s', async () => {
+  it('AC-20260915-02-9 / AC-20260918-01-7: POST notes {op:add} persists to design/notes.json with no leftover .tmp, emits exactly one notes SSE event for that write, and answer over the CLI reaches an SSE notes event within 2s', async () => {
     serve = await startServe(greenHost)
+
+    // Open the event stream BEFORE the POST so the POST's own `notes` event is observable,
+    // and count every `notes` event seen over a 2s window rather than returning on the first.
+    const preRes = await fetch(`${serve.url}/__mock-review/events`)
+    expect(preRes.status).toBe(200)
+    const preReader = preRes.body?.getReader()
+    expect(preReader).toBeDefined()
+
+    let notesEventsFromPost = 0
+    const readLoop = (async () => {
+      if (!preReader) return
+      const decoder = new TextDecoder()
+      let buf = ''
+      try {
+        while (true) {
+          const { value, done } = await preReader.read()
+          if (done) return
+          buf += decoder.decode(value, { stream: true })
+          notesEventsFromPost = (buf.match(/event: notes/g) ?? []).length
+        }
+      } catch {
+        // reader cancelled below once the counting window closes
+      }
+    })()
 
     const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
       method: 'POST',
@@ -188,7 +212,16 @@ describe('mock-review server API (D6)', () => {
     const notesPath = path.join(serve.host, 'design', 'notes.json')
     const onDisk = JSON.parse(readFileSync(notesPath, 'utf8'))
     expect(onDisk).toEqual(addedDoc)
-    expect(existsSync(`${notesPath}.tmp`)).toBe(false)
+
+    // D1 retired the fixed `notes.json.tmp` name in favour of `notes.json.<pid>.<hex>.tmp`;
+    // scan the directory rather than checking a name that can never be observed leftover.
+    const designFiles = readdirSync(path.join(serve.host, 'design'))
+    expect(designFiles.some((f) => f.endsWith('.tmp'))).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await preReader?.cancel()
+    await readLoop
+    expect(notesEventsFromPost).toBe(1)
 
     const eventsRes = await fetch(`${serve.url}/__mock-review/events`)
     expect(eventsRes.status).toBe(200)
@@ -219,6 +252,76 @@ describe('mock-review server API (D6)', () => {
     const n1 = (after.notes.notes as { id: string; status: string }[]).find((n) => n.id === 'N001')
     expect(n1?.status).toBe('answered')
   }, 20_000)
+
+  // AC-20260918-01-8, tagged [pre-green: absence-invariant]: a project note (no screen, so rule 6
+  // — which un/re-approves a screen a note targets — can never fire for it) must never touch
+  // design/approval.json. True before this spec (rule 6 already only fires for a screen-anchored
+  // note) and stays true after — kept as a named invariant, not dropped, because D2's lock wraps
+  // this exact write and must not start touching approval.json as a side effect of taking it.
+  it('AC-20260918-01-8 [pre-green: absence-invariant]: a project:true note add leaves design/approval.json byte-identical when a screen is already approved', async () => {
+    serve = await startServe(greenHost)
+    const approvalPath = path.join(serve.host, 'design', 'approval.json')
+
+    const approveRes = await fetch(`${serve.url}/__mock-review/approval`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'approveScreen', name: 'home' }),
+    })
+    expect(approveRes.status).toBe(200)
+    const before = readFileSync(approvalPath, 'utf8')
+
+    const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: {
+          screen: null,
+          state: null,
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'open',
+          thread: [{ by: 'owner', text: 'project-wide note' }],
+          project: true,
+        },
+      }),
+    })
+    expect(addRes.status).toBe(200)
+
+    expect(readFileSync(approvalPath, 'utf8')).toBe(before)
+  })
+
+  // AC-20260918-01-9: a POST that cannot acquire `design/.lock` within the acquire window answers
+  // 503 with the lock sentence as its `error` body — distinct from the 409 an unreadable document
+  // already uses. The lock file's holder is this test process's own pid (alive — `process.kill(pid,
+  // 0)` never throws ESRCH for it) with a fresh mtime (not stale), so the server can neither break
+  // it nor ever see it released; it must retry for ~2s and then refuse rather than hang.
+  it('AC-20260918-01-9: POST notes answers 503 with the lock sentence when design/.lock stays held past the acquire window', async () => {
+    serve = await startServe(greenHost)
+    const lockPath = path.join(serve.host, 'design', '.lock')
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }))
+
+    const res = await fetch(`${serve.url}/__mock-review/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        op: 'add',
+        note: {
+          screen: 'home',
+          state: 'Default',
+          component: null,
+          key: null,
+          snippet: null,
+          status: 'open',
+          thread: [{ by: 'owner', text: 'locked out' }],
+        },
+      }),
+    })
+    expect(res.status).toBe(503)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/^design\/ is locked by pid \d+ — another mock-review write is in progress; retry$/)
+  }, 10_000)
 
   it('AC-20260915-02-10: a client-role request may only add notes / clientOk approval; anything else is 403', async () => {
     serve = await startServe(greenHost)

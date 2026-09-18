@@ -1,7 +1,10 @@
 // D6/D7/D16: pure, zod-validated appliers over `design/notes.json` and `design/approval.json`.
-// The server (plugin.ts) is the only writer while `serve` runs — every mutation goes through one
-// of these two functions so the CLI's `answer` and the page's controls can never disagree about
-// rule 6 (un-approve on a new/reopened note, D7).
+// Three processes write these documents — the `serve` server, the `answer` CLI, and the spec
+// plugin's `client waive` — serialised by `withDesignLock` (src/files/json.ts), not by any single
+// writer owning the files. `answer` does not call these reducers today (it hand-mutates the
+// document, src/cli/answer.ts); the server's two write handlers are the only callers of
+// `applyNotesPatch`/`applyApprovalPatch`, which is what keeps rule 6 (un-approve on a new/reopened
+// note, D7) consistent for every write that goes through them.
 import type { Approval, Config, NullConfig, Note, Notes } from '../schemas/index.js'
 import { EMPTY_APPROVAL } from '../schemas/index.js'
 import type { ApprovalPatch, NotesPatch } from '../schemas/patches.js'

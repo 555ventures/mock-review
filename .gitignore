@@ -4,6 +4,7 @@ node_modules/
 *.log
 .DS_Store
 design/.serve.json
+design/.lock*
 tests/fixtures/host/node_modules
 tests/fixtures/host-broken/node_modules
 .claude/worktrees/

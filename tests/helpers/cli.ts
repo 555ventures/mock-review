@@ -174,11 +174,14 @@ export function linkNodeModulesInto(hostDir: string): void {
   }
 }
 
-/** Design-state files a `check`/`serve` run can write into a host's `design/` directory (D9).
+/** Design-state files a `check`/`serve` run can write into a host's `design/` directory (D9), plus
+ * D6's `.lock` — a cross-process lock file `withDesignLock` creates and removes under `design/`.
  * Never copy these out of a fixture host: a fixture that was run in place (e.g. tests/e2e's
  * AC-22 case) may carry them, and a stray copy would let that pollution leak into every other
- * test's otherwise-fresh scratch copy. */
-export const DESIGN_STATE_FILES = ['notes.json', 'approval.json', 'decisions.json', '.serve.json'] as const
+ * test's otherwise-fresh scratch copy. Matched by PREFIX (not exact name, D6): a crash mid-break
+ * can leave `.lock.<pid>.stale` behind (D2's rationale), and a fixture copy must exclude that too,
+ * or the next test's scratch host would hang for 2s on a lock it never took out itself. */
+export const DESIGN_STATE_FILES = ['notes.json', 'approval.json', 'decisions.json', '.serve.json', '.lock'] as const
 
 /** Copies a fixture host (excluding node_modules and any design/ state file a prior run may have
  * written into the source fixture) to an exact destination and builds an isolated node_modules
@@ -192,7 +195,12 @@ export function copyHostInto(fixtureDir: string, dest: string): string {
       const designIdx = parts.indexOf('design')
       if (designIdx !== -1 && parts.length === designIdx + 2) {
         const name = parts[designIdx + 1]
-        if (name !== undefined && (DESIGN_STATE_FILES as readonly string[]).includes(name)) return false
+        if (
+          name !== undefined &&
+          (DESIGN_STATE_FILES as readonly string[]).some((prefix) => name.startsWith(prefix))
+        ) {
+          return false
+        }
       }
       return true
     },
