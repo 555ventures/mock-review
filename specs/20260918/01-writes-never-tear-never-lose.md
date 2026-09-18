@@ -31,12 +31,12 @@ changes, and nothing about the documents' shape, the wire, or the page changes.
 | ID | Decision | One-line rationale |
 |----|----------|--------------------|
 | D1 | `writeJsonAtomic` derives its temporary path as `` `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp` `` and unlinks it in a `catch` before rethrowing. The doc comment states that rename is what makes the write atomic and that the unique name is what makes *concurrent* writes atomic (AC-20260918-01-1, AC-20260918-01-3) | A fixed `.tmp` is not a naming preference, it is the corruption: two `writeFileSync` calls interleave into one inode and the first `rename` publishes a half-merged file. Executed evidence in A1 |
-| D2 | A cross-process lock, `withDesignLock(cwd, fn)`, lands in `src/files/json.ts`. Acquire = `openSync(path.join(cwd,'design','.lock'), 'wx')` (EEXIST when held — A2, executed), body = `JSON.stringify({pid: process.pid, at: new Date().toISOString()})`. On `EEXIST`: read the holder; break the lock when `process.kill(holder.pid, 0)` throws `ESRCH` (A3, executed) **or** when `at` is older than 10 s; otherwise sleep 20 ms and retry for at most 2 s, then throw a `DesignLockedError` carrying `design/ is locked by pid <N> — another mock-review write is in progress; retry`. Release in `finally` and from a `process.once('exit')` handler. One lock covers BOTH documents (AC-20260918-01-2, AC-20260918-01-5, AC-20260918-01-6) | The unique temporary name of D1 removes tearing but **not** lost updates: the same executed run kept only **272 of 500** entries (A1). A lock is therefore not an alternative mechanism, it is the other half. One lock rather than two because rule 6 writes `approval.json` inside a `notes.json` mutation (`src/server/patches.ts` rule 6), so the pair is one critical section |
+| D2 | A cross-process lock, `withDesignLock(cwd, fn)`, lands in `src/files/json.ts`. It is **async** — `withDesignLock<T>(cwd: string, fn: () => T \| Promise<T>): Promise<T>` — so the retry waits on `await new Promise((r) => setTimeout(r, RETRY_MS))` and never blocks the server's event loop. Acquire = `openSync(path.join(cwd,'design','.lock'), 'wx')` (EEXIST when held — A2, executed), body = `JSON.stringify({pid: process.pid, at: new Date().toISOString()})`. On `EEXIST`: read the holder and decide. **Staleness is judged from `statSync(lock).mtimeMs`, not the body's `at`** — a waiter can read the file between the holder's `openSync` and its `writeSync`, so an empty or unparseable body counts as HELD, and mtime is what still ages it out. Break the lock only when `process.kill(holder.pid, 0)` throws `ESRCH` (A3, executed) **or** mtime is older than 10 s, and break it by `renameSync(lock, `${lock}.${process.pid}.stale`)` then unlinking the renamed file: the rename is the exclusion, so of two waiters that both judged it stale the loser gets `ENOENT` and re-enters the acquire loop instead of unlinking the winner's fresh lock. Otherwise wait 20 ms and retry for at most 2 s, then throw a `DesignLockedError` carrying `design/ is locked by pid <N> — another mock-review write is in progress; retry`. Release in `finally`, and register a `process.on('exit')` handler **once per module load** (not per acquire) that unlinks a lock this process still holds. One lock covers BOTH documents (AC-20260918-01-2, AC-20260918-01-5, AC-20260918-01-6) | The unique temporary name of D1 removes tearing but **not** lost updates: the same executed run kept only **272 of 500** entries (A1). A lock is therefore not an alternative mechanism, it is the other half. Async because a synchronous retry would have to busy-wait or `Atomics.wait`, and either one freezes `serve` for up to two seconds. One handler per module rather than per acquire because the per-acquire form leaks listeners and warns after ten writes in a long-lived server. One lock rather than two because rule 6 writes `approval.json` inside a `notes.json` mutation, so the pair is one critical section |
 | D3 | `ensureDesignFiles` stops branching on `existsSync` and instead writes each default with `writeFileSync(p, JSON.stringify(EMPTY_*), { flag: 'wx' })`, swallowing only `EEXIST` (A4, executed) and rethrowing anything else. It does **not** take the lock (AC-20260918-01-4) | `existsSync`-then-`writeJsonAtomic` (`json.ts:101-105`) is a check-then-act with a real window: two verbs starting together both see "absent" and the second renames an EMPTY document over the first's file. `wx` makes creation itself the exclusion, and needs no lock because a losing creator writes nothing |
-| D4 | Inside `serve`, the file lock is taken **within** the existing in-process `withWriteLock`, wrapped around the read→apply→write span only (`src/server/plugin.ts:311-405` for notes, `:480-494` for approval) — never around `buildState`. Nesting order is fixed: in-process outer, file inner; no CLI verb ever holds the in-process lock (AC-20260918-01-2) `[no-ac: ordering invariant with no separate observable; AC-20260918-01-2 fails if the span is wrong]` | `withWriteLock` also orders `buildState`-before-write for `clientOk`, so it stays. Holding the file lock across `buildState` would hold it across a Vite render and make every CLI write wait on a page refresh; a fixed nesting order is what makes the two locks deadlock-free |
-| D5 | `src/cli/answer.ts` performs its read→mutate→write inside `withDesignLock`. `ensureDesignFiles` and every usage/validation refusal stay OUTSIDE the lock, so a refused invocation never acquires it (AC-20260918-01-6) | Validation-before-mutation is already this verb's shape (D19c); keeping refusals outside the lock is what makes "a failed `answer` leaves no `design/.lock`" true by construction rather than by a `finally` that must not be forgotten |
-| D7 | Two header comments asserting a single writer are retired in the same edit that makes the claim unnecessary: `src/server/patches.ts:2-3` ("The server (plugin.ts) is the only writer while `serve` runs — every mutation goes through one of these two functions so the CLI's `answer` and the page's controls can never disagree") and `src/ui/sync/api.ts:2-3` ("the server is the sole writer of `design/notes.json` and `design/approval.json` while `serve` runs"). Both are replaced by what is now true: three processes write, `withDesignLock` serialises them, and `answer` does **not** go through `applyNotesPatch` today `[no-ac: comment-only edit with no observable surface; the code it describes is covered by AC-20260918-01-2]` | Both sentences are false as written and were false before this spec — `src/cli/answer.ts:76-77` hand-mutates the document and has never called the reducer. Leaving them would hand the next reader a documented invariant that the lock exists precisely because it does not hold |
-| D6 | `design/.lock` is gitignored beside `design/.serve.json`, and `DESIGN_STATE_FILES` (`tests/helpers/cli.ts:181`) gains `.lock` so a scratch host copy never inherits a stale one. `src/server/watch.ts` is **not** changed: it matches `design/notes.json` and `design/approval.json` by exact path (`watch.ts:21-22`), so neither `.lock` nor a `*.tmp` can raise an event (AC-20260918-01-7) | A lock file copied into a fixture would make the next test hang for 2 s and then refuse; and stating the watcher fact in the spec stops a worker from "defensively" adding a filter that the exact-path match already makes dead code |
+| D4 | Inside `serve`, the file lock is taken **within** the existing in-process `withWriteLock`, around the read→apply→write span only: `src/server/plugin.ts:317` (the two `readDesignDocOrThrow` reads) through `:402` (the conditional approval write) for notes, and `:480-494` for approval. The journey-existence probe at `plugin.ts:372` — `await buildState(...)`, reached when `close` names a journey with no conversation yet — is **hoisted above the file lock**, still inside `withWriteLock`, as an UNLOCKED pre-read: the handler reads the notes document once without the lock purely to decide whether the probe is needed, runs `buildState` if so, then takes the lock and re-reads. **The locked re-read is authoritative**: a note or conversation it finds is acted on, whatever the pre-read saw — a conversation seeded by someone else between the two reads is a real target, not a 404. The probe's answer is consulted only when the re-read still finds neither, and the sole 404 case is "the pre-read found the target, the re-read does not, and no probe was run" — which nothing in the package can cause, only a hand edit. `buildState` is never called while the lock is held. Spec 02's `reply` inherits this shape exactly. Both handlers catch `DesignLockedError` and answer `503 { error: <the sentence> }` — a retryable status, distinct from the 409 an unreadable document already uses — so the page renders the landed notice instead of a bare `-> 500`. The existing `UnparseableDesignFileError` try/catch (`:314-329`, `:481-489`) sits INSIDE the locked span, the read being inside. Nesting order is fixed, in-process outer and file inner; no CLI verb ever holds the in-process lock (AC-20260918-01-2, AC-20260918-01-9) `[no-ac: ordering invariant with no separate observable; AC-20260918-01-2 fails if the span is wrong]` | `withWriteLock` also orders `buildState`-before-write for `clientOk`, so it stays. The hoist is not a preference: `buildState` renders through Vite, and holding a cross-process lock across it would make every CLI write in the repo wait on a page render — the 2 s refusal would start firing under normal use. Spec 02 adds the same probe for `reply`, so naming the hoist here is what stops it being re-introduced |
+| D5 | `src/cli/answer.ts` becomes async and performs **document read, target lookup, mutation and write** inside `withDesignLock`. Only `ensureDesignFiles` and the two USAGE refusals — `--text` missing, and the `--note`/`--journey` XOR — stay outside it. The target-lookup refusal (`no note <id>`) is inside, because the lookup is the read; the lock's `finally` releases on that throw (AC-20260918-01-6) | The first draft said "every validation refusal outside the lock", which cannot hold: the unknown-note check IS the document read, and reading outside the lock reintroduces exactly the read-then-write window this spec exists to close. The `finally` is load-bearing, not a belt-and-braces — say so rather than claiming the property falls out of the structure |
+| D7 | Two header comments asserting a single writer are retired in the same edit that makes the claim unnecessary: `src/server/patches.ts:2-4` ("The server (plugin.ts) is the only writer while `serve` runs — every mutation goes through one of these two functions so the CLI's `answer` and the page's controls can never disagree") and `src/ui/sync/api.ts:2-3` ("the server is the sole writer of `design/notes.json` and `design/approval.json` while `serve` runs"). Both are replaced by what is now true: three processes write, `withDesignLock` serialises them, and `answer` does **not** go through `applyNotesPatch` today `[no-ac: comment-only edit with no observable surface; the code it describes is covered by AC-20260918-01-2]` | Both sentences are false as written and were false before this spec — `src/cli/answer.ts:76-77` hand-mutates the document and has never called the reducer. Leaving them would hand the next reader a documented invariant that the lock exists precisely because it does not hold |
+| D6 | `design/.lock` is gitignored beside `design/.serve.json`, and `DESIGN_STATE_FILES` (`tests/helpers/cli.ts:181`) gains `.lock` and its filter becomes a PREFIX match, so a `.lock.<pid>.stale` is excluded from a fixture copy too so a scratch host copy never inherits a stale one. `src/server/watch.ts` is **not** changed: it matches `design/notes.json` and `design/approval.json` by exact path (`watch.ts:21-22`), so neither `.lock` nor a `*.tmp` can raise an event (AC-20260918-01-7) | A lock file copied into a fixture would make the next test hang for 2 s and then refuse; and stating the watcher fact in the spec stops a worker from "defensively" adding a filter that the exact-path match already makes dead code |
 
 ## File Plan
 
@@ -45,12 +45,14 @@ changes, and nothing about the documents' shape, the wire, or the page changes.
 | src/files/json.ts | MODIFY | schemas | D1 unique tmp + unlink on failure; D2 `DesignLockedError` and `withDesignLock`; D3 `ensureDesignFiles` creates with `wx` |
 | src/server/plugin.ts | MODIFY | server | D4: both POST handlers take `withDesignLock` around their read→apply→write span, inside `withWriteLock`, outside `buildState` |
 | src/cli/answer.ts | MODIFY | cli | D5: the read→mutate→write span runs inside `withDesignLock`; refusals stay outside it |
-| src/server/patches.ts | MODIFY | server | D7: header comment `:2-3` retired — the "only writer while `serve` runs" claim is false and always was; replaced by the lock's actual guarantee. No code change |
+| src/cli.ts | MODIFY | cli | D5: the `answer` branch awaits the now-async verb |
+| tests/unit/design-files.test.ts | CREATE | tests | AC-20260918-01-4 |
+| src/server/patches.ts | MODIFY | server | D7: header comment `:2-4` retired — the "only writer while `serve` runs" claim is false and always was; replaced by the lock's actual guarantee. No code change |
 | src/ui/sync/api.ts | MODIFY | ui | D7: header comment `:2-3` retired, same false claim. No code change |
-| .gitignore | MODIFY | other | D6: `design/.lock` |
+| .gitignore | MODIFY | other | D6: `design/.lock*` — the glob, so a `.stale` left by a crash mid-break is ignored too |
 | tests/helpers/cli.ts | MODIFY | tests | D6: `DESIGN_STATE_FILES` gains `.lock` |
 | tests/cli/files.test.ts | MODIFY | tests | AC-20260918-01-1, AC-20260918-01-2, AC-20260918-01-3, AC-20260918-01-4, AC-20260918-01-5, AC-20260918-01-6 |
-| tests/server/api.test.ts | MODIFY | tests | AC-20260918-01-7, AC-20260918-01-8 |
+| tests/server/api.test.ts | MODIFY | tests | AC-20260918-01-7, AC-20260918-01-8, AC-20260918-01-9 |
 
 ## Contracts
 
@@ -65,9 +67,13 @@ export class DesignLockedError extends Error {
 }
 
 /** Runs `fn` while holding the exclusive `design/.lock`. Acquire is `openSync(..., 'wx')`; a lock
- * whose holder pid is gone (ESRCH) or whose `at` is older than STALE_MS is broken and retaken.
- * Released in `finally` and on process exit. One lock covers notes.json AND approval.json. */
-export function withDesignLock<T>(cwd: string, fn: () => T): T
+ * whose holder pid is gone (ESRCH) or whose mtime is older than STALE_MS is broken — by renaming it
+ * aside and unlinking the rename, so two simultaneous breakers cannot both win — and retaken. An
+ * empty or unparseable body counts as HELD: a waiter can read the file between the holder's open
+ * and its write.
+ * ASYNC so the retry can `await` a timer instead of blocking the server's event loop. Released in
+ * `finally`, and by one module-level exit handler. One lock covers notes.json AND approval.json. */
+export function withDesignLock<T>(cwd: string, fn: () => T | Promise<T>): Promise<T>
 
 const STALE_MS = 10_000
 const ACQUIRE_TIMEOUT_MS = 2_000
@@ -115,26 +121,40 @@ atomic. At most it reads one write stale, exactly as today.
   `design/notes.json` under `withDesignLock` THE SYSTEM SHALL preserve all 500 entries
   (`A-0…A-249` + `B-0…B-249` → `notes.length === 500`), where the same run without the lock keeps
   272 (A1, executed) → writes tests/cli/files.test.ts
-- **AC-20260918-01-3**: WHEN a write through `writeJsonAtomic` throws while its temporary file
-  exists THE SYSTEM SHALL leave no `*.tmp` sibling of the target (e.g. an unserializable value →
-  the directory listing contains `notes.json` and no `notes.json.*.tmp`)
-  → writes tests/cli/files.test.ts
-- **AC-20260918-01-4**: WHEN two OS processes call `ensureDesignFiles` on the same empty `design/`
-  directory simultaneously THE SYSTEM SHALL leave exactly one `notes.json` whose content is
-  `EMPTY_NOTES`, with neither call throwing → writes tests/cli/files.test.ts
+- **AC-20260918-01-3**: WHEN `renameSync` fails after the temporary file has been written THE SYSTEM
+  SHALL unlink that temporary file before rethrowing (target path pre-created as a *directory* →
+  `renameSync` throws `EISDIR`; the pre-image leaves `notes.json.tmp` behind, the post-image leaves
+  no `notes.json.*.tmp`) → writes tests/cli/files.test.ts
+- **AC-20260918-01-4**: WHEN `ensureDesignFiles` runs against a `design/notes.json` that exists but
+  which `existsSync` reports absent — the observable shape of the create-time race — THE SYSTEM
+  SHALL leave that file byte-identical rather than overwriting it with the empty default (mocked
+  `node:fs` where `existsSync` → `false` and the file holds
+  `{"contractVersion":2,"notes":[{"id":"N1",…}],"journeys":{}}`: pre-image overwrites it,
+  post-image swallows `EEXIST` and leaves it untouched) → writes tests/unit/design-files.test.ts
 - **AC-20260918-01-5**: WHEN `design/.lock` names a pid that no longer exists THE SYSTEM SHALL break
   the lock and complete the write (lock body `{"pid":999999,"at":<now>}` → the write succeeds and
   `design/.lock` is absent afterwards) → writes tests/cli/files.test.ts
-- **AC-20260918-01-6**: WHEN `mock-review answer` refuses for any reason before mutating (unknown
-  note id, usage error, unreadable document) THE SYSTEM SHALL exit 2 leaving no `design/.lock`
-  (`answer --note NOPE --text x` → exit 2, `mock-review: no note NOPE`, `design/.lock` absent)
+- **AC-20260918-01-6** `[pre-green: absence-invariant]`: WHEN `mock-review answer` refuses — usage
+  error, unknown note id, or unreadable document — THE SYSTEM SHALL exit 2 leaving no `design/.lock`
+  (`answer --note NOPE --text x` → exit 2, `mock-review: no note NOPE`, `design/.lock` absent). The
+  pre-image satisfies this trivially, no lock file existing at all; it is tagged rather than dropped
+  because it is the invariant the `finally` in D5 exists to keep once one does
   → writes tests/cli/files.test.ts
 - **AC-20260918-01-7**: WHEN a `POST /__mock-review/notes` write completes THE SYSTEM SHALL CONTINUE
   TO persist the note, leave no `*.tmp` behind, and emit exactly one `notes` SSE event within 2 s
   → reuses tests/server/api.test.ts :: AC-20260915-02-9:
-- **AC-20260918-01-8**: WHEN a notes patch changes nothing in `approval` THE SYSTEM SHALL CONTINUE
-  TO leave `design/approval.json` byte-identical, including a `contractVersion` of 1
-  → reuses tests/server/api.test.ts :: AC-20260917-01-12
+- **AC-20260918-01-8** `[pre-green: absence-invariant]`: WHEN a notes patch changes nothing in
+  `approval` THE SYSTEM SHALL CONTINUE TO leave `design/approval.json` byte-identical (a `POST
+  notes` `add` of a `project: true` note — which has no screen, so rule 6 cannot fire — against a
+  host whose `approval.json` holds one approved screen → that file's bytes are unchanged). Anchoring
+  the note to the approved screen would fire rule 6 and assert the opposite
+  → writes tests/server/api.test.ts
+
+- **AC-20260918-01-9**: WHEN a `POST /__mock-review/notes` write cannot acquire the lock within the
+  acquire window THE SYSTEM SHALL answer `503` with the lock sentence as its `error` body, not a
+  bare 500 (a held `design/.lock` whose holder pid is this process and whose mtime is fresh →
+  `{"error":"design/ is locked by pid <N> — another mock-review write is in progress; retry"}`)
+  → writes tests/server/api.test.ts
 
 ## Assumptions (escalation triggers)
 
@@ -157,6 +177,14 @@ atomic. At most it reads one write stale, exactly as today.
   `design/.lock` and `design/notes.json.<pid>.<hex>.tmp` raise no watcher event and no SSE.
   Verified by reading; **not executed**. — **if false:** the page refetches spuriously on every
   write; add an explicit ignore in `watch.ts` and an AC for it.
+- **A7** — AC-1 and AC-2 spawn their two writer processes against the built `.test-dist/files/json.js`
+  (the same build the CLI fixture tests already use), not `tsx`, so the measurement is of shipped
+  code. — **if false:** run them through `tsx` and say so in the test title.
+- **A8** — D3's `wx` create is exclusive but NOT atomic for a concurrent reader: a `buildState`
+  racing the creation can read a partially written empty document and report it unreadable for one
+  tick. Accepted — the window is one fresh file at startup, and the banner clears on the next
+  fetch. — **if false:** publish the default with `linkSync(tmp, p)` (EEXIST if present, atomic) and
+  unlink the tmp.
 - **A6** — No consumer outside this package reads `design/.lock`. The plugin's own write
   (`mocks-driver.js:335`) does not take it and is therefore still unsafe against a concurrent page
   write; that writer moves into this package in a later unit of this series. — **if false:** the
@@ -190,7 +218,12 @@ and `only writer` and returned two literals-leg hits: `src/ui/sync/api.ts` and
 comment-only. No other literal survives; the `mentions` hits on `tests/unit/design-docs.test.ts` and
 `tests/e2e/approved.test.ts` are the lexical proxy tier and owe nothing.
 
-Residual, stated rather than solved: a live-but-hung holder makes writers refuse after 2 s; pid
+Residual, stated rather than solved: a crash between the rename and the unlink leaves a
+`design/.lock.<pid>.stale` file — harmless to locking, since acquire only ever opens `design/.lock`,
+and ignored by D6's glob. The rename fixes two simultaneous breakers; it does not close the older
+window where a holder releases and re-acquires between a waiter's staleness judgement and its
+rename, which the mtime bound makes vanishingly rare rather than impossible. A live-but-hung holder
+makes writers refuse after 2 s; pid
 reuse can make a stale lock look held until the age bound breaks it; `O_EXCL` on NFS is out of
 scope. The plugin's `client waive` write remains uncoordinated until the unit that moves it.
 

@@ -31,13 +31,13 @@ sent from a browser again.
 
 | ID | Decision | One-line rationale |
 |----|----------|--------------------|
-| D1 | A new notes op: `{ op: 'reply', id, entry: { by, text } }`, `.strict()`, with `text` `z.string().trim().min(1)` on this op only. `id` resolves note-first exactly as `close` does (`plugin.ts:369-380`): unknown everywhere → 404; a real journey id with no conversation yet → seeded `{status:'open', thread:[]}`. The reducer appends the entry and sets `status = entry.by === 'session' ? 'answered' : 'open'` from any current status (AC-20260918-02-1, AC-20260918-02-2, AC-20260918-02-3) | One op for the one thing a thread does. Attribution decides whose turn it is, which is the rule the panel and the driver already read: a session reply is an answer (yellow), anybody else's reply reopens (red). Replies to `approved`/`deferred` reopen too — the dialog offers Reply at every status (design-reference §7.3) and rule 7 says any reply re-opens |
-| D2 | `clientNotesOpPatch` (`plugin.ts:198-207`) admits `reply` and forces `entry.by = 'client'`, exactly as it already forces the thread on `add`. The owner's `by` is passed through, bounded to `'owner' \| 'session'` by the wire schema (AC-20260918-02-4) | The 403 was never a policy — a client replying to their own note is the entire point of the review link. Forcing `by` server-side keeps attribution unforgeable without refusing the request |
+| D1 | A new notes op: `{ op: 'reply', id, entry: { by, text } }`, `.strict()`, with `text` `z.string().trim().min(1)` on this op only. `id` resolves note-first exactly as `close` does (`plugin.ts:369-380`): unknown everywhere → 404; a real journey id with no conversation yet → seeded `{status:'open', thread:[]}`. The reducer appends the entry and sets `status = entry.by === 'session' ? 'answered' : 'open'` from any current status (AC-20260918-02-1, AC-20260918-02-2, AC-20260918-02-3) | One op for the one thing a thread does. Attribution decides whose turn it is, which is the rule the panel and the driver already read: a session reply is an answer (yellow), anybody else's reply reopens (red). Replies to `approved`/`deferred` reopen too — the dialog offers Reply at every status (design-reference §6.2, lines 366-373) and rule 7 says any reply re-opens |
+| D2 | `clientNotesOpPatch` (`plugin.ts:198-207`) admits `reply` and forces `entry.by = 'client'`, exactly as it already forces the thread on `add`. The wire enum is `'owner' \| 'session'` ONLY — no request can claim to be the client; the role does. **The page therefore sends `by: 'owner'` in both roles** and the server rewrites it: `useNoteActions.replyJourney` loses its third parameter (`useNoteActions.ts:100`) and `ScreenPage.tsx:350` stops passing `role`. `applyNotesPatch` takes `AppliedNotesPatch`, the widened form the rewrite produces (AC-20260918-02-4) | The 403 was never a policy — a client replying to their own note is the entire point of the review link. Forcing `by` server-side keeps attribution unforgeable without refusing the request. The page must stop sending `by: role`, or a client's journey reply fails `safeParse` at `plugin.ts:290-293` — which runs BEFORE the role rewrite at `:301` — and the 403 comes back as a 400: the same bug through a different door |
 | D3 | `update.fields` refuses `status` and `thread` **by name**, through a `superRefine` in the same style as `AddNoteSchema`'s `id` refusal (`src/schemas/patches.ts:25-34`), and keeps its passthrough catchall. It does **not** use `.omit()` and does **not** become `.strict()` (AC-20260918-02-5) | Executed (A3): on a passthrough schema `.omit({status, thread}).partial()` accepts both keys anyway — the narrowing is a no-op — and `.strict()` rejects them but also rejects `rect`/`viewport`/`whole`, the page-owned geometry `patches.ts:8-13` deliberately preserves. Naming the two forbidden keys is the only form that does exactly what is meant. `update` is now anchor edits only |
 | D4 | `op:'journey'` is retired from the wire and the reducer. Its `entry` half is `reply`; its `status` half is `close` (`approveJourney` becomes `{op:'close', id, status:'approved'}`, which already accepts journeys from any status). `applyNotesPatch` loses its `journey` case and its rule-7 status override, which moves into `reply` (AC-20260918-02-6) | Two ops that do one thing each are not two ops. Keeping `journey` would leave a second path that appends a thread entry, with its own attribution rule, which is how the current divergence happened |
 | D5 | `approveNote` stops sending `op:'update'` with `status:'approved'` and sends `{op:'close', id, status:'approved'}`. With D3 and D4 in place, **no browser request can carry a note's `status` or `thread` any more** (AC-20260918-02-5, AC-20260918-02-7) | The whole-thread merge computed in `useNoteActions.ts:66-74` from the page's own store is the lost-update race with a concurrent `answer`; deleting the ability to send a thread is what closes it, rather than a lock that cannot help because the array was already stale when it left the browser |
-| D6 | `src/cli/answer.ts` stops hand-mutating and calls `applyNotesPatch(notes, {op:'reply', id, entry:{by:'session', text}}, approval)` inside `withDesignLock`. A journey target must already have a conversation, as today (`answer.ts:52-58`) — `answer` has no Vite and cannot ask whether a journey id is real (AC-20260918-02-8, AC-20260918-02-12) | `src/server/patches.ts:2-3` claimed for two versions that every mutation goes through the reducer while `answer.ts:76-77` never did; spec 01 retires the claim, this one makes it true. Rule 6 then applies identically from both processes instead of by coincidence |
-| D7 | Rule 6 gains exactly one trigger: a **note** reply whose resulting status is `open` un-approves that note's screen. A `by:'session'` reply resolves to `answered` and therefore never touches approval, preserving `answer`'s current "approval.json byte-identical" property. Journey replies never touch approval. `applyNotesPatch` returns `approval` by identity whenever unchanged (AC-20260918-02-9, AC-20260918-02-13) | A client saying "this is still wrong" is precisely the event rule 6 exists for. Identity return is contract-relevant, not stylistic: `plugin.ts:399` suppresses the approval write on it, and `tests/server/api.test.ts` pins a v1 `approval.json` staying byte-identical through a notes patch |
+| D6 | `src/cli/answer.ts` stops hand-mutating and builds `{op:'reply', id, entry:{by:'session', text}}`, parses it through `NotesPatchSchema` (so the `text` trim and non-empty rule apply to the CLI exactly as to the page), and applies the result with `applyNotesPatch` inside `withDesignLock`. It passes no approval document and never writes `approval.json`: a session reply resolves to `answered`, so rule 6 cannot fire and the reducer returns `approval` by identity. A journey target must already have a conversation, as today (`answer.ts:52-58`) — `answer` has no Vite and cannot ask whether a journey id is real (AC-20260918-02-8, AC-20260918-02-12) | `src/server/patches.ts:2-3` claimed for two versions that every mutation goes through the reducer while `answer.ts:76-77` never did; spec 01 retires the claim, this one makes it true. Rule 6 then applies identically from both processes instead of by coincidence |
+| D7 | Rule 6 gains exactly one trigger: a **note** reply whose resulting status is `open` un-approves that note's screen. A `by:'session'` reply resolves to `answered` and therefore never touches approval, preserving `answer`'s current "approval.json byte-identical" property. Journey replies never touch approval. `applyNotesPatch` returns `approval` by identity whenever unchanged (AC-20260918-02-9) | A client saying "this is still wrong" is precisely the event rule 6 exists for. Identity return is contract-relevant, not stylistic: `plugin.ts:399` suppresses the approval write on it, and `tests/server/api.test.ts` pins a v1 `approval.json` staying byte-identical through a notes patch |
 | D8 | `NoteActions` (`src/ui/notes/notes-ui.tsx:189-219`) takes `role` and `own` (`thread[0].by === 'client'`, the server's own gate). **Client**, on a note they raised and while it is not closed: **Approve** and **Defer**, never Delete or Reject. **Owner**: Delete while `open`; Reject, Approve and **Defer** while `answered`. Every one of those buttons issues `close` except Delete/Reject, which stay `remove`. `VerdictDialog` gains a `defer` kind (AC-20260918-02-10, AC-20260918-02-11) | The plugin's doctrine lists the page's controls as approve, defer, reject, delete and its driver tells a client to "approve or defer it on the link" — unimplementable until now. Defer was missing for the owner too, so this is not a client-only gap |
 | D9 | `deferred` becomes a **fourth pin tone**, muted grey: `PinTone` (`notes-ui.tsx:21`) and `TONE` (`:24`) widen, the note row and dialog title carry the word `Deferred`, and `toneOf` (`src/ui/store/selectors.ts:22-24`) is **deleted** — the compiler lists its call sites. The aggregate `Tone` (`selectors.ts:7`) stays at three members and `worst()` keeps bucketing `deferred` as closed, so sidebar and panel dots are unchanged (AC-20260918-02-11) | The user chose a distinct colour so a parked note is separable at a glance. Widening the aggregate `Tone` as well would change what a screen's and a journey's dot mean, which is a different frozen-surface question nobody has been asked — `selectors.ts:20`'s note to widen both is followed only where the user's answer reaches |
 | D10 | `docs/design/design-reference.md` gains one Amendments entry covering: the fourth pin tone and its §4/§13 rules, the client's Approve/Defer controls, the owner's new Defer, and the already-landed `Notice` banner from the direct fix that preceded this series `[no-ac: documentation of decisions covered by AC-20260918-02-10 and AC-20260918-02-11]` | The reference is binding and frozen; every deviation in this repo is recorded there rather than argued again later. The landed `Notice` is on the same footing as `ForbiddenNotice` and has no entry yet |
@@ -47,19 +47,21 @@ sent from a browser again.
 | Path | Action | Layer | Summary |
 |------|--------|-------|---------|
 | src/schemas/patches.ts | MODIFY | schemas | D1 `reply` member with trimmed non-empty `text`; D3 `update.fields` superRefine refusing `status`/`thread`; D4 `journey` member deleted |
-| src/server/patches.ts | MODIFY | server | D1/D7 `reply` case with attribution-driven status and the one new rule-6 trigger; D4 `journey` case and its rule-7 override deleted |
+| src/server/patches.ts | MODIFY | server | D1/D7 `reply` case with attribution-driven status and the one new rule-6 trigger; D4 `journey` case and its rule-7 override deleted. `turnedOpen` (`:79`) **stays** — after D3 nothing on the wire can reach it, but three reducer-level tests (`tests/unit/patches.test.ts:50,164,171`) drive rule 6 through it, and deleting it as dead code breaks them |
 | src/server/plugin.ts | MODIFY | server | D1 `reply` 404/seed resolution beside `close`; D2 client admission forcing `entry.by` |
 | src/cli/answer.ts | MODIFY | cli | D6: reducer via `op:'reply'`, `by:'session'`, inside spec 01's lock |
 | src/ui/notes/useNoteActions.ts | MODIFY | ui | D1/D4/D5: `replyNote`/`replyJourney` send `reply`; `approveNote`/`approveJourney` send `close`; no thread leaves the browser |
-| src/ui/notes/NoteDialogs.tsx | MODIFY | ui | D8: `NoteActions` by role and ownership; `VerdictDialog` gains `defer`; D9 `Deferred` in the dialog title |
+| src/ui/notes/NoteDialogs.tsx | MODIFY | ui | D8: `NoteActions` by role and ownership; `VerdictDialog` gains `defer`; D9 `Deferred` in the dialog title and the `toneOf` import and its two call sites (`:21`, `:138`, `:165`) go |
 | src/ui/notes/notes-ui.tsx | MODIFY | ui | D8 `NoteActions` props; D9 `PinTone`/`TONE` gain `deferred` |
 | src/ui/screen/ScreenPage.tsx | MODIFY | ui | D5/D8: verdict dispatch routes approve and defer to `close`, reject/delete to `remove` |
 | src/ui/notes/Overlay.tsx | MODIFY | ui | D9: two `toneOf(note.status)` call sites (`:50`, `:59`) pass `note.status` straight to `PinTone` |
 | src/ui/notes/NotesPanel.tsx | MODIFY | ui | D9: the row's `tone={toneOf(n.status)}` (`:97`) passes `n.status`; the `Tone` import narrows to the aggregate use |
-| src/ui/store/selectors.ts | MODIFY | ui | D9: `toneOf` deleted; aggregate `Tone` and `worst()` unchanged |
+| src/ui/store/selectors.ts | MODIFY | ui | D9: `toneOf` deleted; `journeyTone` (`:56-59`) inlines the collapse it used to borrow; aggregate `Tone` and `worst()` unchanged |
 | docs/design/design-reference.md | MODIFY | other | D10: one Amendments entry |
-| tests/unit/patches.test.ts | MODIFY | tests | AC-20260918-02-1, AC-20260918-02-2, AC-20260918-02-3, AC-20260918-02-6, AC-20260918-02-9, AC-20260918-02-13 |
-| tests/server/api.test.ts | MODIFY | tests | AC-20260918-02-4, AC-20260918-02-5, AC-20260918-02-7 |
+| tests/unit/design-reference.test.ts | MODIFY | tests | D10: the newest-first assertion (`:17-26`) expects the top entry to be dated 2026-09-18 |
+| tests/unit/patches.test.ts | MODIFY | tests | AC-20260918-02-1, AC-20260918-02-2, AC-20260918-02-3, AC-20260918-02-9 |
+| tests/browser/roundtrip.test.ts | MODIFY | tests | AC-20260918-02-7 |
+| tests/server/api.test.ts | MODIFY | tests | AC-20260918-02-4, AC-20260918-02-5, AC-20260918-02-6; also the unknown-id `update` case (`:612-665`) whose body is `fields:{status:'approved'}` — now 400 at the schema, so its body becomes an anchor field to keep asserting 404 |
 | tests/cli/answer.test.ts | MODIFY | tests | AC-20260918-02-8, AC-20260918-02-12 |
 | tests/unit/selectors.test.ts | MODIFY | tests | AC-20260918-02-11 |
 | tests/browser/surfaces.test.ts | MODIFY | tests | AC-20260918-02-10 |
@@ -71,11 +73,24 @@ sent from a browser again.
 
 /** The one operation that adds to a thread. `text` is trimmed and must be non-empty — an empty
  * reply is a mis-click, never an intent. `by` is bounded HERE (the wire); the read-back
- * `ThreadEntrySchema.by` stays `z.string()` under the read-back permissiveness rule (spec 04 D4). */
+ * `ThreadEntrySchema.by` stays `z.string()` under the read-back permissiveness rule (spec 04 D4).
+ * `'client'` is deliberately NOT on the wire FOR THIS OP: the server writes it from the role, so no
+ * reply can forge an attribution the page renders as the client's words. `add.note.thread[].by`
+ * remains `z.string()` and is rewritten only for clients (`forceClientThread`), so an owner `add`
+ * can still self-attribute — pre-existing, out of scope here, and stated so the next reader does
+ * not assume a guarantee the wire does not make. */
 const ReplyEntrySchema = z.object({
-  by: z.enum(['owner', 'client', 'session']),
+  by: z.enum(['owner', 'session']),
   text: z.string().trim().min(1),
 }).strict()
+
+/** The wire enum and the reducer's input are deliberately DIFFERENT types. `clientNotesOpPatch`
+ * rewrites a client's entry to `by: 'client'`, which the wire enum does not admit — and the repo
+ * forbids `as`, so the rewrite needs somewhere legal to land. `applyNotesPatch` takes this widened
+ * form; only the HTTP boundary parses the narrow one. */
+export type AppliedNotesPatch =
+  | Exclude<NotesPatch, { op: 'reply' }>
+  | (Omit<Extract<NotesPatch, { op: 'reply' }>, 'entry'> & { entry: ThreadEntry })
 
 // added member:
 z.object({ op: z.literal('reply'), id: z.string(), entry: ReplyEntrySchema }).strict()
@@ -159,22 +174,26 @@ and is refused 400 instead of clobbering a thread. The landed notice surfaces th
   → writes tests/unit/patches.test.ts
 - **AC-20260918-02-3**: WHEN `entry.text` is `'   '` THE SYSTEM SHALL refuse the patch at the schema
   (`NotesPatchSchema.safeParse` → `success: false`) → writes tests/unit/patches.test.ts
-- **AC-20260918-02-4**: WHEN a client-role request posts `{op:'reply', id:'N1', entry:{by:'owner',
-  text:'hi'}}` THE SYSTEM SHALL answer 200 and persist the entry with `by: 'client'`
+- **AC-20260918-02-4**: WHEN a client-role request posts `{op:'reply', entry:{by:'owner',
+  text:'hi'}}` THE SYSTEM SHALL answer 200 and persist the entry with `by: 'client'` — for a note
+  id (`N1`) and for a journey id (`first-visit`), the journey being the path the page itself takes
   → writes tests/server/api.test.ts
 - **AC-20260918-02-5**: WHEN any request posts `{op:'update', id:'N1', fields:{status:'approved'}}`
   or `fields:{thread:[]}` THE SYSTEM SHALL answer 400 and leave `design/notes.json` byte-identical,
   while `fields:{rect:{...}, viewport:'desktop'}` is still accepted
   → writes tests/server/api.test.ts
 - **AC-20260918-02-6**: WHEN a request posts `{op:'journey', id:'first-visit', entry:{...}}` THE
-  SYSTEM SHALL answer 400, the op no longer being a member of the patch union
-  → rewrites tests/unit/patches.test.ts :: AC-20260917-02-13
-- **AC-20260918-02-7**: WHEN the owner approves a note on the page THE SYSTEM SHALL send
-  `{op:'close', id, status:'approved'}` and the served note SHALL become `approved` with its thread
-  unchanged in length → writes tests/server/api.test.ts
-- **AC-20260918-02-8**: WHEN `mock-review answer --note N1 --text 'moved it'` runs THE SYSTEM SHALL
-  produce the same document the reducer produces for `{op:'reply', entry:{by:'session', text:'moved
-  it'}}` — `status: 'answered'`, thread ending `{by:'session', text:'moved it'}`
+  SYSTEM SHALL answer 400, the op no longer being a member of the patch union — the pre-image
+  answers 403 for a client and 200 for the owner
+  → rewrites tests/server/api.test.ts :: AC-20260917-02-16:
+- **AC-20260918-02-7**: WHEN the owner clicks Approve on a note THE SYSTEM SHALL send a request
+  whose body carries `op: 'close'` (captured with `page.waitForRequest`; the pre-image sends
+  `op: 'update'`), and the served note SHALL become `approved` with its thread unchanged in length
+  → rewrites tests/browser/roundtrip.test.ts :: AC-20260915-02-19:
+- **AC-20260918-02-8**: WHEN `mock-review answer --note N1 --text '  moved it  '` runs THE SYSTEM
+  SHALL append the trimmed text through the shared reducer (`thread` ends
+  `{by:'session', text:'moved it'}`, `status: 'answered'`) — the pre-image keeps the padding, having
+  never parsed the wire schema — and WHEN `--text '   '` is given it SHALL exit 2
   → rewrites tests/cli/answer.test.ts :: AC-20260915-01-16: answer --note
 - **AC-20260918-02-9**: WHEN a client replies to a note on a screen that is currently approved THE
   SYSTEM SHALL delete that screen's entry from `approval.screens`, and WHEN the session replies to
@@ -190,9 +209,6 @@ and is refused 400 instead of clobbering a thread. The landed notice surfaces th
 - **AC-20260918-02-12**: WHEN `mock-review answer --journey J --text t` names a journey with no
   conversation THE SYSTEM SHALL CONTINUE TO exit 2 with `mock-review: no conversation for journey J`
   → reuses tests/cli/answer.test.ts :: AC-20260915-01-17: answer on
-- **AC-20260918-02-13**: WHEN a notes patch leaves approval unchanged THE SYSTEM SHALL CONTINUE TO
-  leave `design/approval.json` byte-identical including a `contractVersion` of 1
-  → reuses tests/server/api.test.ts :: AC-20260917-01-12
 
 ## Assumptions (escalation triggers)
 
@@ -215,7 +231,7 @@ and is refused 400 instead of clobbering a thread. The landed notice surfaces th
 - **A5** — `close` accepts any source status and returns `approval` by identity
   (`src/server/patches.ts`, pinned by `tests/unit/patches.test.ts :: AC-20260917-02-14`). Verified
   by reading; relied upon by D5 and D8. — **if false:** approving a note would start rewriting
-  `approval.json`, breaking AC-20260918-02-13; add a rule-6 exclusion for `close`.
+  `approval.json`, breaking AC-20260918-02-9's identity clause; add a rule-6 exclusion for `close`.
 - **A6** — The plugin's `--mark approved` and `--mark journey-approved` read note and conversation
   statuses only, and treat anything that is not `open` as settled. Making `deferred` page-reachable
   therefore unblocks those marks rather than confusing them. Verified by reading `mocks-driver.js`;
