@@ -110,6 +110,32 @@ export function applyNotesPatch(
       const nextNotes: Notes = { ...notes, journeys: { ...notes.journeys, [patch.id]: { status, thread } } }
       return { notes: nextNotes, approval }
     }
+
+    case 'close': {
+      // D10/D11: `close` targets either a note (`notes.notes`) or a journey conversation
+      // (`notes.journeys`), tried in that order; a no-op on an id known to neither (the 404
+      // pre-check lives at the route layer, plugin.ts — this keeps the function total for a
+      // direct/test caller, mirroring `update`/`remove` above). `close` never touches
+      // `approval.screens` — rule 6 fires only on a note turning `open`, which `close` cannot
+      // produce — so the input `approval` is returned by identity, which is what lets
+      // `plugin.ts`'s `result.approval !== approval` write-suppression hold. Allowed from any
+      // current status.
+      const idx = notes.notes.findIndex((n) => n.id === patch.id)
+      if (idx !== -1) {
+        const existing = notes.notes[idx]
+        if (!existing) return { notes, approval }
+        const updated: Note = { ...existing, status: patch.status }
+        const nextArr = notes.notes.slice()
+        nextArr[idx] = updated
+        return { notes: { ...notes, notes: nextArr }, approval }
+      }
+      const existingJourney = notes.journeys[patch.id]
+      if (existingJourney) {
+        const nextJourneys = { ...notes.journeys, [patch.id]: { ...existingJourney, status: patch.status } }
+        return { notes: { ...notes, journeys: nextJourneys }, approval }
+      }
+      return { notes, approval }
+    }
   }
 }
 
@@ -121,6 +147,10 @@ export type ApprovalPatchCtx = {
   config: Config | NullConfig
   statesOf: (name: string) => string[]
   screenshotsFor: (name: string) => string[]
+  /** D7: the served journey's story hash (`ServerJourney.beats`), or `null` for an unknown
+   * journey or one with no confirmable story — derivation lives here, verification stays in the
+   * endpoint (`plugin.ts`'s `handlePostApproval`), mirroring `hash`/`approveScreen`. */
+  beatsHash: (journeyId: string) => string | null
 }
 
 /** D6/D7/D16: `applyApprovalPatch(approval, patch, ctx)` -> the new `Approval` document. */
@@ -146,14 +176,20 @@ export function applyApprovalPatch(approval: Approval, patch: ApprovalPatch, ctx
       return { ...approval, screens: nextScreens }
     }
 
-    case 'approveJourney': {
-      const existing = approval.journeys[patch.id] ?? { approvedAt: null, client: null }
-      return { ...approval, journeys: { ...approval.journeys, [patch.id]: { ...existing, approvedAt: new Date().toISOString() } } }
-    }
-
     case 'clientOk': {
-      const existing = approval.journeys[patch.id] ?? { approvedAt: null, client: null }
-      return { ...approval, journeys: { ...approval.journeys, [patch.id]: { ...existing, client: 'ok' } } }
+      // D8: the client confirm is a fresh stamp, not a merge onto whatever the entry held before
+      // (a prior v1 `{approvedAt, client}` row's `approvedAt` is intentionally dropped here —
+      // nothing writes it any more) — `{client:'ok', beats, at}` only. Verification that
+      // `patch.beats` matches the served hash happens in the endpoint (`handlePostApproval`,
+      // D7); this reducer trusts the caller already checked.
+      const existing = approval.journeys[patch.id]
+      return {
+        ...approval,
+        journeys: {
+          ...approval.journeys,
+          [patch.id]: { ...existing, client: 'ok', beats: ctx.beatsHash(patch.id) ?? undefined, at: new Date().toISOString() },
+        },
+      }
     }
 
     case 'theme': {

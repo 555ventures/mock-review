@@ -3,13 +3,14 @@ name: feedback-usesyncexternalstore-selectors
 description: useStore selectors in this codebase's store/store.ts must return stable references, never derive/map inline, or React infinite-loops
 metadata:
   type: feedback
+  reviewed: 2026-09-17
 ---
 
 `useStore(selector)` (src/ui/store/store.ts) wraps `useSyncExternalStore`. Any selector whose body
 creates a new array/object every call (e.g. `useStore((s) => s.data?.screens.map((sc) => sc.name) ?? [])`)
 makes React believe the snapshot changed on every render, which forces an immediate re-render,
 which calls the selector again, which returns another new reference — an infinite loop that
-crashes as a *minified* React error #185 ("Maximum update depth exceeded") with no useful stack in
+crashes as a _minified_ React error #185 ("Maximum update depth exceeded") with no useful stack in
 a production build. It reproduces reliably but silently in headless Playwright runs (the whole
 `page.goto(..., {waitUntil:'networkidle'})` or a later `expect.poll` just hangs to timeout, no
 obvious error unless you capture `pageerror` / build unminified with `define:

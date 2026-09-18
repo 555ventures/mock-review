@@ -4,6 +4,7 @@
 import type { PointerEvent, WheelEvent } from 'react'
 import { TONE, NotePin } from './notes-ui.js'
 import { SCREEN_ANCHOR, type Box, type UiNote, type Viewport } from './anchor.js'
+import { toneOf } from '../store/selectors.js'
 
 export type VisibleNote = { note: UiNote; box: Box | null; ownDevice: boolean }
 
@@ -46,7 +47,7 @@ export function Overlay({
             />
           )
         }
-        const t = TONE[note.status]
+        const t = TONE[toneOf(note.status)]
         return (
           <div key={note.id} data-note={note.id} className={`pointer-events-none absolute z-20 rounded-sm border-2 ${t.box}`} style={box}>
             <button
@@ -55,7 +56,7 @@ export function Overlay({
               onClick={() => onSelect(note.id)}
               className={`absolute -top-2.5 -left-2.5 cursor-pointer ${marking ? 'pointer-events-none' : 'pointer-events-auto'}`}
             >
-              <NotePin tone={note.status}>{note.id}</NotePin>
+              <NotePin tone={toneOf(note.status)}>{note.id}</NotePin>
             </button>
           </div>
         )

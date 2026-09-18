@@ -17,7 +17,7 @@ export type AnswerFlags = {
   decision: string | undefined
 }
 
-type ThreadTarget = { status: 'open' | 'answered' | 'approved'; thread: ThreadEntry[] }
+type ThreadTarget = { status: 'open' | 'answered' | 'approved' | 'deferred'; thread: ThreadEntry[] }
 
 export function answerVerb(cwd: string, flags: AnswerFlags): string {
   ensureDesignFiles(cwd)

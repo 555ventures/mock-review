@@ -12,7 +12,15 @@ type Check = {
   findings: Finding[]
   screens: Array<{ name: string; file: string; states: string[]; shell: string | null; hash: string; lines: number }>
   shells: Array<{ name: string; file: string; examples: string[] }>
-  journeys: Array<{ id: string; resolved: boolean; unresolved: Array<{ from: number; to: number; reason: string }> }>
+  journeys: Array<{
+    id: string
+    title?: string
+    persona?: string
+    steps?: Array<{ screen: string; beat?: string; state?: string }>
+    edges?: Array<{ from: number; to: number; label?: string; say?: string }>
+    resolved: boolean
+    unresolved: Array<{ from: number; to: number; reason: string }>
+  }>
   themes: string[]
   config: Record<string, unknown>
 }
@@ -203,13 +211,112 @@ describe('mock-review check --json (built dist/)', () => {
     expect(check.journeys[0]).toEqual({
       id: 'first-visit',
       title: 'First visit',
-      steps: [{ screen: 'home' }, { screen: 'account' }],
-      edges: [{ from: 0, to: 1, label: 'Account' }],
+      persona: 'a new customer',
+      steps: [
+        { screen: 'home', beat: 'I open the app' },
+        { screen: 'account', beat: 'I land on my account', state: 'default' },
+      ],
+      edges: [{ from: 0, to: 1, label: 'Account', say: 'I tap Account' }],
       resolved: false,
       unresolved: [{ from: 0, to: 1, reason: 'no control with data-to="Account" on home' }],
     })
     expect(check.ok).toBe(true)
     expect(check.findings.some((f) => f.kind === 'twin' || JSON.stringify(f).includes('unresolved'))).toBe(false)
+  })
+
+  // AC-20260917-02-1 (D1): every one of beat/state/say/persona is echoed verbatim from
+  // `check --json`'s own steps/edges/journey — and a step written with ONLY `screen` emits
+  // exactly `{"screen":"home"}`, never `{"screen":"home","beat":undefined}` (zod 4.6.5 omits
+  // absent optional keys from parse output, A4). Rewrites the pre-02 shape of
+  // AC-20260915-01-12's own case above.
+  it('AC-20260917-02-1: check --json echoes step.beat/state, edge.say and journey.persona verbatim, and omits beat entirely for a beat-less step', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-beats-')
+    const check = runCheck(host)
+
+    const journey = check.journeys[0]
+    expect(journey?.steps?.[0]).toEqual({ screen: 'home', beat: 'I open the app' })
+    expect(journey?.steps?.[1]).toEqual({ screen: 'account', beat: 'I land on my account', state: 'default' })
+    expect(journey?.edges?.[0]).toEqual({ from: 0, to: 1, label: 'Account', say: 'I tap Account' })
+
+    // A beat-less step (only `screen`) must be echoed as exactly `{"screen":"home"}` — 'beat' in
+    // step is false, never `"beat":undefined` on the wire. The shared fixture's own `Step.beat`
+    // stays required (D13 pins it to the plugin template, verbatim) — a host that genuinely never
+    // had beats never had a required-`beat` type checking against it either, so this scratch
+    // copy's own `Step` type is relaxed alongside the literal, local to this copy only, so the
+    // mutated host stays internally consistent instead of failing its own typecheck.
+    const journeysFile = path.join(host, 'src', 'journeys.ts')
+    const journeysSrc = readFileSync(journeysFile, 'utf8')
+    const beatless = journeysSrc
+      .replace('  beat: string\n', '  beat?: string\n')
+      .replace(
+        "{ screen: 'account', beat: 'I land on my account', state: 'default' }",
+        "{ screen: 'account' }",
+      )
+    expect(beatless).not.toBe(journeysSrc)
+    expect(beatless).toContain('beat?: string')
+    writeFileSync(journeysFile, beatless)
+
+    const beatlessCheck = runCheck(host)
+    const raw = JSON.stringify(beatlessCheck.journeys[0]?.steps?.[1])
+    expect(raw).toBe('{"screen":"account"}')
+    expect('beat' in (beatlessCheck.journeys[0]?.steps?.[1] ?? {})).toBe(false)
+  })
+
+  // AC-20260917-02-2 (D1/D2): `persona` is reported when declared, and omitted entirely
+  // (`'persona' in journeys[0]` is false) when the journey declares none.
+  it('AC-20260917-02-2: journey.persona is reported when declared, and omitted when the journey declares none', () => {
+    const withPersonaHost = copyFixtureHost(greenHost, 'mock-review-check-persona-')
+    const withPersonaCheck = runCheck(withPersonaHost)
+    expect(withPersonaCheck.journeys[0]?.persona).toBe('a new customer')
+
+    const noPersonaHost = copyFixtureHost(greenHost, 'mock-review-check-nopersona-')
+    const journeysFile = path.join(noPersonaHost, 'src', 'journeys.ts')
+    const journeysSrc = readFileSync(journeysFile, 'utf8')
+    const noPersona = journeysSrc.replace("    persona: 'a new customer',\n", '')
+    expect(noPersona).not.toBe(journeysSrc)
+    writeFileSync(journeysFile, noPersona)
+
+    const noPersonaCheck = runCheck(noPersonaHost)
+    expect('persona' in (noPersonaCheck.journeys[0] ?? {})).toBe(false)
+  })
+
+  // AC-20260917-02-3 (D3): a step with no beat is a warn-severity `beats` finding naming the
+  // journey and the 1-based step index — never a refusal, and `check.ok` stays true.
+  it('AC-20260917-02-3: a beat-less step yields exactly one warn "beats" finding naming the journey and step index, and check.ok stays true', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-beatswarn-')
+    const journeysFile = path.join(host, 'src', 'journeys.ts')
+    const journeysSrc = readFileSync(journeysFile, 'utf8')
+    // The shared fixture's own `Step.beat` stays required (D13 pins it to the plugin template
+    // verbatim); this scratch copy's `Step` type is relaxed alongside the literal so the mutated
+    // host still typechecks against itself — otherwise `typeFindings` correctly reports a real
+    // TS2741 `error`, which flips `check.ok` false for a reason unrelated to this AC's own `warn`
+    // finding.
+    const beatless = journeysSrc
+      .replace('  beat: string\n', '  beat?: string\n')
+      .replace(
+        "{ screen: 'account', beat: 'I land on my account', state: 'default' }",
+        "{ screen: 'account' }",
+      )
+    expect(beatless).not.toBe(journeysSrc)
+    expect(beatless).toContain('beat?: string')
+    writeFileSync(journeysFile, beatless)
+
+    const check = runCheck(host)
+    expect(check.ok).toBe(true)
+    const beatsFindings = check.findings.filter((f) => f.kind === 'beats')
+    expect(beatsFindings).toHaveLength(1)
+    expect(beatsFindings[0]).toEqual({
+      kind: 'beats',
+      severity: 'warn',
+      file: 'src/journeys.ts',
+      message: 'journey first-visit step 2 has no beat — `--mark journey-drawn` will refuse this step',
+    })
+  })
+
+  it('AC-20260917-02-3: a journey whose every step carries a beat emits no beats finding', () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-check-nobeatswarn-')
+    const check = runCheck(host)
+    expect(check.findings.some((f) => f.kind === 'beats')).toBe(false)
   })
 
   it('AC-20260916-03-6: a scaffold-owned src/components/theme-provider.tsx is invisible to check (D1) — ok:true, no doc findings for it', () => {

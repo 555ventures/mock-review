@@ -91,7 +91,7 @@ npm run check   # typecheck, lint, tests
 npm run build   # tsc -p tsconfig.build.json && chmod +x dist/cli.js — writes dist/: the compiled CLI and plugin only
 git add dist
 git commit
-git tag -f v1
+git tag -f v2
 git push --tags
 ```
 

@@ -11,9 +11,10 @@ import { CONTRACT_VERSION } from '../../src/schemas/version.js'
 
 const pluginRoot = process.env.SPEC_PLUGIN_ROOT || path.join(homedir(), 'projects', 'claude-plugins')
 const driverScript = path.join(pluginRoot, 'spec', 'scripts', 'mocks-driver.js')
-// D6: the plugin's own template contract still reports 1 (verified 2026-09-17) until claude-plugins
-// specs/20260917/01 is built; contractSkew is the falsifiable surface (AC-20260917-01-9, its own
-// unit suite) — only the driver-running test below consults it.
+// D6/D10: contractSkew is the pure falsifiable surface behind the driver-running test's own skip
+// (AC-20260917-01-9/AC-20260917-02-19, its own unit suite) — it is consulted here rather than
+// assumed, so this file never hardcodes whether the installed plugin checkout's own template is
+// currently in or out of skew with this package's contract.
 const pluginContractTemplate = path.join(pluginRoot, 'spec', 'templates', 'mock', 'contract.json')
 const hasPlugin = existsSync(driverScript)
 const describeIfPlugin = hasPlugin ? describe : describe.skip
@@ -48,6 +49,10 @@ describeIfPlugin('mocks-driver.js against the built binary (built .test-dist/, D
     copyHostInto(greenHost, appDir)
     linkInstalledBin(appDir)
     mkdirSync(path.join(scratchRoot, 'design', 'mocks'), { recursive: true })
+    // D13: the seed's own beats (the client's numbered sentences, `N. "sentence" -> screen[@state]`)
+    // must copy `src/journeys.ts`'s beats verbatim — `--mark journey-drawn` compares them
+    // beat-for-beat against `check --json`'s steps (mocks-driver.js `findBeatsMismatch`). This
+    // grammar replaces the retired ```surfaces``` block (A8/A9).
     writeFileSync(
       path.join(scratchRoot, 'design', 'mocks', 'seed.md'),
       [
@@ -66,11 +71,9 @@ describeIfPlugin('mocks-driver.js against the built binary (built .test-dist/, D
         '## Journeys',
         '',
         '### first-visit',
-        'A new customer opens the app, checks their wallet, and goes to their account.',
-        '```surfaces',
-        'Home',
-        'Home -> Account',
-        '```',
+        'a new customer',
+        '1. "I open the app" -> home',
+        '2. "I land on my account" -> account@default',
         '',
       ].join('\n'),
     )

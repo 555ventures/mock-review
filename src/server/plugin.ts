@@ -178,6 +178,7 @@ function ctxFromState(cwd: string, state: ServerState): ApprovalPatchCtx {
     config: state.config,
     statesOf: (name) => state.screens.find((s) => s.name === name)?.states ?? [],
     screenshotsFor: (name) => screenshotsFor(cwd, name),
+    beatsHash: (journeyId) => state.journeys.find((j) => j.id === journeyId)?.beats ?? null,
   }
 }
 
@@ -185,17 +186,34 @@ function forceClientThread(thread: ThreadEntry[]): ThreadEntry[] {
   return thread.map((entry) => ({ ...entry, by: 'client' }))
 }
 
-/** D6: a client-role request may `POST notes` only with `op: 'add'` (thread entries forced to
- * `by: 'client'`) or `op: 'journey'` with an `entry` (also forced to `by: 'client'`) — everything
- * else is 403. Returns `null` when the patch is not one a client may send. */
-function clientNotesPatch(patch: NotesPatch): NotesPatch | null {
+/** D6/D11: op-level admission for a client-role request, decided with no document access — an op
+ * a client may never issue (`update`, `remove`, a bare `journey` with no `entry`) is 403
+ * regardless of whether the target id exists, so a never-permitted op can never be used to probe
+ * existence. Checked BEFORE the 404 pre-check, restoring the original op-then-404 ordering.
+ * `add` and `journey` (with an `entry`) are transformed here (thread entries forced to `client`);
+ * `close` is admitted at this stage unconditionally — its per-target ownership gate needs the
+ * current document and runs later, inside the write lock, AFTER the 404 pre-check
+ * (`clientOwnsCloseTarget` below): D11's 404-before-403 governs THAT gate specifically, not
+ * op-level admission. Returns `null` when the op itself is never allowed for a client. */
+function clientNotesOpPatch(patch: NotesPatch): NotesPatch | null {
   if (patch.op === 'add') {
     return { ...patch, note: { ...patch.note, thread: forceClientThread(patch.note.thread) } }
   }
-  if (patch.op === 'journey' && patch.entry) {
-    return { ...patch, entry: { ...patch.entry, by: 'client' } }
+  if (patch.op === 'journey') {
+    return patch.entry ? { ...patch, entry: { ...patch.entry, by: 'client' } } : null
   }
+  if (patch.op === 'close') return patch
   return null
+}
+
+/** D11: `close`'s ownership gate — a client may close only a note or journey conversation they
+ * themselves opened (`thread[0].by === 'client'`). Called only after the 404 pre-check has
+ * already confirmed the target exists (note, or a known journey — possibly just seeded with a
+ * default `{status:'open', thread:[]}` entry by the caller), so this never leaks existence. */
+function clientOwnsCloseTarget(id: string, notes: Notes): boolean {
+  const note = notes.notes.find((n) => n.id === id)
+  const thread = note ? note.thread : notes.journeys[id]?.thread
+  return thread?.[0]?.by === 'client'
 }
 
 /** D6: a client-role request may `POST approval` only with `op: 'clientOk'`. */
@@ -304,9 +322,13 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
     return
   }
 
+  // D6/D11: op-level admission runs BEFORE the 404 pre-check — an op a client may never issue
+  // (e.g. `remove`, `update`, a bare `journey`) is 403 regardless of whether the target id
+  // exists, so it never leaks existence. `close`'s own per-target ownership gate is the one
+  // check that runs AFTER 404 (below, inside the lock), per D11.
   let patch: NotesPatch | null = parsed.data
   if (role === 'client') {
-    patch = clientNotesPatch(parsed.data)
+    patch = clientNotesOpPatch(parsed.data)
     if (!patch) {
       res.statusCode = 403
       res.end()
@@ -342,6 +364,36 @@ async function handlePostNotes(req: IncomingMessage, res: ServerResponse, cwd: s
       res.statusCode = 404
       res.end()
       return
+    }
+
+    // D10/D11: `close` may target a note or a journey conversation. A note match is checked
+    // first; when the id is not a note and not yet a `notes.journeys` entry, this mirrors how
+    // `op:'journey'` treats a missing entry — except `close` must first confirm the id names a
+    // REAL journey (`state.journeys`), since unlike `op:'journey'` it must answer 404 for an id
+    // that is neither a note nor a journey at all (AC-20260917-02-15's "exists nowhere" case).
+    // Only once the id is confirmed real is a default `{status:'open', thread:[]}` entry seeded
+    // so the reducer below has something to update — mirroring `op:'journey'`'s own default.
+    if (appliedPatch.op === 'close') {
+      const isNote = notes.notes.some((n) => n.id === appliedPatch.id)
+      if (!isNote && !(appliedPatch.id in notes.journeys)) {
+        const state = await buildState(cwd, role, runner)
+        const isJourney = state.journeys.some((j) => j.id === appliedPatch.id)
+        if (!isJourney) {
+          res.statusCode = 404
+          res.end()
+          return
+        }
+        notes = { ...notes, journeys: { ...notes.journeys, [appliedPatch.id]: { status: 'open', thread: [] } } }
+      }
+
+      // D11: the ownership gate — a client may close only a note or journey conversation they
+      // themselves opened. Runs only after the 404 pre-check above has confirmed the target
+      // exists, so it never leaks existence.
+      if (role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
+        res.statusCode = 403
+        res.end()
+        return
+      }
     }
 
     const result = applyNotesPatch(notes, appliedPatch, approval)
@@ -406,6 +458,30 @@ async function handlePostApproval(
     if (appliedPatch.op === 'approveScreen' && !state.screens.some((s) => s.name === appliedPatch.name)) {
       sendJson(res, 400, { error: `unknown screen ${appliedPatch.name}` })
       return
+    }
+
+    // D7: the client confirm is If-Match on the story hash — three guards, in this order, all
+    // inside the write lock where `buildState`'s result (`state.journeys`) is already in hand.
+    // (1) unknown journey; (2) a journey with nothing confirmable yet (`beats === null`); (3) the
+    // hash the client echoed no longer matches what would be served now (the seed moved under
+    // them since they read it) — 409, file left byte-identical. Only once all three pass does the
+    // reducer write.
+    if (appliedPatch.op === 'clientOk') {
+      const journey = state.journeys.find((j) => j.id === appliedPatch.id)
+      if (!journey) {
+        sendJson(res, 400, { error: `unknown journey ${appliedPatch.id}` })
+        return
+      }
+      if (journey.beats === null) {
+        sendJson(res, 400, {
+          error: `journey ${appliedPatch.id} has no beats — every step needs a sentence before a client can confirm it`,
+        })
+        return
+      }
+      if (appliedPatch.beats !== journey.beats) {
+        sendJson(res, 409, { error: 'story changed since it was shown — reload' })
+        return
+      }
     }
 
     let approval: Approval

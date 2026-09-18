@@ -10,6 +10,7 @@ import { screenReport, pickDefaultHtml } from '../analysis/screens.js'
 import { shellReport } from '../analysis/shells.js'
 import { resolveState } from '../ui/frame/stateKey.js'
 import { journeyReport, type JourneyInput } from '../analysis/journeys.js'
+import { beatHash } from '../analysis/beats.js'
 import { inventory } from '../analysis/inventory.js'
 import { ensureDesignFiles, readJson } from '../files/json.js'
 import { ApprovalSchema, EMPTY_APPROVAL, EMPTY_NOTES, NotesSchema } from '../schemas/index.js'
@@ -42,14 +43,6 @@ async function moduleExamplesMap(
  * An unresolved or ambiguous state passes through unchanged. */
 function normaliseStepState(exampleKeys: readonly string[], state: string): string {
   return resolveState(exampleKeys, state) ?? state
-}
-
-/** D4: the optional fields the plugin's `journeys.ts` template gains on top of the analysis
- * layer's `JourneyInput` — read from the host module when present, dropped otherwise. */
-type ServerJourneyInput = JourneyInput & {
-  persona?: string
-  steps: { screen: string; state?: string }[]
-  edges: { from: number; to: number; label?: string; say?: string }[]
 }
 
 /**
@@ -89,11 +82,11 @@ export async function buildState(cwd: string, role: 'owner' | 'client', runner: 
 
     shells = await shellReport(cwd, runner, discovered.shells)
 
-    let journeyInputs: ServerJourneyInput[] = []
+    let journeyInputs: JourneyInput[] = []
     if (discovered.journeysFile) {
       try {
         const mod = (await runner.import(path.join(cwd, discovered.journeysFile))) as {
-          journeys?: ServerJourneyInput[]
+          journeys?: JourneyInput[]
         }
         journeyInputs = mod.journeys ?? []
       } catch {
@@ -106,23 +99,19 @@ export async function buildState(cwd: string, role: 'owner' | 'client', runner: 
       return screen ? pickDefaultHtml(screen, screenResult.htmlByScreen) : undefined
     })
 
-    journeys = resolved.map((journey, i): ServerJourney => {
-      const input = journeyInputs[i]
-      const rawSteps: { screen: string; state?: string }[] = input?.steps ?? journey.steps
+    // D5: `beats` is hashed here, over `journeyReport`'s raw steps — BEFORE the state-normalising
+    // map below rewrites each step's `state` to the host's example key. The driver hashes the
+    // seed's raw spelling, and `--mark journey-drawn` already enforces `check --json` steps ==
+    // seed beats, so raw is the only spelling that can ever equal the driver's own hash (D5, A2).
+    journeys = resolved.map((journey): ServerJourney => {
+      const rawSteps: { screen: string; beat?: string | undefined; state?: string | undefined }[] = journey.steps
+      const beats = beatHash(rawSteps)
       const steps = rawSteps.map((step) => {
         if (step.state === undefined) return step
         const screen = screens.find((s) => s.name === step.screen)
         return { ...step, state: normaliseStepState(screen?.examples ?? [], step.state) }
       })
-      return {
-        ...journey,
-        ...(input?.persona !== undefined ? { persona: input.persona } : {}),
-        steps,
-        edges: journey.edges.map((edge, ei) => {
-          const say = input?.edges[ei]?.say
-          return say !== undefined ? { ...edge, say } : edge
-        }),
-      }
+      return { ...journey, steps, beats }
     })
 
     const specifiers = Array.from(screenResult.specifiersByScreen.entries()).map(([name, specs]) => ({

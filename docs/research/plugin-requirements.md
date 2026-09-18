@@ -72,7 +72,7 @@ Required top-level: `contractVersion, ok, findings, screens, shells, journeys, t
 - **`findings[]`** `{kind, severity, file, message}`. `severity` ∈ `"error"|"warn"`; only the literal `"error"` is filtered. Error kinds: `type` (TS error), `layer` (import outside allowed layers), `doc` (project component/shell without doc line or `examples`), `render` (a screen state that throws), `config` (invalid `mock.config.ts`). Warn kinds: `size` (screen past 150 lines), `twin` (component whose shadcn imports match another's), `states` (screen missing a state the seed requires). Warns never flip `ok`, never refuse a mark. An unresolved journey edge is never a finding. `file`+`message` are printed verbatim in refusals.
 - **`screens[]`** `{name, file, states, shell, hash, lines}`. `name` = key of `approval.screens[<name>]` and of the look URL `<serve.url>/#/<screen>`. `hash` is the drift oracle: preflight requires `approval.screens[n].hash === check.screens[n].hash`, else STOP "changed since approval" (`stage-design.md:43-46`); must change on any edit. `states` = the screen's exported `meta.states`. `shell`, `lines`: required keys, no driver read.
 - **`shells[]`** `{name, file, examples}`. `shell-drawn` requires `check.shells.some(s => Array.isArray(s.examples) && s.examples.length > 0)` (`mocks-driver.js:348-351`) — array of example names, e.g. `["Default"]`.
-- **`journeys[]`** `{id, title, steps, edges, resolved, unresolved}`. `id` matched against the seed's `### <journey>` names (`mocks-driver.js:370`, `394`). `steps`: array of `{screen}` — driver maps `steps.map(s => s.screen)` and requires each approved (`:401-407`). `resolved: boolean` — `journey-drawn` refuses unless truthy (`:374`). `unresolved[]` `{from: number, to: number, reason: string}` printed as `step <from> → <to>: <reason>` (`:375`); reference reason `no control with text "Account" in ConsoleShell`.
+- **`journeys[]`** `{id, title, steps, edges, resolved, unresolved, persona?, beats}` (contract v2). `id` matched against the seed's `### <journey>` names (`mocks-driver.js:370`, `394`). `steps`: array of `{screen, beat?, state?}` — driver maps `steps.map(s => s.screen)` and requires each approved (`:401-407`); the seed's beat lines are compared against `steps[].beat` at `--mark journey-drawn`, and a step missing `beat` is refused there even though `check` itself only warns. `edges[]` carry an optional `say` (the client's own words for taking the edge) alongside `label`. `resolved: boolean` — `journey-drawn` refuses unless truthy (`:374`). `unresolved[]` `{from: number, to: number, reason: string}` printed as `step <from> → <to>: <reason>` (`:375`); reference reason `no control with text "Account" in ConsoleShell`. `persona` is the client's own description of who is walking the journey, optional. `beats: string | null` is server-only (`GET state`, never `check --json`) — the 12-hex sha256 of the journey's story computed from the raw (un-normalised) steps; `--mark journey-approved` refuses unless `approval.journeys[id].beats === beats`, and `null` means nothing is confirmable yet.
 - **`themes`** — array of keys from `src/themes/*.css` (basename without `.css`); `theme-picked` requires `check.themes.includes(approval.theme)` (`:442-444`).
 - **`config`** `{name, port, targets:{viewports[], schemes[]}, theme: string|null, client:{token}}` mirroring `mock.config.ts`. `theme-picked` requires `check.config.theme === approval.theme` (`:439-441`). `client open` builds `<serve.url>/?client=<config.client.token>` (`:576-577`).
 - **`serve`** `{url: string|null}` — `null` exactly when no `serve` process runs for this app. `client open` refuses on null with `remedy: npx mock-review serve` (`:575`). **No trailing slash** (driver concatenates `url + '/?client=' + token`).
@@ -99,7 +99,7 @@ Session-authored. Each exports `meta = { name, states: string[] }` plus the comp
 One `/** … */` doc line above the export and a named `examples` export; missing either = `doc` error; the sweep inventory is built from them (`SKILL.md:16-18`; `spec/doctrine/mocks.md:221-225`).
 
 ### C.4 `src/journeys.ts`
-Copied from `spec/templates/mock/journeys.ts`. Types: `Step = { screen: string }`, `Edge = { from: number; to: number; label?: string }`, `Journey = { id; title; steps: Step[]; edges: Edge[] }`, `export const journeys: Journey[] = []` (`:4-30`). Empty array must be valid.
+Copied from `spec/templates/mock/journeys.ts`. Types (contract v2): `Step = { screen: string; beat?: string; state?: string }`, `Edge = { from: number; to: number; label?: string; say?: string }`, `Journey = { id; title; persona?: string; steps: Step[]; edges: Edge[] }`, `export const journeys: Journey[] = []` (`:4-30`). Empty array must be valid. `beat`/`say`/`persona`/`state` are unmarked in the template's own `fields` block, but track this host-facing type as optional — a step written with only `{screen}` is still valid, and the package reports it as an `ok: true` check with one `beats` warn finding rather than refusing.
 
 ### C.5 `src/records/*.ts`, `src/themes/*.css`
 Records: typed arrays, one file per seed `## Records` entity; driver verifies existence at `seed-done` (`mocks-driver.js:319-324`). Themes: `src/themes/<k>.css`; `<k>` appears in `check.themes`.
@@ -109,25 +109,25 @@ Records: typed arrays, one file per seed `## Records` entity; driver verifies ex
 
 ### C.7 `design/notes.json` — package-owned
 ```
-{ contractVersion: 1,
+{ contractVersion: 2,
   notes: [ { id, screen, state, component, key, snippet, status, thread[], project?: true } ],
   journeys: { "<journeyId>": { status, thread[] } } }
 ```
-- `thread[]` `{by, text}`. `status` ∈ `open` (red, session's turn) | `answered` (yellow) | `approved` (blue).
+- `thread[]` `{by, text}`. `status` ∈ `open` (red, session's turn) | `answered` (yellow) | `approved` (blue) | `deferred` (contract v2 — closed, same as `approved`: it leaves screen approval alone and drops out of the sweep queue, and `--mark approved` turns it into a ledger exclusion row).
 - `project: true` is optional but load-bearing: driver filters `n.project === true` (`mocks-driver.js:413`, `468`); a project note has `screen/state/component/key/snippet` all `null`.
-- Writers: package UI (raise/approve/reject/delete), package CLI `answer` (open → answered). Never the plugin, never hand-edited; only the page's own controls end a note (`mocks.md:178-181`).
-- Readers: driver `readNotesRaw()` (`mocks-driver.js:264-269`) at `journey-approved` (`:408-420`) and `approved` (`:465-469`); `genesis-driver.js:696,708-717`.
-- **Must exist** (missing → throw → exit 2). Package creates `{contractVersion:1,notes:[],journeys:{}}` at first serve/init.
+- Writers: package UI (raise/approve/reject/delete), package CLI `answer` (open → answered). A client may also `close` a note or journey conversation they themselves raised (`thread[0].by === 'client'`) to `approved` or `deferred`, via the page's own confirm/close control — never the plugin, never hand-edited.
+- Readers: driver `readNotesRaw()` (`mocks-driver.js:264-269`) at `journey-approved` (`:408-420`) and `approved` (`:465-469`); `genesis-driver.js:696,708-717`; `deferredExclusionTargets` reads `deferred` rows for both notes and journeys.
+- **Must exist** (missing → throw → exit 2). Package creates `{contractVersion:2,notes:[],journeys:{}}` at first serve/init.
 
 ### C.8 `design/approval.json` — package-owned (one narrow plugin write)
 ```
-{ contractVersion: 1,
+{ contractVersion: 2,
   screens:  { "<name>": { hash, approvedAt, states, viewports, schemes, screenshots } },
-  journeys: { "<id>":   { approvedAt, client } },
+  journeys: { "<id>":   { client, beats?, at?, reason?, approvedAt? } },
   theme: string|null }
 ```
-- `screens[<name>].hash` must equal `check.screens[<name>].hash` at approval; `approvedAt` ISO, truthiness-tested (`mocks-driver.js:398`, `404`). `journeys[<id>].client` ∈ `"ok"|"waived"|null` — `"ok"` written by the client's confirm control on the page (`mocks.md:203-205`). `theme`: picked on the page (`:436-437`).
-- Writers: package UI; the plugin writes **only** `journeys[<j>] = {…, client: "waived", reason, at}` via `client waive` (`mocks-driver.js:581-592`) — extra keys `reason`, `at` must be tolerated and preserved.
+- `screens[<name>].hash` must equal `check.screens[<name>].hash` at approval; `approvedAt` ISO, truthiness-tested (`mocks-driver.js:398`, `404`). `journeys[<id>].client` ∈ `"ok"|"waived"|null`. Contract v2 drops `approvedAt` as the journey-approval witness: `"ok"` is now written by the client's own confirm control POSTing `{op:'clientOk', id, beats}`, If-Match on the `beats` hash `GET state` served — the entry becomes `{client:'ok', beats, at}` with **no** `approvedAt` key. `--mark journey-approved` reads `approval.journeys[id].beats === check`'s (`GET state`'s) `beats` for that journey. `theme`: picked on the page (`:436-437`).
+- Writers: package UI; the plugin writes **only** `journeys[<j>] = {client: "waived", reason, at, beats}` via `client waive` (`mocks-driver.js:581-592`) — no `approvedAt`; extra keys `reason`, `at`, `beats` must be tolerated and preserved. A v1 row (`{approvedAt, client}`, no `beats`) still parses and round-trips both keys untouched.
 - Readers: driver at `journey-approved`/`theme-picked`/`approved`/`client waive`; genesis journey count off `Object.keys(approval.journeys)` (`genesis-driver.js:703-707`); design-stage preflight; `/spec:sketch` exit; `/spec:plan` UI-brief check (`spec/commands/plan.md:30-32`).
 - Must exist. Default `{contractVersion:1,screens:{},journeys:{},theme:null}`. `--reopen` leaves it byte-identical.
 

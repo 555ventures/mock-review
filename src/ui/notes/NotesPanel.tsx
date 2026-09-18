@@ -10,7 +10,7 @@ import { Sidebar, SidebarHeader } from '../components/ui/sidebar.js'
 import { NoteRow, StatusLine } from './notes-ui.js'
 import { SCREEN_ANCHOR, type UiNote } from './anchor.js'
 import { screenLabel, stateLabel, stepLabel } from '../store/labels.js'
-import { sameState, type Tone } from '../store/selectors.js'
+import { sameState, toneOf, type Tone } from '../store/selectors.js'
 
 export type NotesGroup = { key: 'here' | 'rest'; label: string; notes: UiNote[] }
 
@@ -96,7 +96,7 @@ export function NotesPanel({
                           <NoteRow
                             key={n.id}
                             rowId={n.id}
-                            tone={n.status}
+                            tone={toneOf(n.status)}
                             selected={selected === n.id}
                             onClick={() => onSelect(n.id, true)}
                             id={n.id}

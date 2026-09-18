@@ -3,6 +3,7 @@ name: feedback-radix-select-bugs
 description: two Radix Select gotchas in this stack (React 19 + radix-ui) that manifest as an infinite render loop, not a visible warning
 metadata:
   type: feedback
+  reviewed: 2026-09-17
 ---
 
 Two independent Radix `Select` bugs hit while building the reviewer page's theme picker and the
@@ -14,7 +15,7 @@ Components-page example picker (both stock shadcn `select.tsx`, `radix-ui` packa
    matches any `SelectItem`'s value, and Radix's item-aligned scroll-to-selected logic loops
    retrying forever. **Fix:** never pass `value` at all when nothing is selected yet — conditional
    spread it in: `<Select {...(x ? { value: x } : {})} ...>`.
-2. Independently, the *default* `SelectContent` position (`"item-aligned"`, shadcn's own default)
+2. Independently, the _default_ `SelectContent` position (`"item-aligned"`, shadcn's own default)
    can loop the same way in this exact React 19 + radix-ui version combo, even with a valid
    `value`. **Fix:** pass `position="popper"` explicitly on every `SelectContent` usage in this
    codebase.

@@ -41,9 +41,15 @@
     "approval": {
       "required": ["contractVersion", "screens", "journeys"],
       "screens{}": ["hash", "approvedAt", "states", "viewports", "schemes", "screenshots"],
-      "journeys{}": ["approvedAt", "client"],
-      "theme": "string?"
+      "journeys{}": ["client", "beats"]
     },
     "decisions": { "required": ["contractVersion", "decisions"], "decisions[]": ["screen", "text", "at"] }
+  },
+  "fields": {
+    "check.journeys[]": ["id", "title", "persona?", "steps", "edges", "resolved", "unresolved"],
+    "check.journeys[].steps[]": ["screen", "beat", "state?"],
+    "check.journeys[].edges[]": ["from", "to", "label?", "say?"],
+    "notes.status": "open|answered|approved|deferred",
+    "approval.journeys{}": ["client", "beats", "at?", "reason?"]
   }
 }

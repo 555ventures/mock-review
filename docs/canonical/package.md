@@ -2,11 +2,23 @@
 
 Canonical reference for the headless CLI, the reviewer page and its server, the files they read and
 write, and the release procedure. Source of truth:
-`specs/20260915/01-schemas-cli-and-bare-serve.md` (D1–D19) and
-`specs/20260915/02-the-reviewer-page.md` (D1–D27). The
+`specs/20260915/01-schemas-cli-and-bare-serve.md` (D1–D19),
+`specs/20260915/02-the-reviewer-page.md` (D1–D27) and
+`specs/20260917/02-the-story-travels.md` (D1–D13). The
 binding contract is the spec plugin's `spec/templates/mock/contract.json` (contractVersion 2);
 every shape below has a zod schema in `src/schemas/`, and `CONTRACT_VERSION` in
 `src/schemas/index.ts` is the one place the number lives.
+
+**A journey step carries the client's sentence.** `check --json` accepts and echoes `step.beat`,
+`step.state`, `edge.say` and `journey.persona`, all optional and omitted when absent; a step with no
+beat is a `beats` warn finding, never a refusal. `GET state` adds one server-only field,
+`journey.beats` — the 12-hex sha256 of the journey's story, computed over the steps `check --json`
+reports and never over the page-normalised ones. The client's confirm is If-Match on that hash:
+`{op:'clientOk', id, beats}` writes `approval.journeys[id] = {client:'ok', beats, at}` and answers
+409 when the story moved under them. `approvedAt` is no longer written by anything; the
+`approveJourney` op is gone. A note or journey conversation has four statuses — `open`, `answered`,
+`approved`, `deferred` — and the narrow `close` op is how a client ends a point they themselves
+raised.
 
 ## Verbs
 
@@ -25,6 +37,11 @@ loaded lazily, so `contract` never loads Vite or reads the host.
 | anything else  | —                                                                    | nothing; stderr `mock-review: unknown verb <verb>`                                                                                                                                 | 2                                                                                                                                          |
 
 Every refusal prints `mock-review: <reason>` on stderr.
+
+`serve` owns its own shutdown: Vite's `createServer()` registers `SIGINT`/`SIGTERM` handlers that
+exit with 128+signal before any handler registered later runs, so the CLI removes them as soon as
+`createServer()` resolves and installs its own — without that, `design/.serve.json` is never
+deleted and the exit code is not 0.
 
 ## File layer
 
@@ -78,20 +95,24 @@ optimisation; nothing requires it. `mockReview()` takes no options.
 All endpoints live under `/__mock-review/`, and every write goes through `writeJsonAtomic` under one
 in-process lock.
 
-| Route               | Method | Body / answer                                                                                                                                                        |
-| ------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ping`              | GET    | 200, no body — the liveness probe `check` uses                                                                                                                       |
-| `state`             | GET    | `{screens, shells, journeys, themes, config, inventory, violations, notes, approval, role}`; `screens[]` and `inventory[]` each carry their module's `examples` keys |
-| `notes`             | POST   | `{op:'add', note} \| {op:'update', id, fields} \| {op:'remove', id} \| {op:'journey', id, status?, entry?}` → the new document                                       |
-| `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'approveJourney'\|'clientOk', id} \| {op:'theme', key}` → the new document                                     |
-| `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                           |
-| `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                           |
-| `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                        |
+| Route               | Method | Body / answer                                                                                                                                                                      |
+| ------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ping`              | GET    | 200, no body — the liveness probe `check` uses                                                                                                                                     |
+| `state`             | GET    | `{screens, shells, journeys, themes, config, inventory, violations, notes, approval, role}`; `screens[]` and `inventory[]` each carry their module's `examples` keys               |
+| `notes`             | POST   | `{op:'add', note} \| {op:'update', id, fields} \| {op:'remove', id} \| {op:'journey', id, status?, entry?} \| {op:'close', id, status: 'approved'\|'deferred'}` → the new document |
+| `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'clientOk', id, beats} \| {op:'theme', key}` → the new document                                                              |
+| `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                                         |
+| `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                                         |
+| `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                                      |
 
 Refusals: 400 for a body that is not JSON, for a patch that fails its schema, for an `add` carrying
-its own `id`, and for approving a screen with no row in the current state (never a written empty
-hash); 404 for an `update` or `remove` of an unknown note; 409 when the target file exists but does
-not parse; 403 by role.
+its own `id`, for approving a screen with no row in the current state (never a written empty hash),
+and for `clientOk` against an unknown journey or one whose `beats` is still `null`; 404 for an
+`update`, `remove` or `close` of an unknown note or journey conversation (checked before any
+client-ownership gate); 409 when the target file exists but does not parse, or when a `clientOk`'s
+`beats` no longer matches the hash `GET state` would serve now (`design/approval.json` left
+byte-identical); 403 by role, and for a client's `close` of a note or journey conversation whose
+`thread[0].by` is not `'client'`.
 
 ### Roles
 
@@ -167,19 +188,20 @@ still prints with empty screens, shells and journeys.
 
 `ok = !findings.some(f => f.severity === 'error')`.
 
-| Kind     | Severity | Fires when                                                                                                                                   | `message`                                               |
-| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `type`   | error    | a TypeScript pre-emit diagnostic under `src/`                                                                                                | `TS<code>: <text> at <line>:<col>`                      |
-| `layer`  | error    | a screen imports anything other than `react`, `react/…`, `@/components/ui/…`, `@/components/…`, `@/shells/…`, `@/records/…` (one per import) | `imports <specifier>`                                   |
-| `doc`    | error    | a component or shell lacks a `/** … */` line above an export, or lacks a named `examples` export                                             | `missing doc line` / `missing examples export`          |
-| `render` | error    | an `examples` entry throws in `renderToString`                                                                                               | `<examples key>: <error.message>` (e.g. `Broken: boom`) |
-| `render` | error    | a screen module throws on import (the only finding for that file)                                                                            | `module failed to load: <error.message>`                |
-| `render` | error    | a loaded screen module has no `meta`                                                                                                         | `meta: missing`                                         |
-| `config` | error    | `mock.config.ts` is missing, unloadable, or fails the schema                                                                                 | the first line of the zod pretty error                  |
-| `size`   | warn     | a screen over 150 lines                                                                                                                      | `<n> lines`                                             |
-| `states` | warn     | a `meta.states` entry has no exact and no normalised `examples` key                                                                          | `state <s> has no example`                              |
-| `states` | warn     | a `meta.states` entry has no exact key and two or more normalised ones                                                                       | `state <s> matches several examples: <k1>, <k2>`        |
-| `twin`   | warn     | never emitted yet                                                                                                                            | —                                                       |
+| Kind     | Severity | Fires when                                                                                                                                   | `message`                                                                            |
+| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `type`   | error    | a TypeScript pre-emit diagnostic under `src/`                                                                                                | `TS<code>: <text> at <line>:<col>`                                                   |
+| `layer`  | error    | a screen imports anything other than `react`, `react/…`, `@/components/ui/…`, `@/components/…`, `@/shells/…`, `@/records/…` (one per import) | `imports <specifier>`                                                                |
+| `doc`    | error    | a component or shell lacks a `/** … */` line above an export, or lacks a named `examples` export                                             | `missing doc line` / `missing examples export`                                       |
+| `render` | error    | an `examples` entry throws in `renderToString`                                                                                               | `<examples key>: <error.message>` (e.g. `Broken: boom`)                              |
+| `render` | error    | a screen module throws on import (the only finding for that file)                                                                            | `module failed to load: <error.message>`                                             |
+| `render` | error    | a loaded screen module has no `meta`                                                                                                         | `meta: missing`                                                                      |
+| `config` | error    | `mock.config.ts` is missing, unloadable, or fails the schema                                                                                 | the first line of the zod pretty error                                               |
+| `size`   | warn     | a screen over 150 lines                                                                                                                      | `<n> lines`                                                                          |
+| `states` | warn     | a `meta.states` entry has no exact and no normalised `examples` key                                                                          | `state <s> has no example`                                                           |
+| `states` | warn     | a `meta.states` entry has no exact key and two or more normalised ones                                                                       | `state <s> matches several examples: <k1>, <k2>`                                     |
+| `beats`  | warn     | a journey's steps are not all beat-bearing (`src/journeys.ts`, one per affected journey)                                                     | `journey <id> step <n> has no beat — \`--mark journey-drawn\` will refuse this step` |
+| `twin`   | warn     | never emitted yet                                                                                                                            | —                                                                                    |
 
 A state resolves to an example key by one rule, `resolveStates` in `src/ui/frame/stateKey.ts`, used
 by `check`, the reviewer's state list, journey steps and the frame: an exact key first, otherwise
@@ -204,7 +226,7 @@ reviewer needs no build. Browser tests run both layouts: the linked package (the
 
 1. `npm run build` (writes `dist/`: the compiled CLI and plugin only).
 2. Commit `dist/`. It is committed at release only, never in a build batch.
-3. `git tag -f v1`.
+3. `git tag -f v2`.
 4. Push the tags.
 
 Hosts install with `npm i -D github:555ventures/mock-review#v2`. The package major equals the contract

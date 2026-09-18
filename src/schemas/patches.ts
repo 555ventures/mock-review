@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { ConfigSchema, NullConfigSchema } from './config.js'
 import { NoteSchema, ThreadEntrySchema, NotesSchema } from './notes.js'
 import { ApprovalSchema } from './approval.js'
-import { ScreenSchema, ShellSchema, JourneySchema, StepSchema, EdgeSchema } from './check.js'
+import { ScreenSchema, ShellSchema, JourneySchema } from './check.js'
 import { InventoryRowSchema } from './sweep.js'
 
 /** D5/D23: `add`'s `note` shape — `NoteSchema.omit({id:true})` plus a `superRefine` that rejects
@@ -45,8 +45,15 @@ export const NotesPatchSchema = z.discriminatedUnion('op', [
     .object({
       op: z.literal('journey'),
       id: z.string(),
-      status: z.enum(['open', 'answered', 'approved']).optional(),
+      status: z.enum(['open', 'answered', 'approved', 'deferred']).optional(),
       entry: ThreadEntrySchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('close'),
+      id: z.string(),
+      status: z.enum(['approved', 'deferred']),
     })
     .strict(),
 ])
@@ -69,14 +76,9 @@ export const ApprovalPatchSchema = z.discriminatedUnion('op', [
     .strict(),
   z
     .object({
-      op: z.literal('approveJourney'),
-      id: z.string(),
-    })
-    .strict(),
-  z
-    .object({
       op: z.literal('clientOk'),
       id: z.string(),
+      beats: z.string(),
     })
     .strict(),
   z
@@ -89,12 +91,11 @@ export const ApprovalPatchSchema = z.discriminatedUnion('op', [
 
 export type ApprovalPatch = z.infer<typeof ApprovalPatchSchema>
 
-/** D6/Contracts: `GET state`'s journeys carry the plugin-queued `persona`/step `state`/edge `say`
- * fields (spec 02 UI §1/§8.2) on top of the analysis-layer `Journey` shape. */
+/** D6: the base `JourneySchema` now carries `persona`/step `state`/edge `say` itself (D1); this
+ * server-only wrapper adds only what `GET state` adds on top — the story hash, `null` when the
+ * journey has no confirmable story (D4/D5). */
 export const ServerJourneySchema = JourneySchema.extend({
-  persona: z.string().optional(),
-  steps: z.array(StepSchema.extend({ state: z.string().optional() })),
-  edges: z.array(EdgeSchema.extend({ say: z.string().optional() })),
+  beats: z.string().nullable(),
 })
 
 export type ServerJourney = z.infer<typeof ServerJourneySchema>
