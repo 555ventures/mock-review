@@ -35,6 +35,11 @@ export type State = {
   // otherwise stopped qualifying as `client`/loopback `owner`) while this tab was open. Distinct
   // from `data: null` (still loading, or a transient fetch failure the next SSE event retries).
   forbidden: boolean
+  // The last write refusal's sentence, for the one-line notice. The server writes these for a
+  // human ("story changed since it was shown — reload"); before this field every non-403 refusal
+  // was an unhandled rejection and the control just looked dead. `null` once dismissed or once a
+  // later action succeeds. Deviation from the frozen reference, same footing as `ForbiddenNotice`.
+  notice: string | null
 }
 
 const EMPTY_STATE: ServerState = {
@@ -73,11 +78,12 @@ export type Store = {
   subscribe: (listener: () => void) => () => void
   setData: (data: ServerState, seq: number) => void
   setForbidden: () => void
+  setNotice: (text: string | null) => void
   setUi: (patch: Partial<UiState> | ((ui: UiState) => Partial<UiState>)) => void
 }
 
 export function createStore(): Store {
-  let state: State = { data: null, ui: initialUi(), forbidden: false }
+  let state: State = { data: null, ui: initialUi(), forbidden: false, notice: null }
   const listeners = new Set<() => void>()
   // D26: the highest `sync/api.ts` `fetchState` request number applied so far. The action path
   // (`useNoteActions` -> patch -> refresh) and the SSE path (`main.tsx` -> refetch) both call
@@ -105,6 +111,11 @@ export function createStore(): Store {
     setForbidden: () => {
       if (state.forbidden) return
       state = { ...state, forbidden: true }
+      notify()
+    },
+    setNotice: (text) => {
+      if (state.notice === text) return
+      state = { ...state, notice: text }
       notify()
     },
     setUi: (patch) => {

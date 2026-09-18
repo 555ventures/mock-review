@@ -20,11 +20,14 @@ import { NoteThread } from '../notes/notes-ui.js'
 import type { ThreadEntry } from '../../schemas/index.js'
 import type { Tone } from '../store/selectors.js'
 
+const NO_BEATS = 'This story has no sentences yet, so there is nothing to confirm — every step needs a beat first.'
+
 export function JourneyPanel({
   title,
   thread,
   tone,
   role,
+  beats,
   onReply,
   onApprove,
   onConfirm,
@@ -33,6 +36,10 @@ export function JourneyPanel({
   thread: ThreadEntry[]
   tone: Tone | null
   role: 'owner' | 'client'
+  /** The story hash the page was served, or `null` when the host's journey has no `beat:` lines.
+   * The confirm is If-Match on this hash, so a null one is refused 400 by the server — which the
+   * client used to experience as a button that did nothing. Disable it and say why instead. */
+  beats: string | null
   onReply: (text: string) => void
   onApprove: () => void
   onConfirm: () => void
@@ -60,7 +67,7 @@ export function JourneyPanel({
         </Field>
         <div className="flex justify-end gap-2">
           {role === 'client' ? (
-            <Button type="button" onClick={() => setConfirm(true)}>
+            <Button type="button" disabled={beats === null} title={beats === null ? NO_BEATS : undefined} onClick={() => setConfirm(true)}>
               Confirm journey
             </Button>
           ) : (
@@ -74,6 +81,7 @@ export function JourneyPanel({
             Reply
           </Button>
         </div>
+        {role === 'client' && beats === null && <p className="text-xs text-muted-foreground">{NO_BEATS}</p>}
       </form>
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>

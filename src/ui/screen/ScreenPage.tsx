@@ -346,6 +346,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
               thread={journeyThread}
               tone={journeyTone(journey.id, data?.notes.journeys ?? EMPTY_JOURNEYS)}
               role={role}
+              beats={journey.beats ?? null}
               onReply={(text) => void actions.replyJourney(journey.id, text, role)}
               onApprove={() => void actions.approveJourney(journey.id)}
               onConfirm={() => void actions.clientOk(journey.id, journey.beats ?? '')}

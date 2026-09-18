@@ -256,6 +256,65 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
+  // Escaped from spec 02's review: the port folded pins, draft and the marking surface into one
+  // `Overlay` and gated the whole thing on `showNotes`, so "Mark an area" became a no-op with the
+  // Notes panel hidden. The prototype gates only the pins (`ReviewLayer.tsx:212` vs `:234`/`:241`),
+  // and reference rule 26 ties pins to `showNotes` but mark mode to `marking` alone. Steps 5-6 pin
+  // that split: marking works with the panel hidden, and the saved note's pin stays hidden until
+  // the panel is shown again — the panel must NOT open on commit.
+  it('AC-20260915-02-2 (escape, reference §4 / rule 26): with the Notes panel hidden, M mounts the crosshair overlay, a drag opens the New note dialog, and the saved pin stays hidden until the panel is shown', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+
+      const notesToggle = page.getByRole('button', { name: /Notes/ })
+      await expect.poll(() => notesToggle.count(), SLOW_POLL).toBeGreaterThan(0)
+      await notesToggle.click()
+      await expect.poll(() => page.locator('[data-notes-scroll]').count(), SLOW_POLL).toBe(0)
+
+      await page.keyboard.press('m')
+      await expect.poll(() => page.locator('.cursor-crosshair').count(), SLOW_POLL).toBeGreaterThan(0)
+
+      const frame = page.locator('iframe').first()
+      const box = await frame.boundingBox()
+      if (!box) throw new Error('frame has no bounding box')
+      const startX = box.x + 20
+      const startY = box.y + 20
+      await page.mouse.move(startX, startY)
+      await page.mouse.down()
+      await page.mouse.move(startX + 60, startY + 40, { steps: 5 })
+      await page.mouse.up()
+
+      const dialog = page.getByRole('dialog', { name: /New note/i })
+      await expect.poll(() => dialog.isVisible(), SLOW_POLL).toBe(true)
+      await dialog.getByRole('textbox').fill('Marked with the panel hidden')
+      await dialog.getByRole('button', { name: 'Save' }).click()
+
+      const notesPath = path.join(serve.host, 'design', 'notes.json')
+      await expect
+        .poll(() => {
+          try {
+            return (JSON.parse(readFileSync(notesPath, 'utf8')) as { notes: { text?: string }[] }).notes.length
+          } catch {
+            return 0
+          }
+        }, SLOW_POLL)
+        .toBeGreaterThan(0)
+
+      // The pin is not in the accessibility tree behind a closed panel — locate it by attribute
+      // (gotcha AC-20260915-02-19), and assert the panel did not open itself on commit.
+      expect(await page.locator('[data-note]').count()).toBe(0)
+      expect(await page.locator('[data-notes-scroll]').count()).toBe(0)
+
+      await notesToggle.click()
+      await expect.poll(() => page.locator('[data-note]').count(), SLOW_POLL).toBeGreaterThan(0)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
   it('AC-20260915-02-1: view/side-tab prefs persist across a reload (sessionStorage, rule 31)', async () => {
     serve = await startServe(greenHost)
     const page = await browser.newPage()
@@ -421,6 +480,59 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     try {
       await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
       expect(await page.getByRole('combobox', { name: /Theme/i }).count()).toBe(0)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  // Every write refusal used to be an unhandled rejection: `api.ts` threw, `useNoteActions` never
+  // caught, and every caller is `void actions.x()` — so the server's human sentence was discarded
+  // and the control looked dead. A client replying on a note is the highest-traffic instance: the
+  // op-level gate answers 403 and the reply textarea clears, losing what they typed. The reply
+  // itself still needs a server-side `reply` op (staged separately); this pins that the refusal is
+  // now *visible*, and that a write 403 does NOT blank the page the way a dead token does.
+  it('AC-20260917-02-20 (escape): a write the server refuses shows one notice instead of failing silently, and does not replace the page with the dead-link notice', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/?client=replace-me#/home`, { waitUntil: 'networkidle' })
+
+      // The client may add a note (op:'add'), so make one to reply to.
+      await page.keyboard.press('m')
+      await expect.poll(() => page.locator('.cursor-crosshair').count(), SLOW_POLL).toBeGreaterThan(0)
+      const frame = page.locator('iframe').first()
+      const box = await frame.boundingBox()
+      if (!box) throw new Error('frame has no bounding box')
+      await page.mouse.move(box.x + 20, box.y + 20)
+      await page.mouse.down()
+      await page.mouse.move(box.x + 80, box.y + 60, { steps: 5 })
+      await page.mouse.up()
+      const newNote = page.getByRole('dialog', { name: /New note/i })
+      await expect.poll(() => newNote.isVisible(), SLOW_POLL).toBe(true)
+      await newNote.getByRole('textbox').fill('Please change this part')
+      await newNote.getByRole('button', { name: 'Save' }).click()
+
+      // Reopen it and reply — `op:'update'` is not admitted for a client, so the server answers 403.
+      // The pin's wrapper is `pointer-events-none` (Overlay.tsx) — the hit target is the labelled
+      // button inside it. Leave mark mode first, or the crosshair surface swallows the click.
+      await page.keyboard.press('Escape')
+      const pin = page.getByRole('button', { name: /^Open note / })
+      await expect.poll(() => pin.count(), SLOW_POLL).toBeGreaterThan(0)
+      await pin.first().click()
+      const card = page.getByRole('dialog')
+      await expect.poll(() => card.isVisible(), SLOW_POLL).toBe(true)
+      await card.getByRole('textbox').fill('one more thing')
+      await card.getByRole('button', { name: /Reply/i }).click()
+
+      // The note card is a Radix modal, which `aria-hidden`s everything behind it — so the notice
+      // is unreachable by role while the card is open (gotcha AC-20260915-02-19). Locate it by
+      // attribute instead.
+      const alert = page.locator('[data-notice]')
+      await expect.poll(() => alert.count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await alert.first().textContent()).toContain('cannot make that change')
+      // D24's dead-token notice replaces the whole page; a refused write must never do that.
+      expect(await page.getByText('This review link is no longer valid.').count()).toBe(0)
     } finally {
       await page.close()
       await stop()

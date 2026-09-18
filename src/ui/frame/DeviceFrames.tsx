@@ -251,9 +251,15 @@ function Device({
     onDraw(viewport, b)
   }
 
-  const visible: VisibleNote[] = notes
-    .filter((n) => n.screen === screen && sameState(n.state, state))
-    .map((n) => ({ note: n, box: boxes[n.id] ?? null, ownDevice: ownDevice(n, viewport) }))
+  // Reference §4 / rule 26: `showNotes` hides the note pins and ghosts only — the draft box and the
+  // marking overlay (`marking`) are independent of the Notes panel, exactly as the prototype gates
+  // them (`ReviewLayer.tsx:212` pins vs `:234` draft / `:241` overlay). Gating the whole `Overlay`
+  // on `showNotes` made "Mark an area" a no-op with the panel closed.
+  const visible: VisibleNote[] = showNotes
+    ? notes
+        .filter((n) => n.screen === screen && sameState(n.state, state))
+        .map((n) => ({ note: n, box: boxes[n.id] ?? null, ownDevice: ownDevice(n, viewport) }))
+    : []
 
   return (
     <div className="flex flex-col gap-2">
@@ -282,21 +288,19 @@ function Device({
             {ringBoxes.map((box, i) => (
               <div key={i} data-journey-ring className="pointer-events-none absolute z-5" style={box} />
             ))}
-            {showNotes && (
-              <Overlay
-                viewport={viewport}
-                visible={visible}
-                marking={marking}
-                drag={drag?.box ?? null}
-                draft={draft}
-                onSelect={onSelect}
-                onOpenDraft={onOpenDraft}
-                onPointerDown={onDown}
-                onPointerMove={onMove}
-                onPointerUp={onUp}
-                onWheel={(e) => frameRef.current?.contentWindow?.scrollBy(e.deltaX, e.deltaY)}
-              />
-            )}
+            <Overlay
+              viewport={viewport}
+              visible={visible}
+              marking={marking}
+              drag={drag?.box ?? null}
+              draft={draft}
+              onSelect={onSelect}
+              onOpenDraft={onOpenDraft}
+              onPointerDown={onDown}
+              onPointerMove={onMove}
+              onPointerUp={onUp}
+              onWheel={(e) => frameRef.current?.contentWindow?.scrollBy(e.deltaX, e.deltaY)}
+            />
           </div>
         </div>
       </Card>

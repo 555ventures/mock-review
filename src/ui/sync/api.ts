@@ -17,6 +17,32 @@ export class ForbiddenError extends Error {
   }
 }
 
+/** Every write refusal carries a sentence the server wrote for a human ("story changed since it
+ * was shown — reload", "journey X has no beats…"). Before this type those sentences were thrown
+ * away with the status code and the page showed nothing at all, which is what made a refused
+ * control look like a dead one. `RefusedError` keeps the sentence so `useNoteActions` can put it
+ * on screen. 403 stays `ForbiddenError` — that one replaces the whole page, not a notice. */
+export class RefusedError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'RefusedError'
+    this.status = status
+  }
+}
+
+/** The server's refusal bodies are `{ error: string }` (`plugin.ts` `sendJson`). A body that is
+ * missing, truncated or not JSON still has to produce a sentence, so fall back to the status. */
+async function refusalOf(res: Response, url: string): Promise<RefusedError> {
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    if (typeof body.error === 'string' && body.error.trim()) return new RefusedError(res.status, body.error)
+  } catch {
+    // not JSON, or the stream ended early — fall through to the generic sentence.
+  }
+  return new RefusedError(res.status, `${url} -> ${res.status}`)
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -24,7 +50,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   })
   if (res.status === 403) throw new ForbiddenError(url)
-  if (!res.ok) throw new Error(`${url} -> ${res.status}`)
+  if (!res.ok) throw await refusalOf(res, url)
   return (await res.json()) as T
 }
 
