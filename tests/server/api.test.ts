@@ -162,8 +162,32 @@ describe('mock-review server API (D6)', () => {
     expect(anyState.config.name).not.toBeNull()
   })
 
-  it('AC-20260915-02-9 / AC-20260918-01-7: POST notes {op:add} persists to design/notes.json with no leftover .tmp, and answer over the CLI reaches an SSE notes event within 2s', async () => {
+  it('AC-20260915-02-9 / AC-20260918-01-7: POST notes {op:add} persists to design/notes.json with no leftover .tmp, emits exactly one notes SSE event for that write, and answer over the CLI reaches an SSE notes event within 2s', async () => {
     serve = await startServe(greenHost)
+
+    // Open the event stream BEFORE the POST so the POST's own `notes` event is observable,
+    // and count every `notes` event seen over a 2s window rather than returning on the first.
+    const preRes = await fetch(`${serve.url}/__mock-review/events`)
+    expect(preRes.status).toBe(200)
+    const preReader = preRes.body?.getReader()
+    expect(preReader).toBeDefined()
+
+    let notesEventsFromPost = 0
+    const readLoop = (async () => {
+      if (!preReader) return
+      const decoder = new TextDecoder()
+      let buf = ''
+      try {
+        while (true) {
+          const { value, done } = await preReader.read()
+          if (done) return
+          buf += decoder.decode(value, { stream: true })
+          notesEventsFromPost = (buf.match(/event: notes/g) ?? []).length
+        }
+      } catch {
+        // reader cancelled below once the counting window closes
+      }
+    })()
 
     const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
       method: 'POST',
@@ -188,7 +212,16 @@ describe('mock-review server API (D6)', () => {
     const notesPath = path.join(serve.host, 'design', 'notes.json')
     const onDisk = JSON.parse(readFileSync(notesPath, 'utf8'))
     expect(onDisk).toEqual(addedDoc)
-    expect(existsSync(`${notesPath}.tmp`)).toBe(false)
+
+    // D1 retired the fixed `notes.json.tmp` name in favour of `notes.json.<pid>.<hex>.tmp`;
+    // scan the directory rather than checking a name that can never be observed leftover.
+    const designFiles = readdirSync(path.join(serve.host, 'design'))
+    expect(designFiles.some((f) => f.endsWith('.tmp'))).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await preReader?.cancel()
+    await readLoop
+    expect(notesEventsFromPost).toBe(1)
 
     const eventsRes = await fetch(`${serve.url}/__mock-review/events`)
     expect(eventsRes.status).toBe(200)
