@@ -1,6 +1,6 @@
 ---
 date: 2026-09-17
-status: implementing
+status: done
 tier: critical
 area: server
 design: false
@@ -219,6 +219,46 @@ build batch, rebuilt wholesale at the next release. The paths leg's single `ment
 Two `SHALL CONTINUE TO` pins, both deliberate: AC-9 protects the 409 the write path already gives
 (the behaviour most likely to be "simplified" while its reader is being moved), and AC-10 protects
 the claim this spec rests on — that nothing visible changed.
+
+### Build and review record (2026-09-17)
+
+**Two ACs were already true on the untouched pre-image, and their tests are regression pins rather
+than red-phase proof.** AC-20260917-04-11's scenario cannot go red on pre-change code: the plain
+`check --json` path never reads `design/approval.json` at all, and the only call site that does —
+`themeFor`, reached exclusively by `check --look` — already swallowed a corrupt document silently
+before D5 moved it onto `readDesignDoc`. The rewritten `tests/cli/check.test.ts` test therefore
+proves `check --json` stays unaffected *and* exercises `check --look`'s theme capture against the
+same corrupt file, green before and after. AC-20260917-04-5 is the same shape: `buildState` already
+computed every analysis-derived field in a `try/catch` entirely prior to and independent of the
+design-document read, so a corrupt `notes.json` never emptied them, pre-D1. Both were verified
+against base `d033c4c` by extracting that commit and running the two tests on it. This is the
+`SHALL CONTINUE TO` category the spec already applies to AC-9 and AC-10 (marked `reuses`, no
+red-test obligation), mislabelled `writes`/`rewrites` in the File Plan — the ACs are honest, the
+File Plan's annotation was not.
+
+**Disposition — `leg:ac-matrix` rejected (2026-09-17, user-confirmed).** The AC-coverage leg
+counted AC-20260917-04-9 and AC-20260917-04-10 as uncovered on zero title hits across File Plan
+tests rows. Both are `reuses` rows whose carriers are pre-existing pins titled with their
+*original* AC-IDs, so zero title hits is the expected shape, not a gap; AC-10's carrier
+(`tests/browser/surfaces.test.ts`) is not a File Plan tests row at all, so the leg searched a set
+that by construction could not contain it. Both carriers were executed green independently
+(`api.test.ts :: review pass 3`, `surfaces.test.ts :: AC-20260915-02-1`). Rejected as a
+miscitation of the spec's own carrier annotations.
+
+**Gotchas eviction (2026-09-17).** The section was at its cap of 15, so admitting this spec's entry
+evicted the `.test-dist/cli.js` gotcha by **merge**: its content is already stated in full in
+`docs/canonical/package.md` § Tests and builds, which is where a standing fact about this repo's
+test-and-build layout belongs.
+
+**Advisory findings retained, not fixed here** (five softs, all executed-verified by the reviewer,
+none behaviour-affecting today): `readDesignDoc` absorbs an absent file into the "exists but does
+not parse" verdict, so its error text is untrue for ENOENT at the one caller that skips
+`ensureDesignFiles`; `readDesignDocOrThrow` re-implements the catch instead of wrapping
+`readDesignDoc`, leaving the two verdicts as two code paths that can still drift — the precise
+drift D1 set out to make impossible; `tests/unit/plugin-shapes.test.ts` covers only the plugin's
+fixture defaults and omits the shape `client waive` actually writes; AC-9's reused carrier asserts
+the 409 status and byte-identity but never the refusal sentence the AC quotes; and AC-8's mutant
+sweep replaces three values rather than each leaf.
 
 ## Canonical Delta
 
