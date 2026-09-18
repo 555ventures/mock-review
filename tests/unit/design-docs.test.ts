@@ -9,9 +9,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-// D1: not yet exported by src/files/json.ts — this import fails at module load until the Decision
-// lands, which is what keeps every test below genuinely red in the interim.
-import { readDesignDoc } from '../../src/files/json.js'
+import { readDesignDoc, readDesignDocOrThrow, UnparseableDesignFileError } from '../../src/files/json.js'
 import { ApprovalSchema } from '../../src/schemas/approval.js'
 import { repoRoot, ensureFixtures, greenHost } from '../setup.js'
 import { startServe, stopServe, type Serve } from '../helpers/serve.js'
@@ -179,4 +177,61 @@ describe('AC-20260917-04-8: design/approval.json mutants — the live schema is 
     },
     30_000,
   )
+})
+
+// The read and write paths are one verdict, not two that happen to agree. `readDesignDocOrThrow`
+// delegates to the same private judge as `readDesignDoc`, so there is a single catch site and no
+// input can be readable to one path and unreadable to the other. This is the guarantee D1 asked
+// for ("a thin wrapper ... so the two paths cannot drift") stated as a test rather than as a
+// comment: the two readers are checked against each other over the same bytes, including the
+// absent case, where the shared verdict says "does not exist" rather than naming damage that is
+// not there.
+describe('the read and write paths derive from one verdict', () => {
+  const CASES: { label: string; write?: string | undefined }[] = [
+    { label: 'well-formed', write: JSON.stringify({ contractVersion: 2, screens: {}, journeys: {}, theme: null }) },
+    { label: 'truncated JSON', write: '{"contractVersion":' },
+    { label: 'unknown contractVersion', write: JSON.stringify({ contractVersion: 3, screens: {}, journeys: {}, theme: null }) },
+    { label: 'not an object', write: '[]' },
+    { label: 'absent', write: undefined },
+  ]
+
+  it.each(CASES)('$label: both readers reach the same verdict, with the same sentence', ({ write }) => {
+    const cwd = tmpCwd()
+    const rel = 'design/approval.json'
+    if (write !== undefined) writeFileSync(path.join(cwd, rel), write)
+
+    const result = readDesignDoc(cwd, 'approval')
+
+    if (result.ok) {
+      // Readable to one path ⇒ readable to the other, and the very same document.
+      expect(readDesignDocOrThrow(cwd, 'approval')).toEqual(result.doc)
+      return
+    }
+
+    // Unreadable to one path ⇒ the other throws, carrying the identical sentence.
+    let thrown: unknown
+    try {
+      readDesignDocOrThrow(cwd, 'approval')
+    } catch (err) {
+      thrown = err
+    }
+    expect(thrown).toBeInstanceOf(UnparseableDesignFileError)
+    expect((thrown as UnparseableDesignFileError).message).toBe(result.error)
+    expect((thrown as UnparseableDesignFileError).relPath).toBe(rel)
+  })
+
+  it('an absent document is reported as absent, not as damaged', () => {
+    const cwd = tmpCwd()
+    const result = readDesignDoc(cwd, 'approval')
+
+    expect(result).toEqual({ ok: false, error: 'design/approval.json does not exist — run a host verb to create it' })
+    expect(result.ok ? '' : result.error).not.toContain('does not parse')
+  })
+
+  it('a present but unreadable document keeps the by-hand refusal sentence', () => {
+    const cwd = tmpCwd()
+    writeFileSync(path.join(cwd, 'design', 'approval.json'), '{"contractVersion":')
+
+    expect(readDesignDoc(cwd, 'approval')).toEqual({ ok: false, error: REFUSAL('design/approval.json') })
+  })
 })
