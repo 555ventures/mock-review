@@ -682,6 +682,64 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
+  // AC-20260918-02-11 (D9/§ UI): the notes panel row for a `deferred` note carries the word
+  // "Deferred" (NotesPanel.tsx prefixes `what` with `'Deferred · '` for that status only — same
+  // rule NoteDialogs.tsx's dialog title follows); a non-deferred row must not. Seeded directly
+  // (two notes, one deferred and one open) rather than driven through the UI, since the point
+  // here is the row's rendered text, not how a note reaches `deferred` (that's AC-20260918-02-10).
+  it('AC-20260918-02-11: a deferred note\'s panel row carries the word "Deferred"; a non-deferred row does not', async () => {
+    serve = await startServe(greenHost)
+    const { url: serveUrl, host: serveHost } = serve
+    const notesPath = path.join(serveHost, 'design', 'notes.json')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(path.dirname(notesPath), { recursive: true })
+    writeFileSync(
+      notesPath,
+      JSON.stringify({
+        contractVersion: 1,
+        notes: [
+          {
+            id: 'N001',
+            screen: 'home',
+            state: 'Default',
+            component: 'WalletSummary',
+            key: '0',
+            snippet: 'USD 128.50',
+            status: 'deferred',
+            thread: [{ by: 'owner', text: 'parked for later' }],
+          },
+          {
+            id: 'N002',
+            screen: 'home',
+            state: 'Default',
+            component: 'WalletSummary',
+            key: '0',
+            snippet: 'USD 128.50',
+            status: 'open',
+            thread: [{ by: 'owner', text: 'still open' }],
+          },
+        ],
+        journeys: {},
+      }),
+    )
+
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serveUrl}/#/home`, { waitUntil: 'networkidle' })
+
+      const deferredRow = page.locator('button[data-row="N001"]')
+      const openRow = page.locator('button[data-row="N002"]')
+      await expect.poll(() => deferredRow.count(), SLOW_POLL).toBeGreaterThan(0)
+      await expect.poll(() => openRow.count(), SLOW_POLL).toBeGreaterThan(0)
+
+      expect(await deferredRow.first().textContent()).toContain('Deferred')
+      expect(await openRow.first().textContent()).not.toContain('Deferred')
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
   it("AC-20260915-02-16 (D24): a forwarded (simulated-remote) client request still renders the mock, proving the role does not depend on the Referer", async () => {
     serve = await startServe(greenHost)
     const context = await browser.newContext()

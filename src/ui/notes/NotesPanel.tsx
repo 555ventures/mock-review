@@ -89,7 +89,8 @@ export function NotesPanel({
                               : (n.component ?? 'Screen')
                         const noteState = n.state ?? ''
                         const what =
-                          n.project || sameState(noteState, state) ? part : `${stateLabel(noteState)} · ${part}`
+                          (n.status === 'deferred' ? 'Deferred · ' : '') +
+                          (n.project || sameState(noteState, state) ? part : `${stateLabel(noteState)} · ${part}`)
                         return (
                           <NoteRow
                             key={n.id}

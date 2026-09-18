@@ -342,6 +342,9 @@ The "what" string (`:570-572`):
   component name;
 - in **THIS SCREEN** for the current state, or for a project note → just the part;
 - otherwise (THIS SCREEN, a different state) → `{stateLabel} · {part}`.
+- **Amended 2026-09-18** (see Amendments): a `deferred` note prefixes `Deferred · ` to whichever of
+  the above the row would otherwise show — `Deferred · {part}` or `Deferred · {stateLabel} ·
+  {part}` — the same prefix the thread dialog's title carries (§6.2).
 
 **Amended 2026-09-17** (see Amendments, D1): the `stepLabel` branch is retired — every row in **THIS
 SCREEN** is on this screen and every row in **PROJECT** is a project note, so no row in this panel
