@@ -12,7 +12,8 @@ import path from 'node:path'
 import { contractSkew } from '../helpers/cli.js'
 import { CONTRACT_VERSION } from '../../src/schemas/version.js'
 
-const pluginRoot = process.env.SPEC_PLUGIN_ROOT || path.join(homedir(), 'projects', 'claude-plugins')
+const pluginRoot =
+  process.env.SPEC_PLUGIN_ROOT || path.join(homedir(), 'projects', 'claude-plugins')
 const pluginContractTemplate = path.join(pluginRoot, 'spec', 'templates', 'mock', 'contract.json')
 const hasPlugin = existsSync(pluginContractTemplate)
 const thisDir = path.dirname(fileURLToPath(import.meta.url))
@@ -29,7 +30,7 @@ describe('contractSkew (D6)', () => {
     const templatePath = writeTemplate(2)
     try {
       expect(contractSkew(templatePath, CONTRACT_VERSION)).toBe(
-        `plugin template contract 2 ≠ package contract ${CONTRACT_VERSION} — build claude-plugins specs/20260917/01 first`,
+        `plugin template contract 2 ≠ package contract ${CONTRACT_VERSION} — build claude-plugins specs/20260918/01-mock-contract-v3.md first`,
       )
     } finally {
       rmSync(path.dirname(templatePath), { recursive: true, force: true })
@@ -52,7 +53,7 @@ describe('contractSkew (D6)', () => {
 
   // AC-20260917-02-19: D1 puts `beat` on the base `StepSchema` (optional), so a template
   // declaring it is no longer skew — this inverts the pre-spec-02 refusal above.
-  it('AC-20260917-02-19 (D1, inverts the pre-02 refusal): returns null when the template declares a journey step field (beat) this package\'s journey schema now accepts', () => {
+  it("AC-20260917-02-19 (D1, inverts the pre-02 refusal): returns null when the template declares a journey step field (beat) this package's journey schema now accepts", () => {
     const templatePath = writeTemplate(CONTRACT_VERSION, { 'check.journeys[].steps[]': ['beat'] })
     try {
       expect(contractSkew(templatePath, CONTRACT_VERSION)).toBeNull()
@@ -72,7 +73,7 @@ describe('contractSkew (D6)', () => {
     }
   })
 
-  it('AC-20260917-02-19 (D10): returns null when every declared journey/step/edge field — the full v2 field set — parses against this package\'s journey schema', () => {
+  it("AC-20260917-02-19 (D10): returns null when every declared journey/step/edge field — the full v2 field set — parses against this package's journey schema", () => {
     const templatePath = writeTemplate(CONTRACT_VERSION, {
       'check.journeys[]': ['id', 'title', 'persona?', 'steps', 'edges', 'resolved', 'unresolved'],
       'check.journeys[].steps[]': ['screen', 'beat', 'state?'],
@@ -85,12 +86,18 @@ describe('contractSkew (D6)', () => {
     }
   })
 
-  it.skipIf(!hasPlugin)("AC-20260917-02-19 [env: SPEC_PLUGIN_ROOT]: contractSkew(<the plugin's live template>, CONTRACT_VERSION) returns null", () => {
-    expect(contractSkew(pluginContractTemplate, CONTRACT_VERSION)).toBeNull()
-  })
+  it.skipIf(!hasPlugin)(
+    "AC-20260917-02-19 [env: SPEC_PLUGIN_ROOT]: contractSkew(<the plugin's live template>, CONTRACT_VERSION) returns null",
+    () => {
+      expect(contractSkew(pluginContractTemplate, CONTRACT_VERSION)).toBeNull()
+    },
+  )
 
-  it.skipIf(!hasPlugin)("AC-20260917-02-19 [env: SPEC_PLUGIN_ROOT]: tests/fixtures/contract.json is byte-equal to the plugin's spec/templates/mock/contract.json", () => {
-    const fixturePath = path.resolve(thisDir, '..', 'fixtures', 'contract.json')
-    expect(readFileSync(fixturePath, 'utf8')).toBe(readFileSync(pluginContractTemplate, 'utf8'))
-  })
+  it.skipIf(!hasPlugin)(
+    "AC-20260917-02-19 [env: SPEC_PLUGIN_ROOT]: tests/fixtures/contract.json is byte-equal to the plugin's spec/templates/mock/contract.json",
+    () => {
+      const fixturePath = path.resolve(thisDir, '..', 'fixtures', 'contract.json')
+      expect(readFileSync(fixturePath, 'utf8')).toBe(readFileSync(pluginContractTemplate, 'utf8'))
+    },
+  )
 })

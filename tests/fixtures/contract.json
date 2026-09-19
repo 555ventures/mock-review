@@ -2,7 +2,7 @@
   "contractVersion": 3,
   "package": "@555-ventures/mock-review",
   "bin": "mock-review",
-  "verbs": ["contract", "sweep", "answer", "check", "serve"],
+  "verbs": ["contract", "sweep", "answer", "approve", "waive", "check", "serve"],
   "host": {
     "examples": "design/examples/ (outside every glob below)",
     "config": "mock.config.ts",

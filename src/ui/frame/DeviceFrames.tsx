@@ -1,10 +1,25 @@
 // Reference §3: the device frame area. Renders the mock in a same-origin iframe per visible
 // viewport, scaled to fit the workspace (never upscaling), with the note overlay layer living
 // inside the same scaled wrapper so rectangles map 1:1 onto the frame (rule 30).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { Card } from '../components/ui/card.js'
 import { Overlay, type VisibleNote } from '../notes/Overlay.js'
-import { anchorFor, resolveBox, resolveGhost, rectOf, type Box, type UiNote, type Viewport } from '../notes/anchor.js'
+import {
+  anchorFor,
+  resolveBox,
+  resolveGhost,
+  rectOf,
+  type Box,
+  type UiNote,
+  type Viewport,
+} from '../notes/anchor.js'
 import { sameState } from '../store/selectors.js'
 import { frameSrc, parseFrameHash, replaceFrameHash, sameScreenState } from './frameRoute.js'
 
@@ -30,7 +45,13 @@ function boxesEqual(a: Record<string, Box | null>, b: Record<string, Box | null>
     const bv = b[key]
     if (av === bv) continue
     if (!av || !bv) return false
-    if (av.left !== bv.left || av.top !== bv.top || av.width !== bv.width || av.height !== bv.height) return false
+    if (
+      av.left !== bv.left ||
+      av.top !== bv.top ||
+      av.width !== bv.width ||
+      av.height !== bv.height
+    )
+      return false
   }
   return true
 }
@@ -50,15 +71,24 @@ function ringBoxesEqual(a: Box[], b: Box[]): boolean {
   return true
 }
 
-function rectsIntersect(a: { left: number; top: number; right: number; bottom: number }, b: { left: number; top: number; right: number; bottom: number }): boolean {
+function rectsIntersect(
+  a: { left: number; top: number; right: number; bottom: number },
+  b: { left: number; top: number; right: number; bottom: number },
+): boolean {
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
 }
 
 /** D5: the labels of this step's outgoing edges, resolved to frame-viewport boxes for the
  * `[data-journey-ring]` overlay — a pure read of the frame's DOM, never a write into it. */
-function resolveRing(root: HTMLElement, win: Window, labels: string[], here: { screen: string; state: string }): Box[] {
+function resolveRing(
+  root: HTMLElement,
+  win: Window,
+  labels: string[],
+  here: { screen: string; state: string },
+): Box[] {
   const route = parseFrameHash(win.location.hash)
-  if (!route || !sameScreenState(route, { kind: 'screen', screen: here.screen, state: here.state })) return []
+  if (!route || !sameScreenState(route, { kind: 'screen', screen: here.screen, state: here.state }))
+    return []
   const viewport = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight }
   const boxes: Box[] = []
   for (const label of labels) {
@@ -135,7 +165,7 @@ function Device({
   const rootRef = useRef<HTMLElement | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   // D10: `theme` is a dependency (not just `screen`) so picking a theme changes `src` and forces
-  // a real iframe reload — the frame entry reads `approval.theme` once, at script load.
+  // a real iframe reload — the frame entry reads its theme once from the `_theme` query parameter, at script load.
   const src = useMemo(() => frameSrc({ kind: 'screen', screen, state }, theme), [screen, theme])
   const [frameLoad, setFrameLoad] = useState(0)
   const [tick, setTick] = useState(0)
@@ -271,7 +301,12 @@ function Device({
           <div
             ref={wrapRef}
             className="absolute top-0 left-0 overflow-hidden"
-            style={{ width: w, height: h, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+            style={{
+              width: w,
+              height: h,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+            }}
           >
             <iframe
               ref={frameRef}
@@ -286,7 +321,12 @@ function Device({
               style={{ width: w, height: h }}
             />
             {ringBoxes.map((box, i) => (
-              <div key={i} data-journey-ring className="pointer-events-none absolute z-5" style={box} />
+              <div
+                key={i}
+                data-journey-ring
+                className="pointer-events-none absolute z-5"
+                style={box}
+              />
             ))}
             <Overlay
               viewport={viewport}

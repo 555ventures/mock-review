@@ -1,5 +1,21 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams, type SpawnSyncReturns } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, statSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import {
+  spawn,
+  spawnSync,
+  type ChildProcessWithoutNullStreams,
+  type SpawnSyncReturns,
+} from 'node:child_process'
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  symlinkSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll } from 'vitest'
@@ -86,7 +102,9 @@ function dieIfTimedOut(result: SpawnSyncReturns<string>, argv: string[], cwd: st
   const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code
   const timedOut = errorCode === 'ETIMEDOUT' || result.signal != null
   if (!timedOut) return
-  const reason = result.signal ? `killed by ${result.signal}` : (result.error?.message ?? 'timed out')
+  const reason = result.signal
+    ? `killed by ${result.signal}`
+    : (result.error?.message ?? 'timed out')
   throw new Error(
     `CLI spawn hung and was killed after ${CLI_SPAWN_TIMEOUT_MS}ms (${reason}): ${JSON.stringify(argv)} in ${cwd}`,
   )
@@ -233,7 +251,10 @@ export function linkInstalledBin(hostDir: string): void {
  * `exclude`. Used to prove `contract` never needs a package it doesn't import (D2/D19,
  * AC-20260915-01-3) — e.g. `buildScratchPackage(['vite'])` for "contract works with no vite
  * resolvable". */
-export function buildScratchPackage(exclude: readonly string[] = []): { dir: string; cliPath: string } {
+export function buildScratchPackage(exclude: readonly string[] = []): {
+  dir: string
+  cliPath: string
+} {
   const scratch = mkdtempSync(path.join(tmpdir(), 'mock-review-pkg-'))
   registerScratchDir(scratch)
   cpSync(testDistDir, path.join(scratch, 'dist'), { recursive: true })
@@ -295,12 +316,18 @@ export function installPackageInto(hostDir: string): string {
  * plugin's own bare `import 'vite'` (pre-fix) resolves relative to the package's files, i.e. the
  * repo's copy, while the HOST's own `vite` binary/`createServer` is the physical copy — two
  * distinct realpaths, reproducing spike S7's failure. */
-export function copyFixtureHostWithOwnVite(fixtureDir: string, label = 'mock-review-ownvite-'): string {
+export function copyFixtureHostWithOwnVite(
+  fixtureDir: string,
+  label = 'mock-review-ownvite-',
+): string {
   const host = copyFixtureHost(fixtureDir, label)
 
   const hostVite = path.join(host, 'node_modules', 'vite')
   rmSync(hostVite, { recursive: true, force: true })
-  cpSync(path.join(repoRoot, 'node_modules', 'vite'), hostVite, { recursive: true, dereference: true })
+  cpSync(path.join(repoRoot, 'node_modules', 'vite'), hostVite, {
+    recursive: true,
+    dereference: true,
+  })
 
   const configPath = path.join(host, 'vite.config.ts')
   const original = readFileSync(configPath, 'utf8')
@@ -311,7 +338,9 @@ export function copyFixtureHostWithOwnVite(fixtureDir: string, label = 'mock-rev
     (_match, inner: string) => `plugins: [${inner}, mockReview()]`,
   )
   if (withPlugin === original) {
-    throw new Error(`copyFixtureHostWithOwnVite: could not find a "plugins: [...]" array in ${configPath}`)
+    throw new Error(
+      `copyFixtureHostWithOwnVite: could not find a "plugins: [...]" array in ${configPath}`,
+    )
   }
   writeFileSync(configPath, importLine + withPlugin)
 
@@ -355,7 +384,9 @@ export function startHostVite(host: string, port: number): Promise<ChildProcessW
     const poll = () => {
       if (settled) return
       if (Date.now() > deadline) {
-        fail(new Error(`host vite did not answer GET /__mock-review/ping within 20s on port ${port}`))
+        fail(
+          new Error(`host vite did not answer GET /__mock-review/ping within 20s on port ${port}`),
+        )
         return
       }
       fetch(`http://127.0.0.1:${port}/__mock-review/ping`)
@@ -380,7 +411,11 @@ export function startHostVite(host: string, port: number): Promise<ChildProcessW
  * `version` — `package.json` naming only `createServer` in its `exports`, and an `index.js` whose
  * `createServer` always throws. Used to exercise D3's major-version refusal (`loadHostVite`
  * rejects any host vite whose major isn't 8) without installing a real vite 7/9. */
-export function makeFakeViteHost(fixtureDir: string, version: string, label = 'mock-review-fakevite-'): string {
+export function makeFakeViteHost(
+  fixtureDir: string,
+  version: string,
+  label = 'mock-review-fakevite-',
+): string {
   const host = copyFixtureHost(fixtureDir, label)
 
   const viteDir = path.join(host, 'node_modules', 'vite')
@@ -395,7 +430,10 @@ export function makeFakeViteHost(fixtureDir: string, version: string, label = 'm
       exports: { '.': './index.js', './package.json': './package.json' },
     }),
   )
-  writeFileSync(path.join(viteDir, 'index.js'), "export const createServer = () => { throw new Error('fake vite') }\n")
+  writeFileSync(
+    path.join(viteDir, 'index.js'),
+    "export const createServer = () => { throw new Error('fake vite') }\n",
+  )
 
   return host
 }
@@ -483,7 +521,7 @@ export function contractSkew(templatePath: string, packageVersion: number): stri
     fields?: unknown
   }
   if (template.contractVersion !== packageVersion) {
-    return `plugin template contract ${template.contractVersion} ≠ package contract ${packageVersion} — build claude-plugins specs/20260917/01 first`
+    return `plugin template contract ${template.contractVersion} ≠ package contract ${packageVersion} — build claude-plugins specs/20260918/01-mock-contract-v3.md first`
   }
   return refusedJourneyField(template.fields)
 }
@@ -502,7 +540,11 @@ type Contract = {
  * keys must be present on each map value; any other array-valued shape entry describes keys
  * required on the scalar sub-object at that field. Returns the list of missing dotted paths —
  * empty means the shape is satisfied. */
-export function missingContractKeys(contract: Contract, verb: string, value: Record<string, unknown>): string[] {
+export function missingContractKeys(
+  contract: Contract,
+  verb: string,
+  value: Record<string, unknown>,
+): string[] {
   const shape = contract.shapes[verb]
   if (!shape) throw new Error(`contract has no shape for verb "${verb}"`)
   const missing: string[] = []

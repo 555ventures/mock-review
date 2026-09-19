@@ -29,7 +29,12 @@ function baseNote(overrides: Partial<Note> = {}): Omit<Note, 'id'> {
 
 describe('AC-20260915-02-7: applyNotesPatch add/update', () => {
   it('assigns N001 then N002 to sequential adds and keeps passthrough extras, producing a schema-valid document', () => {
-    const note1 = { ...baseNote(), rect: { x: 0, y: 0, w: 1, h: 1 }, viewport: 'desktop', whole: false } as unknown as Note
+    const note1 = {
+      ...baseNote(),
+      rect: { x: 0, y: 0, w: 1, h: 1 },
+      viewport: 'desktop',
+      whole: false,
+    } as unknown as Note
     const r1 = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: note1 })
     expect(r1.notes.notes[0]?.id).toBe('N001')
     expect(r1.notes.notes[0]?.rect).toEqual({ x: 0, y: 0, w: 1, h: 1 })
@@ -44,7 +49,10 @@ describe('AC-20260915-02-7: applyNotesPatch add/update', () => {
   it('update changes only the targeted note', () => {
     const note1 = baseNote({ status: 'answered' }) as unknown as Note
     const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: note1 })
-    const other = applyNotesPatch(seeded.notes, { op: 'add', note: baseNote({ screen: 'account' }) as unknown as Note })
+    const other = applyNotesPatch(seeded.notes, {
+      op: 'add',
+      note: baseNote({ screen: 'account' }) as unknown as Note,
+    })
     const id = other.notes.notes[0]?.id as string
     const otherId = other.notes.notes[1]?.id as string
 
@@ -69,7 +77,9 @@ const config: Config = {
 // "verification stays in the endpoint, derivation in the ctx"). Every clientOk case in this file
 // posts `beats: '7c0be20327a0'`, so the stub returns that same literal for every journey id; a
 // case that needs the null (no-story) path passes its own ctx override instead of this default.
-function ctx(beatsHash: (journeyId: string) => string | null = (_journeyId: string) => '7c0be20327a0') {
+function ctx(
+  beatsHash: (journeyId: string) => string | null = (_journeyId: string) => '7c0be20327a0',
+) {
   return {
     hash: (_name: string) => 'abc',
     config,
@@ -105,13 +115,20 @@ describe('AC-20260915-02-11: applyApprovalPatch', () => {
     expect(Object.keys(entry ?? {}).sort()).toEqual(['at', 'beats', 'client'])
     expect(entry?.client).toBe('ok')
     expect((entry as unknown as { beats?: string })?.beats).toBe('7c0be20327a0')
-    expect(() => new Date((entry as unknown as { at?: string })?.at ?? '').toISOString()).not.toThrow()
+    expect(() =>
+      new Date((entry as unknown as { at?: string })?.at ?? '').toISOString(),
+    ).not.toThrow()
   })
 
   it('AC-20260917-02-8: clientOk over an existing v1-shaped entry preserves approvedAt untouched while setting client/beats/at', () => {
     const approval: Approval = {
       ...EMPTY_APPROVAL,
-      journeys: { 'first-visit': { approvedAt: '2026-01-01T00:00:00.000Z', client: null } as Approval['journeys'][string] },
+      journeys: {
+        'first-visit': {
+          approvedAt: '2026-01-01T00:00:00.000Z',
+          client: null,
+        } as Approval['journeys'][string],
+      },
     }
     const result = applyApprovalPatch(
       approval,
@@ -152,7 +169,7 @@ describe('AC-20260915-02-11: applyApprovalPatch', () => {
 
   // AC-20260918-04-5 (D5): the `unapproveScreen` WIRE OP is removed from `ApprovalPatchSchema` —
   // no role can post it any more, refused at the schema exactly like `theme`/`approveJourney`
-  // above (the route-level 400 is tests/server/api.test.ts's own case). The internal helper of
+  // above; the route-level 400 is covered by the same schema refusal on the approval route. The helper of
   // the same name (src/server/patches.ts:36, called by rule 6) is a different thing and is
   // exercised, unchanged, by the "notes patches un-approve a screen" describe block below.
   it('AC-20260918-04-5: ApprovalPatchSchema refuses an unapproveScreen op outright', async () => {
@@ -190,7 +207,12 @@ describe('AC-20260915-02-11: applyApprovalPatch', () => {
   it('AC-20260918-04-6: waive over an existing entry preserves unrelated keys via ...existing while overwriting client/reason/beats/at', () => {
     const approval: Approval = {
       ...EMPTY_APPROVAL,
-      journeys: { 'first-visit': { approvedAt: '2026-01-01T00:00:00.000Z', client: 'ok' } as Approval['journeys'][string] },
+      journeys: {
+        'first-visit': {
+          approvedAt: '2026-01-01T00:00:00.000Z',
+          client: 'ok',
+        } as Approval['journeys'][string],
+      },
     }
     const result = applyApprovalPatch(
       approval,
@@ -212,10 +234,20 @@ describe('AC-20260915-02-11: applyApprovalPatch', () => {
 
   it('AC-20260918-04-6: ApprovalPatchSchema accepts a waive op with a non-empty reason and rejects a whitespace-only reason', async () => {
     const { ApprovalPatchSchema } = await import('../../src/schemas/patches.js')
-    const good = ApprovalPatchSchema.safeParse({ op: 'waive', id: 'first-visit', reason: 'client unreachable', beats: 'h' })
+    const good = ApprovalPatchSchema.safeParse({
+      op: 'waive',
+      id: 'first-visit',
+      reason: 'client unreachable',
+      beats: 'h',
+    })
     expect(good.success).toBe(true)
 
-    const blank = ApprovalPatchSchema.safeParse({ op: 'waive', id: 'first-visit', reason: '   ', beats: 'h' })
+    const blank = ApprovalPatchSchema.safeParse({
+      op: 'waive',
+      id: 'first-visit',
+      reason: '   ',
+      beats: 'h',
+    })
     expect(blank.success).toBe(false)
   })
 })
@@ -224,26 +256,51 @@ describe('AC-20260915-02-12: notes patches un-approve a screen (D7 rule 6)', () 
   const approvedHome: Approval = {
     ...EMPTY_APPROVAL,
     screens: {
-      home: { hash: 'abc', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
+      home: {
+        hash: 'abc',
+        approvedAt: 'now',
+        states: ['default'],
+        viewports: [],
+        schemes: [],
+        screenshots: [],
+      },
     },
   }
 
   it('a new note on an approved screen removes approval.screens[name]', () => {
-    const result = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote() as unknown as Note }, approvedHome)
+    const result = applyNotesPatch(
+      EMPTY_NOTES,
+      { op: 'add', note: baseNote() as unknown as Note },
+      approvedHome,
+    )
     expect(result.approval.screens.home).toBeUndefined()
   })
 
   it('a note turning from answered to open removes approval.screens[name]', () => {
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'answered' }) as unknown as Note })
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ status: 'answered' }) as unknown as Note,
+    })
     const id = seeded.notes.notes[0]?.id as string
-    const result = applyNotesPatch(seeded.notes, { op: 'update', id, fields: { status: 'open' } }, approvedHome)
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'update', id, fields: { status: 'open' } },
+      approvedHome,
+    )
     expect(result.approval.screens.home).toBeUndefined()
   })
 
   it('approving a note leaves approval untouched', () => {
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'answered' }) as unknown as Note })
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ status: 'answered' }) as unknown as Note,
+    })
     const id = seeded.notes.notes[0]?.id as string
-    const result = applyNotesPatch(seeded.notes, { op: 'update', id, fields: { status: 'approved' } }, approvedHome)
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'update', id, fields: { status: 'approved' } },
+      approvedHome,
+    )
     expect(result.approval).toEqual(approvedHome)
   })
 
@@ -255,13 +312,34 @@ describe('AC-20260915-02-12: notes patches un-approve a screen (D7 rule 6)', () 
     const bothApproved: Approval = {
       ...EMPTY_APPROVAL,
       screens: {
-        home: { hash: 'abc', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
-        account: { hash: 'def', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
+        home: {
+          hash: 'abc',
+          approvedAt: 'now',
+          states: ['default'],
+          viewports: [],
+          schemes: [],
+          screenshots: [],
+        },
+        account: {
+          hash: 'def',
+          approvedAt: 'now',
+          states: ['default'],
+          viewports: [],
+          schemes: [],
+          screenshots: [],
+        },
       },
     }
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ screen: 'home', status: 'open' }) as unknown as Note })
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ screen: 'home', status: 'open' }) as unknown as Note,
+    })
     const id = seeded.notes.notes[0]?.id as string
-    const result = applyNotesPatch(seeded.notes, { op: 'update', id, fields: { screen: 'account' } }, bothApproved)
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'update', id, fields: { screen: 'account' } },
+      bothApproved,
+    )
     expect(result.approval.screens.home).toBeUndefined()
     expect(result.approval.screens.account).toBeUndefined()
   })
@@ -270,13 +348,34 @@ describe('AC-20260915-02-12: notes patches un-approve a screen (D7 rule 6)', () 
     const bothApproved: Approval = {
       ...EMPTY_APPROVAL,
       screens: {
-        home: { hash: 'abc', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
-        account: { hash: 'def', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
+        home: {
+          hash: 'abc',
+          approvedAt: 'now',
+          states: ['default'],
+          viewports: [],
+          schemes: [],
+          screenshots: [],
+        },
+        account: {
+          hash: 'def',
+          approvedAt: 'now',
+          states: ['default'],
+          viewports: [],
+          schemes: [],
+          screenshots: [],
+        },
       },
     }
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ screen: 'home', status: 'approved' }) as unknown as Note })
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ screen: 'home', status: 'approved' }) as unknown as Note,
+    })
     const id = seeded.notes.notes[0]?.id as string
-    const result = applyNotesPatch(seeded.notes, { op: 'update', id, fields: { screen: 'account' } }, bothApproved)
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'update', id, fields: { screen: 'account' } },
+      bothApproved,
+    )
     expect(result.approval.screens.home).toBeDefined()
     expect(result.approval.screens.account).toBeDefined()
   })
@@ -291,16 +390,31 @@ describe('AC-20260917-02-14: applyNotesPatch close op (D10)', () => {
   const approvedHome: Approval = {
     ...EMPTY_APPROVAL,
     screens: {
-      home: { hash: 'abc', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
+      home: {
+        hash: 'abc',
+        approvedAt: 'now',
+        states: ['default'],
+        viewports: [],
+        schemes: [],
+        screenshots: [],
+      },
     },
   }
 
   it('sets the target note status to deferred and returns the SAME approval object reference, leaving approval.screens.home present', () => {
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'open' }) as unknown as Note }, approvedHome)
+    const seeded = applyNotesPatch(
+      EMPTY_NOTES,
+      { op: 'add', note: baseNote({ status: 'open' }) as unknown as Note },
+      approvedHome,
+    )
     const id = seeded.notes.notes[0]?.id as string
     // The `add` above already un-approved home (rule 6) — re-seed a fresh approved doc so this
     // case isolates `close`'s own behaviour, not `add`'s.
-    const result = applyNotesPatch(seeded.notes, { op: 'close', id, status: 'deferred' }, approvedHome)
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'close', id, status: 'deferred' },
+      approvedHome,
+    )
     expect(result.notes.notes.find((n) => n.id === id)?.status).toBe('deferred')
     expect(result.approval).toBe(approvedHome)
     expect(result.approval.screens.home).toBeDefined()
@@ -308,12 +422,19 @@ describe('AC-20260917-02-14: applyNotesPatch close op (D10)', () => {
 
   it('is a no-op on an unknown id, returning the notes document unchanged', () => {
     const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote() as unknown as Note })
-    const result = applyNotesPatch(seeded.notes, { op: 'close', id: 'N999', status: 'approved' }, approvedHome)
+    const result = applyNotesPatch(
+      seeded.notes,
+      { op: 'close', id: 'N999', status: 'approved' },
+      approvedHome,
+    )
     expect(result.notes).toEqual(seeded.notes)
   })
 
   it('close is allowed from any current status, e.g. approved -> deferred', () => {
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'approved' }) as unknown as Note })
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ status: 'approved' }) as unknown as Note,
+    })
     const id = seeded.notes.notes[0]?.id as string
     const result = applyNotesPatch(seeded.notes, { op: 'close', id, status: 'deferred' })
     expect(result.notes.notes.find((n) => n.id === id)?.status).toBe('deferred')
@@ -329,7 +450,10 @@ describe('AC-20260918-02-1/-2: applyNotesPatch reply op (D1)', () => {
   it('AC-20260918-02-1: a reply from the client to an answered note appends the entry and reopens it (thread 1 -> 2, answered -> open)', () => {
     const seeded = applyNotesPatch(EMPTY_NOTES, {
       op: 'add',
-      note: baseNote({ status: 'answered', thread: [{ by: 'session', text: 'fixed' }] }) as unknown as Note,
+      note: baseNote({
+        status: 'answered',
+        thread: [{ by: 'session', text: 'fixed' }],
+      }) as unknown as Note,
     })
     const id = seeded.notes.notes[0]?.id as string
     expect(seeded.notes.notes[0]?.thread).toHaveLength(1)
@@ -347,7 +471,10 @@ describe('AC-20260918-02-1/-2: applyNotesPatch reply op (D1)', () => {
 
   it('AC-20260918-02-2: a reply from the session sets status to answered from any source status (open, deferred)', () => {
     for (const from of ['open', 'deferred'] as const) {
-      const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: from }) as unknown as Note })
+      const seeded = applyNotesPatch(EMPTY_NOTES, {
+        op: 'add',
+        note: baseNote({ status: from }) as unknown as Note,
+      })
       const id = seeded.notes.notes[0]?.id as string
       const result = applyNotesPatch(seeded.notes, {
         op: 'reply',
@@ -385,12 +512,22 @@ describe('AC-20260918-02-9: reply op un-approves on reopen (rule 6), returns app
   const approvedHome: Approval = {
     ...EMPTY_APPROVAL,
     screens: {
-      home: { hash: 'abc', approvedAt: 'now', states: ['default'], viewports: [], schemes: [], screenshots: [] },
+      home: {
+        hash: 'abc',
+        approvedAt: 'now',
+        states: ['default'],
+        viewports: [],
+        schemes: [],
+        screenshots: [],
+      },
     },
   }
 
   it('a client reply to a note on a currently-approved screen deletes approval.screens[name]', () => {
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'answered' }) as unknown as Note })
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ status: 'answered' }) as unknown as Note,
+    })
     const id = seeded.notes.notes[0]?.id as string
     const result = applyNotesPatch(
       seeded.notes,
@@ -401,7 +538,10 @@ describe('AC-20260918-02-9: reply op un-approves on reopen (rule 6), returns app
   })
 
   it('a session reply leaves approval unchanged BY IDENTITY (same object reference)', () => {
-    const seeded = applyNotesPatch(EMPTY_NOTES, { op: 'add', note: baseNote({ status: 'open' }) as unknown as Note })
+    const seeded = applyNotesPatch(EMPTY_NOTES, {
+      op: 'add',
+      note: baseNote({ status: 'open' }) as unknown as Note,
+    })
     const id = seeded.notes.notes[0]?.id as string
     const result = applyNotesPatch(
       seeded.notes,
