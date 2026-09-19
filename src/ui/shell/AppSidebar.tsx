@@ -25,6 +25,7 @@ import { journeyTone, screenStates, screenTone, stateTone } from '../store/selec
 import { locate } from '../journeys/locate.js'
 import { getStore, useStore } from '../store/store.js'
 import type { SideTab } from '../prefs.js'
+import { EMPTY_APPROVAL } from '../../schemas/version.js'
 
 export function AppSidebar({ route }: { route: Route }) {
   const data = useStore((s) => s.data)
@@ -32,7 +33,7 @@ export function AppSidebar({ route }: { route: Route }) {
 
   const notes = data?.notes.notes ?? []
   const journeysConv = data?.notes.journeys ?? {}
-  const approval = data?.approval ?? { contractVersion: 1 as const, screens: {}, journeys: {}, theme: null }
+  const approval = data?.approval ?? EMPTY_APPROVAL
   const journeys = data?.journeys ?? []
   const screens = data?.screens ?? []
   const role = data?.role ?? 'owner'

@@ -9,26 +9,25 @@ import { describe, expect, it } from 'vitest'
 import { ApprovalSchema } from '../../src/schemas/approval.js'
 import { NotesSchema } from '../../src/schemas/notes.js'
 
-describe('AC-20260917-04-6: plugin-written design-document shapes parse against this package\'s read-back schemas', () => {
-  it('defaultApproval (claude-plugins/tests/mocks/mock-app-fixtures.js:95-97, contractVersion 1) has no theme key and must parse with theme null; defaultNotes (:91-93, contractVersion 1) must parse unchanged', () => {
-    // Copied verbatim from claude-plugins/tests/mocks/mock-app-fixtures.js:95-97:
+describe('AC-20260918-04-8 (rewrites AC-20260917-04-6: defaultApproval): plugin-written design-document shapes parse against this package\'s read-back schemas', () => {
+  it('defaultApproval (claude-plugins/tests/mocks/mock-app-fixtures.js, contractVersion 3, D9) has no theme key and parses as-is; defaultNotes (contractVersion 3) must parse unchanged', () => {
+    // Copied verbatim from claude-plugins/tests/mocks/mock-app-fixtures.js, once the sibling
+    // plugin spec (D9) has landed:
     //   function defaultApproval(overrides = {}) {
-    //     return { contractVersion: 1, screens: {}, journeys: {}, ...overrides }
+    //     return { contractVersion: 3, screens: {}, journeys: {}, ...overrides }
     //   }
-    // A3 (executed 2026-09-17): today's ApprovalSchema REJECTS this with `invalid_type` at
-    // ["theme"] — a required key, so no `.passthrough()` could ever have covered it.
-    const defaultApproval = { contractVersion: 1, screens: {}, journeys: {} }
+    // D4: `theme` no longer exists on ApprovalSchema at all — this fixture never carried it, and
+    // it stays out.
+    const defaultApproval = { contractVersion: 3, screens: {}, journeys: {} }
 
     const parsedApproval = ApprovalSchema.parse(defaultApproval)
-    expect(parsedApproval.theme).toBeNull()
+    expect(parsedApproval).toEqual(defaultApproval)
 
-    // Copied verbatim from claude-plugins/tests/mocks/mock-app-fixtures.js:91-93:
+    // Copied verbatim from claude-plugins/tests/mocks/mock-app-fixtures.js, once D9 has landed:
     //   function defaultNotes(overrides = {}) {
-    //     return { contractVersion: 1, notes: [], journeys: {}, ...overrides }
+    //     return { contractVersion: 3, notes: [], journeys: {}, ...overrides }
     //   }
-    // A3: this one already parses today (the `theme` instance is `approval`-only) — asserted here
-    // too so this file holds BOTH plugin-written shapes the AC names, side by side.
-    const defaultNotes = { contractVersion: 1, notes: [], journeys: {} }
+    const defaultNotes = { contractVersion: 3, notes: [], journeys: {} }
     expect(NotesSchema.parse(defaultNotes)).toEqual(defaultNotes)
   })
 })

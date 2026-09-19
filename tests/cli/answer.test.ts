@@ -4,7 +4,7 @@ import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
 import { copyFixtureHost, run } from '../helpers/cli.js'
 
-function seedNotes(host: string, notes: unknown, journeys: unknown, contractVersion = 1) {
+function seedNotes(host: string, notes: unknown, journeys: unknown, contractVersion = 3) {
   mkdirSync(path.join(host, 'design'), { recursive: true })
   writeFileSync(path.join(host, 'design', 'notes.json'), JSON.stringify({ contractVersion, notes, journeys }))
 }
@@ -71,7 +71,7 @@ describe('mock-review answer (built dist/)', () => {
     expect(readFileSync(notesPath, 'utf8')).toBe(before)
   })
 
-  it('AC-20260917-01-4: answer --note on a v1 notes.json exits 0, rewrites contractVersion to 2, and leaves every other key as expected', () => {
+  it('AC-20260918-04-2 (rewrites AC-20260917-01-4): answer --note on a v1 notes.json exits 2, reporting it unreadable, and leaves the file byte-identical', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     seedNotes(
       host,
@@ -79,20 +79,13 @@ describe('mock-review answer (built dist/)', () => {
       {},
       1,
     )
+    const notesPath = path.join(host, 'design', 'notes.json')
+    const before = readFileSync(notesPath, 'utf8')
 
     const r = run(host, ['answer', '--note', 'N1', '--text', 'use the card'])
-    expect(r.status).toBe(0)
-
-    const notes = JSON.parse(readFileSync(path.join(host, 'design', 'notes.json'), 'utf8')) as {
-      contractVersion: number
-      notes: Array<{ id: string; status: string; thread: Array<{ by: string; text: string }> }>
-      journeys: Record<string, unknown>
-    }
-    expect(notes.contractVersion).toBe(2)
-    const n1 = notes.notes.find((n) => n.id === 'N1')
-    expect(n1?.status).toBe('answered')
-    expect(n1?.thread).toEqual([{ by: 'session', text: 'use the card' }])
-    expect(notes.journeys).toEqual({})
+    expect(r.status).toBe(2)
+    expect(r.stderr).toContain('design/notes.json')
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
   })
 
   it('AC-20260915-01-16: answer --journey flips an open journey conversation to answered', () => {
@@ -108,7 +101,11 @@ describe('mock-review answer (built dist/)', () => {
     expect(notes.journeys['first-visit']).toEqual({ status: 'answered', thread: [{ by: 'session', text: 'ok' }] })
   })
 
-  it('AC-20260917-01-11 (rewrites AC-20260915-01-17: answer --decision appends): creates design/decisions.json at contractVersion 2 with the appended decision, when absent', () => {
+  // AC-20260918-04-3 (D3): `--decision` no longer exists — `parseArgs` collects any `--name value`
+  // with no per-verb allow-list, so the `answer` dispatch branch refuses it explicitly rather than
+  // silently accepting and ignoring it. Exit 2 with the exact usage sentence, and no
+  // design/decisions.json is created.
+  it('AC-20260918-04-3: answer --note N1 --text t --decision d exits 2 with the unknown-flag usage refusal and creates no design/decisions.json', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     seedNotes(
       host,
@@ -117,65 +114,25 @@ describe('mock-review answer (built dist/)', () => {
     )
     expect(existsSync(path.join(host, 'design', 'decisions.json'))).toBe(false)
 
-    const r = run(host, ['answer', '--note', 'N1', '--text', 'x', '--decision', 'cards, not tables'])
-    expect(r.status).toBe(0)
-
-    const decisions = JSON.parse(readFileSync(path.join(host, 'design', 'decisions.json'), 'utf8')) as {
-      contractVersion: number
-      decisions: Array<{ screen: string | null; text: string; at: string }>
-    }
-    expect(decisions).toEqual({
-      contractVersion: 2,
-      decisions: [{ screen: 'home', text: 'cards, not tables', at: decisions.decisions[0]?.at }],
-    })
-    expect(() => new Date(decisions.decisions[0]?.at ?? '').toISOString()).not.toThrow()
+    const r = run(host, ['answer', '--note', 'N1', '--text', 't', '--decision', 'd'])
+    expect(r.status).toBe(2)
+    expect(r.stderr.trim()).toBe('mock-review: usage: answer (--note <id> | --journey <id>) --text <t>')
+    expect(existsSync(path.join(host, 'design', 'decisions.json'))).toBe(false)
   })
 
-  it('AC-20260917-01-5 (rewrites AC-20260915-01-17: answer --decision refuses): refuses an unknown contractVersion 3, leaving both files byte-identical', () => {
+  it('AC-20260918-04-3: answer --note N1 --text t --decision (bare, no value) also exits 2 with the unknown-flag usage refusal', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-answer-')
     seedNotes(
       host,
       [{ id: 'N1', screen: 'home', state: 'default', component: null, key: null, snippet: null, status: 'open', thread: [] }],
       {},
     )
-    const decisionsPath = path.join(host, 'design', 'decisions.json')
-    const invalidDecisions = JSON.stringify({ contractVersion: 3, decisions: [] })
-    writeFileSync(decisionsPath, invalidDecisions)
-    const notesPath = path.join(host, 'design', 'notes.json')
-    const notesBefore = readFileSync(notesPath, 'utf8')
 
-    const r = run(host, ['answer', '--note', 'N1', '--text', 'x', '--decision', 'd'])
+    const r = run(host, ['answer', '--note', 'N1', '--text', 't', '--decision'])
     expect(r.status).toBe(2)
-    expect(r.stderr.trim()).toBe('mock-review: design/decisions.json is invalid')
-
-    expect(readFileSync(decisionsPath, 'utf8')).toBe(invalidDecisions)
-    expect(readFileSync(notesPath, 'utf8')).toBe(notesBefore)
+    expect(r.stderr.trim()).toBe('mock-review: usage: answer (--note <id> | --journey <id>) --text <t>')
+    expect(existsSync(path.join(host, 'design', 'decisions.json'))).toBe(false)
   })
-
-  it.each([1, 2])(
-    'AC-20260917-01-5: answer --decision exits 0 and writes the appended decision at contractVersion 2 when decisions.json reads contractVersion %i',
-    (existingVersion) => {
-      const host = copyFixtureHost(greenHost, 'mock-review-answer-')
-      seedNotes(
-        host,
-        [{ id: 'N1', screen: 'home', state: 'default', component: null, key: null, snippet: null, status: 'open', thread: [] }],
-        {},
-      )
-      const decisionsPath = path.join(host, 'design', 'decisions.json')
-      writeFileSync(decisionsPath, JSON.stringify({ contractVersion: existingVersion, decisions: [] }))
-
-      const r = run(host, ['answer', '--note', 'N1', '--text', 'x', '--decision', 'cards, not tables'])
-      expect(r.status).toBe(0)
-
-      const decisions = JSON.parse(readFileSync(decisionsPath, 'utf8')) as {
-        contractVersion: number
-        decisions: Array<{ screen: string | null; text: string; at: string }>
-      }
-      expect(decisions.contractVersion).toBe(2)
-      expect(decisions.decisions).toHaveLength(1)
-      expect(decisions.decisions[0]?.text).toBe('cards, not tables')
-    },
-  )
 
   // D5: `answer` stops crashing with a raw zod stack on an unreadable design/notes.json — it
   // refuses with the shared sentence on stderr at exit 2, leaving the file byte-identical.

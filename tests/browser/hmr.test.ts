@@ -46,7 +46,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-03-6, AC-20260916
     writeFileSync(
       notesPath,
       JSON.stringify({
-        contractVersion: 1,
+        contractVersion: 3,
         notes: [
           {
             id: 'N001',

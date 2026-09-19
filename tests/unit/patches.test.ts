@@ -149,6 +149,75 @@ describe('AC-20260915-02-11: applyApprovalPatch', () => {
     const result = ApprovalPatchSchema.safeParse({ op: 'approveJourney', id: 'first-visit' })
     expect(result.success).toBe(false)
   })
+
+  // AC-20260918-04-5 (D5): the `unapproveScreen` WIRE OP is removed from `ApprovalPatchSchema` —
+  // no role can post it any more, refused at the schema exactly like `theme`/`approveJourney`
+  // above (the route-level 400 is tests/server/api.test.ts's own case). The internal helper of
+  // the same name (src/server/patches.ts:36, called by rule 6) is a different thing and is
+  // exercised, unchanged, by the "notes patches un-approve a screen" describe block below.
+  it('AC-20260918-04-5: ApprovalPatchSchema refuses an unapproveScreen op outright', async () => {
+    const { ApprovalPatchSchema } = await import('../../src/schemas/patches.js')
+    const result = ApprovalPatchSchema.safeParse({ op: 'unapproveScreen', name: 'home' })
+    expect(result.success).toBe(false)
+  })
+
+  // AC-20260918-04-6/D6: the new `waive` op and its reducer case, mirroring clientOk's fresh
+  // stamp — `approvedAt` is never written, and an existing one on the entry does NOT survive
+  // (unlike clientOk's preserve-approvedAt case above): D6 says the written shape is exactly
+  // `{ ...existing, client: 'waived', reason, beats, at }`, so `...existing` still spreads first,
+  // but `client`/`reason`/`beats`/`at` are always the fresh values from the patch/stamp, never the
+  // pre-existing ones.
+  it('AC-20260918-04-6: waive writes client:waived, reason, beats and a fresh at stamp, never approvedAt', () => {
+    const result = applyApprovalPatch(
+      EMPTY_APPROVAL,
+      { op: 'waive', id: 'first-visit', reason: 'client unreachable', beats: 'deadbeef0000' },
+      ctx(),
+    )
+    const entry = result.journeys['first-visit'] as unknown as {
+      client: string
+      reason: string
+      beats: string
+      at: string
+      approvedAt?: string
+    }
+    expect(entry.client).toBe('waived')
+    expect(entry.reason).toBe('client unreachable')
+    expect(entry.beats).toBe('deadbeef0000')
+    expect(typeof entry.at).toBe('string')
+    expect(entry.approvedAt).toBeUndefined()
+  })
+
+  it('AC-20260918-04-6: waive over an existing entry preserves unrelated keys via ...existing while overwriting client/reason/beats/at', () => {
+    const approval: Approval = {
+      ...EMPTY_APPROVAL,
+      journeys: { 'first-visit': { approvedAt: '2026-01-01T00:00:00.000Z', client: 'ok' } as Approval['journeys'][string] },
+    }
+    const result = applyApprovalPatch(
+      approval,
+      { op: 'waive', id: 'first-visit', reason: 'client unreachable', beats: 'deadbeef0000' },
+      ctx(),
+    )
+    const entry = result.journeys['first-visit'] as unknown as {
+      approvedAt?: string
+      client: string
+      reason: string
+      beats: string
+      at: string
+    }
+    expect(entry.approvedAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(entry.client).toBe('waived')
+    expect(entry.reason).toBe('client unreachable')
+    expect(entry.beats).toBe('deadbeef0000')
+  })
+
+  it('AC-20260918-04-6: ApprovalPatchSchema accepts a waive op with a non-empty reason and rejects a whitespace-only reason', async () => {
+    const { ApprovalPatchSchema } = await import('../../src/schemas/patches.js')
+    const good = ApprovalPatchSchema.safeParse({ op: 'waive', id: 'first-visit', reason: 'client unreachable', beats: 'h' })
+    expect(good.success).toBe(true)
+
+    const blank = ApprovalPatchSchema.safeParse({ op: 'waive', id: 'first-visit', reason: '   ', beats: 'h' })
+    expect(blank.success).toBe(false)
+  })
 })
 
 describe('AC-20260915-02-12: notes patches un-approve a screen (D7 rule 6)', () => {
@@ -388,7 +457,7 @@ describe('AC-20260917-03-10/-12: the notes scope invariant (D6)', () => {
 
   it('AC-20260917-03-12: NotesSchema still accepts a contradictory note (screen + project:true) already on disk — the read-back path stays permissive', () => {
     const result = NotesSchema.safeParse({
-      contractVersion: 2,
+      contractVersion: 3,
       notes: [
         {
           id: 'N001',

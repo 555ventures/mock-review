@@ -164,7 +164,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
     writeFileSync(
       notesPath,
       JSON.stringify({
-        contractVersion: 1,
+        contractVersion: 3,
         notes: [
           {
             id: 'N001',
@@ -358,7 +358,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
     writeFileSync(
       notesPath,
       JSON.stringify({
-        contractVersion: 2,
+        contractVersion: 3,
         notes: [
           {
             id: 'N001',

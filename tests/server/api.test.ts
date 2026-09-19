@@ -34,7 +34,7 @@ type ServerState = {
   }[]
   inventory: { name: string }[]
   notes: { notes: unknown[]; journeys: Record<string, unknown> }
-  approval: { screens: Record<string, unknown>; journeys: Record<string, unknown>; theme: string | null }
+  approval: { screens: Record<string, unknown>; journeys: Record<string, unknown> }
   role: 'owner' | 'client'
 }
 
@@ -89,15 +89,18 @@ describe('mock-review server API (D6)', () => {
     expect(state.approval).toBeDefined()
     expect(state.role).toBe('owner')
 
-    // AC-20260917-02-12 (D8): ApprovalSchema keeps `theme` — a document carrying a `theme` must
-    // survive the schema and GET state must serve it back on `state.approval.theme`.
+    // AC-20260918-04-4 (rewrites AC-20260917-02-12, D4): `theme` is removed from `ApprovalSchema`
+    // entirely — a document carrying it now fails the .strict() shape and is reported unreadable,
+    // never served back on `state.approval.theme` (which no longer exists on the type at all).
     const approvalPath = path.join(serve.host, 'design', 'approval.json')
     writeFileSync(
       approvalPath,
-      JSON.stringify({ contractVersion: 2, screens: {}, journeys: {}, theme: 'nova' }),
+      JSON.stringify({ contractVersion: 3, screens: {}, journeys: {}, theme: 'nova' }),
     )
-    const themedState = await getState(serve.url)
-    expect(themedState.approval.theme).toBe('nova')
+    const themedState = (await getState(serve.url)) as unknown as {
+      documents: { approval: { ok: boolean } }
+    }
+    expect(themedState.documents.approval.ok).toBe(false)
 
     // D24 (redesigned): the role travels in the `mock-review-client` cookie, not the Referer —
     // the frame's own sub-requests all carry the frame's URL as Referer with no token, so a
@@ -323,7 +326,7 @@ describe('mock-review server API (D6)', () => {
     expect(body.error).toMatch(/^design\/ is locked by pid \d+ — another mock-review write is in progress; retry$/)
   }, 10_000)
 
-  it('AC-20260915-02-10: a client-role request may only add notes / clientOk approval; anything else is 403', async () => {
+  it('AC-20260918-04-11 (rewrites AC-20260915-02-10): a client-role request may only add notes / clientOk approval; remove, update, approveScreen and waive are all 403', async () => {
     serve = await startServe(greenHost)
     const clientUrl = `${serve.url}/__mock-review/notes?client=replace-me`
 
@@ -336,6 +339,14 @@ describe('mock-review server API (D6)', () => {
       body: JSON.stringify({ op: 'remove', id: 'N001' }),
     })
     expect(removeRes.status).toBe(403)
+    expect(readFileSync(notesPath, 'utf8')).toBe(before)
+
+    const updateRes = await fetch(clientUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'update', id: 'N001', fields: { component: 'WalletSummary' } }),
+    })
+    expect(updateRes.status).toBe(403)
     expect(readFileSync(notesPath, 'utf8')).toBe(before)
 
     const addRes = await fetch(clientUrl, {
@@ -358,12 +369,28 @@ describe('mock-review server API (D6)', () => {
     const doc = (await addRes.json()) as { notes: { thread: { by: string }[] }[] }
     expect(doc.notes[doc.notes.length - 1]?.thread[0]?.by).toBe('client')
 
+    const approvalPath = path.join(serve.host, 'design', 'approval.json')
+    const approvalBefore = readFileSync(approvalPath, 'utf8')
+
     const approveScreenRes = await fetch(`${serve.url}/__mock-review/approval?client=replace-me`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ op: 'approveScreen', name: 'home' }),
     })
     expect(approveScreenRes.status).toBe(403)
+    expect(readFileSync(approvalPath, 'utf8')).toBe(approvalBefore)
+
+    // AC-20260918-04-11/D6: the new `waive` op joins the client-role allow-list refusal — the
+    // allow-list admits only `clientOk`, with NO extra gate for `waive` beyond that (D6's own
+    // rationale: unlike `clientOk` the HTTP path applies no journey-existence/beats-freshness
+    // guard, because `waive`'s intended caller is the CLI verb, never a client-role HTTP request).
+    const waiveRes = await fetch(`${serve.url}/__mock-review/approval?client=replace-me`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'waive', id: 'first-visit', reason: 'x', beats: 'h' }),
+    })
+    expect(waiveRes.status).toBe(403)
+    expect(readFileSync(approvalPath, 'utf8')).toBe(approvalBefore)
 
     // AC-20260917-02-7/-9/-10 (D7): `clientOk` now requires the story hash `GET state` served —
     // fetch it first rather than hand-typing a literal that would drift from the fixture's beats.
@@ -732,12 +759,11 @@ describe('mock-review server API (D6)', () => {
     serve = await startServe(greenHost)
     const approvalPath = path.join(serve.host, 'design', 'approval.json')
     const waived = {
-      contractVersion: 2,
+      contractVersion: 3,
       screens: {},
       journeys: {
         'first-visit': { client: 'waived', reason: 'no client', at: '2026-09-17T00:00:00.000Z', beats: '7c0be20327a0' },
       },
-      theme: null,
     }
     writeFileSync(approvalPath, JSON.stringify(waived))
 
@@ -950,9 +976,15 @@ describe('mock-review server API (D6)', () => {
     expect(readFileSync(approvalPath, 'utf8')).toBe(corruptApproval)
   })
 
-  // D5: the approval-half of this migration proof used `op:'theme'` (now retired from the wire);
-  // `approveScreen` is the surviving op that still migrates a v1 approval.json on write.
-  it('AC-20260917-01-12: a note patch migrates v1 notes.json to contractVersion 2 with notes/journeys intact and leaves approval.json byte-identical at 1; an approveScreen patch migrates approval.json to 2; a v3 approval.json is refused 409 byte-identical', async () => {
+  // AC-20260918-04-2 (D2, inverts AC-20260917-01-12): the pin removes migration-on-write
+  // entirely — a v1 document is no longer silently carried forward to the current contract, it is
+  // UNREADABLE. Both a note patch against a v1 notes.json and an approveScreen patch against a v1
+  // approval.json now answer 409 byte-identical, exactly like any other unparseable document; a
+  // 3->3 write asserts nothing, so there is no "migrates to current version" clause left to prove.
+  // The "refused" mutant this test used to probe at contractVersion+1 (v3, when 2 was current)
+  // moves to CONTRACT_VERSION+1 (v4, now that 3 is current) — the same shift M4's design-docs
+  // matrix makes.
+  it('AC-20260918-04-2: a note patch against a v1 notes.json is refused 409 byte-identical; an approveScreen patch against a v1 approval.json is refused 409 byte-identical; a v4 approval.json is refused 409 byte-identical', async () => {
     serve = await startServe(greenHost)
     const notesPath = path.join(serve.host, 'design', 'notes.json')
     const approvalPath = path.join(serve.host, 'design', 'approval.json')
@@ -979,10 +1011,10 @@ describe('mock-review server API (D6)', () => {
       contractVersion: 1,
       screens: {},
       journeys: {},
-      theme: null,
     }
     writeFileSync(notesPath, JSON.stringify(v1Notes))
     writeFileSync(approvalPath, JSON.stringify(v1Approval))
+    const notesBefore = readFileSync(notesPath, 'utf8')
     const approvalBefore = readFileSync(approvalPath, 'utf8')
 
     const addRes = await fetch(`${serve.url}/__mock-review/notes`, {
@@ -997,53 +1029,31 @@ describe('mock-review server API (D6)', () => {
           key: null,
           snippet: null,
           status: 'open',
-          thread: [{ by: 'owner', text: 'migrate on write' }],
+          thread: [{ by: 'owner', text: 'no migration now' }],
         },
       }),
     })
-    expect(addRes.status).toBe(200)
-    const addedDoc = (await addRes.json()) as {
-      contractVersion: number
-      notes: { id: string }[]
-      journeys: Record<string, unknown>
-    }
-    expect(addedDoc.contractVersion).toBe(2)
-    const carriedNote = addedDoc.notes.find((n) => n.id === 'N001') as { thread: { text: string }[] } | undefined
-    expect(carriedNote?.thread[0]?.text).toBe('bigger')
-    expect(addedDoc.journeys['first-visit']).toEqual(v1Notes.journeys['first-visit'])
-
-    const onDiskNotes = JSON.parse(readFileSync(notesPath, 'utf8'))
-    expect(onDiskNotes.contractVersion).toBe(2)
-    expect(onDiskNotes).toEqual(addedDoc)
-
-    // The add patch never touches approval (`result.approval !== approval` guard) — the v1 file
-    // is left byte-identical, not merely equal after a round-trip through the same version.
-    expect(readFileSync(approvalPath, 'utf8')).toBe(approvalBefore)
+    expect(addRes.status).toBe(409)
+    expect(readFileSync(notesPath, 'utf8')).toBe(notesBefore)
 
     const approveRes = await fetch(`${serve.url}/__mock-review/approval`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ op: 'approveScreen', name: 'home' }),
     })
-    expect(approveRes.status).toBe(200)
-    const approvedDoc = (await approveRes.json()) as { contractVersion: number; screens: Record<string, unknown> }
-    expect(approvedDoc.contractVersion).toBe(2)
-    expect(approvedDoc.screens.home).toBeDefined()
+    expect(approveRes.status).toBe(409)
+    expect(readFileSync(approvalPath, 'utf8')).toBe(approvalBefore)
 
-    const onDiskApproval = JSON.parse(readFileSync(approvalPath, 'utf8'))
-    expect(onDiskApproval.contractVersion).toBe(2)
-    expect(onDiskApproval).toEqual(approvedDoc)
-
-    const v3Approval = { contractVersion: 3, screens: {}, journeys: {}, theme: 'nova' }
-    writeFileSync(approvalPath, JSON.stringify(v3Approval))
-    const v3Before = readFileSync(approvalPath, 'utf8')
+    const v4Approval = { contractVersion: 4, screens: {}, journeys: {} }
+    writeFileSync(approvalPath, JSON.stringify(v4Approval))
+    const v4Before = readFileSync(approvalPath, 'utf8')
     const refusedRes = await fetch(`${serve.url}/__mock-review/approval`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ op: 'approveScreen', name: 'account' }),
     })
     expect(refusedRes.status).toBe(409)
-    expect(readFileSync(approvalPath, 'utf8')).toBe(v3Before)
+    expect(readFileSync(approvalPath, 'utf8')).toBe(v4Before)
   })
 
   it('AC-20260915-02-9 (D23): the SSE stream disposes itself when the client connection drops, without breaking later connections or notes writes', async () => {

@@ -117,14 +117,16 @@ export const ApprovalPatchSchema = z.discriminatedUnion('op', [
     .strict(),
   z
     .object({
-      op: z.literal('unapproveScreen'),
-      name: z.string(),
+      op: z.literal('clientOk'),
+      id: z.string(),
+      beats: z.string(),
     })
     .strict(),
   z
     .object({
-      op: z.literal('clientOk'),
+      op: z.literal('waive'),
       id: z.string(),
+      reason: z.string().trim().min(1),
       beats: z.string(),
     })
     .strict(),

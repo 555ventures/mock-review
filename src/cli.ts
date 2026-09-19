@@ -41,12 +41,19 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case 'answer': {
+      // D3 (04-contract-v3): `design/decisions.json` and `--decision` are retired.
+      // `parseArgs` (src/cli/args.ts) collects any `--name value` with no per-verb allow-list, so
+      // this branch refuses `--decision` explicitly rather than silently dropping it — dropping it
+      // would leave `answer --decision d` exiting 0 while ignoring the flag, the same broken
+      // promise in a quieter form.
+      if (values.decision !== undefined || flags.has('decision')) {
+        throw new CliError('usage: answer (--note <id> | --journey <id>) --text <t>')
+      }
       const { answerVerb } = await import('./cli/answer.js')
       const result = await answerVerb(cwd, {
         note: values.note,
         journey: values.journey,
         text: values.text,
-        decision: values.decision,
       })
       await writeFlushed(process.stdout, result + '\n')
       return 0
@@ -55,6 +62,17 @@ async function main(argv: string[]): Promise<number> {
     case 'approve': {
       const { approveVerb } = await import('./cli/approve.js')
       const result = await approveVerb(cwd, { screen: values.screen })
+      await writeFlushed(process.stdout, result + '\n')
+      return 0
+    }
+
+    case 'waive': {
+      const { waiveVerb } = await import('./cli/waive.js')
+      const result = await waiveVerb(cwd, {
+        journey: values.journey,
+        reason: values.reason,
+        beats: values.beats,
+      })
       await writeFlushed(process.stdout, result + '\n')
       return 0
     }

@@ -1,15 +1,15 @@
 # @555-ventures/mock-review
 
 The mock reviewer for the spec pipeline's mock app: the `mock-review` CLI and the served
-reviewer page, satisfying contract v2 (`~/projects/claude-plugins/spec/templates/mock/contract.json`).
+reviewer page, satisfying contract v3 (`~/projects/claude-plugins/spec/templates/mock/contract.json`).
 
 ## Install
 
 ```sh
-npm i -D github:555ventures/mock-review#v2
+npm i -D @555-ventures/mock-review@3
 ```
 
-`dist/` is committed to the tag, so no build runs on the host.
+`dist/` ships prebuilt in the published package, so no build runs on the host. The major version is the contract version.
 
 ## Verbs
 
@@ -18,7 +18,9 @@ npm i -D github:555ventures/mock-review#v2
 | `contract` | `mock-review contract --json` | Prints `{ contractVersion, package, version }`. Never touches the host filesystem or Vite. |
 | `check` | `mock-review check [--json] [--look <screen> [--state <s>]]` | Loads the host through one Vite dev server, reports findings, screens, shells, journeys, themes, config and serve liveness. `--look` captures screenshots instead (see below). |
 | `sweep` | `mock-review sweep [--json]` | One `react-docgen-typescript` pass over components/shells plus the open-item queue (open journey conversations first, then open notes). |
-| `answer` | `mock-review answer (--note <id> \| --journey <id>) --text <t> [--decision <d>]` | Appends to a note's or journey's thread as `by: "session"`, marks it `answered`, optionally records a decision. |
+| `answer` | `mock-review answer (--note <id> \| --journey <id>) --text <t>` | Appends to a note's or journey's thread as `by: "session"` and marks it `answered`. |
+| `approve` | `mock-review approve --screen <name>` | Runs `check`, then records `approval.screens[<name>]` at the current hash — the one writer left for screen approval now that the page has no Approve-screen control. |
+| `waive` | `mock-review waive --journey <id> --reason <text> --beats <hash>` | Records `approval.journeys[<id>] = {client: 'waived', reason, beats, at}` — the last direct plugin write (`client waive`) moves into this verb, so the package is the only program that writes a design document. |
 | `serve` | `mock-review serve` | Starts the bare reviewer server, prints its URL, writes `design/.serve.json`, and runs until `SIGINT`/`SIGTERM`. |
 
 Every JSON verb writes exactly one `JSON.stringify(result) + "\n"` to stdout; every diagnostic
@@ -38,7 +40,6 @@ src/themes/*.css
 src/journeys.ts           # exports `journeys`
 design/notes.json         # created with its empty default when absent
 design/approval.json      # created with its empty default when absent
-design/decisions.json     # created on the first `answer --decision`
 design/.serve.json        # the running `serve`'s portfile — never committed
 design/examples/          # never read by this package
 ```
@@ -48,8 +49,8 @@ design/examples/          # never read by this package
 `npx mock-review serve` starts the host's own Vite dev server with the package's Vite plugin
 mounted, and prints its URL. Open it to browse screens, shells and journeys, draw notes, and
 approve journeys. The page has no screen-approve or theme control: `mock-review approve --screen
-<name>` records a screen's approval, and the theme is whatever `mock.config.ts` declares. The
-reviewer ships as source (`src/ui/`) and compiles through the host's own Vite pipeline
+<name>` records a screen's approval, and the theme is whatever `mock.config.ts`'s `theme` field
+declares — it is never picked on the page. The reviewer ships as source (`src/ui/`) and compiles through the host's own Vite pipeline
 (`@vitejs/plugin-react`, `@tailwindcss/vite`) — there is no prebuilt page.
 
 Add `?client=<token>` (matching `mock.config.ts`'s `client.token`) to open the page in the
@@ -93,7 +94,7 @@ npm run check   # typecheck, lint, tests
 npm run build   # tsc -p tsconfig.build.json && chmod +x dist/cli.js — writes dist/: the compiled CLI and plugin only
 git add dist
 git commit
-git tag -f v2
+git tag -f v3
 git push --tags
 ```
 

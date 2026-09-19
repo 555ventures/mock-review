@@ -2,9 +2,10 @@ import { z } from 'zod'
 import { CONTRACT_VERSION } from './version.js'
 
 /** D4: READ-BACK SCHEMA. It validates only what this package itself reads or writes; anything
- * else passes through, and `contractVersion` is checked as "known", not "equal". This rule
- * LOWERS the frequency of a swallowed read; it does NOT close it, because a missing required key
- * is not an extra key. */
+ * else passes through, and `contractVersion` is checked as "equal" to the single pinned literal
+ * (spec 04 D2) — a document from any other version is reported unreadable, not silently accepted.
+ * This rule LOWERS the frequency of a swallowed read; it does NOT close it, because a missing
+ * required key is not an extra key. */
 
 /** D1: one reply in a note's or journey's thread. `by` is a free-form attribution string
  * (`"session"` for `answer`, `"client"` for the page's client role — spec 02). */
@@ -48,7 +49,7 @@ export type JourneyConversation = z.infer<typeof JourneyConversationSchema>
 
 export const NotesSchema = z
   .object({
-    contractVersion: z.union([z.literal(1), z.literal(CONTRACT_VERSION)]),
+    contractVersion: z.literal(CONTRACT_VERSION),
     notes: z.array(NoteSchema),
     journeys: z.record(z.string(), JourneyConversationSchema),
   })

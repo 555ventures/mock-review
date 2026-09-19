@@ -25,11 +25,11 @@ function writeTemplate(contractVersion: number, fields?: Record<string, unknown>
 }
 
 describe('contractSkew (D6)', () => {
-  it('AC-20260917-01-9: returns the exact reason string when the template reports 1 and the package reports 2', () => {
-    const templatePath = writeTemplate(1)
+  it('AC-20260918-04-1: returns the exact reason string when the template reports 2 and the package reports 3', () => {
+    const templatePath = writeTemplate(2)
     try {
       expect(contractSkew(templatePath, CONTRACT_VERSION)).toBe(
-        'plugin template contract 1 ≠ package contract 2 — build claude-plugins specs/20260917/01 first',
+        `plugin template contract 2 ≠ package contract ${CONTRACT_VERSION} — build claude-plugins specs/20260917/01 first`,
       )
     } finally {
       rmSync(path.dirname(templatePath), { recursive: true, force: true })

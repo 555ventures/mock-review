@@ -5,10 +5,12 @@ write, and the release procedure. Source of truth:
 `specs/20260915/01-schemas-cli-and-bare-serve.md` (D1–D19),
 `specs/20260915/02-the-reviewer-page.md` (D1–D27) and
 `specs/20260917/02-the-story-travels.md` (D1–D13) and
-`specs/20260918/01-writes-never-tear-never-lose.md` (D1–D7). The
-binding contract is the spec plugin's `spec/templates/mock/contract.json` (contractVersion 2);
+`specs/20260918/01-writes-never-tear-never-lose.md` (D1–D7) and
+`specs/20260918/04-contract-v3.md` (D1–D13). The
+binding contract is the spec plugin's `spec/templates/mock/contract.json` (contractVersion 3);
 every shape below has a zod schema in `src/schemas/`, and `CONTRACT_VERSION` in
-`src/schemas/index.ts` is the one place the number lives.
+`src/schemas/version.ts` is the one place the number lives. The package's major version is the
+contract version, and both are 3.
 
 **A journey step carries the client's sentence.** `check --json` accepts and echoes `step.beat`,
 `step.state`, `edge.say` and `journey.persona`, all optional and omitted when absent; a step with no
@@ -26,16 +28,17 @@ reports and never over the page-normalised ones. The client's confirm is If-Matc
 one `JSON.stringify(result) + "\n"` to stdout; every diagnostic goes to stderr. Each verb module is
 loaded lazily, so `contract` never loads Vite or reads the host.
 
-| Verb           | Argv                                                                 | stdout                                                                                                                                                                             | Exit                                                                                                                                                                                                                               |
-| -------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `contract`     | `contract --json`                                                    | `{"contractVersion":2,"package":"@555-ventures/mock-review","version":"<package.json version>"}`                                                                                   | 0                                                                                                                                                                                                                                  |
-| `check`        | `check [--json]`                                                     | JSON: the `Check` object. Text: one line per finding `<severity> <kind> <file>: <message>`, then `ok` / `not ok`                                                                   | 0 (findings never change the exit)                                                                                                                                                                                                 |
-| `check --look` | `check --look <screen> [--state <s>]`                                | one written PNG path per line                                                                                                                                                      | 0; 2 with no running `serve`, without `playwright`, for an unknown screen, for a screen whose module fails to load, or for a bare `--look`                                                                                         |
-| `sweep`        | `sweep [--json]`                                                     | JSON: `{contractVersion:2, inventory, queue}`. Text: `queue empty` alone when no open items; else inventory lines, a blank line, then the queue grouped under `## <file>` headings | 0                                                                                                                                                                                                                                  |
-| `answer`       | `answer (--note <id> \| --journey <id>) --text <t> [--decision <d>]` | `answered <id>`                                                                                                                                                                    | 0; 2 on usage, unknown id (`no note <id>` / `no conversation for journey <id>`), or an invalid `design/decisions.json`                                                                                                             |
-| `approve`      | `approve --screen <name>`                                            | `approved <name> <hash>`                                                                                                                                                           | 0; 2 on usage, when `check` is not ok (the first error finding's message), for an unknown screen (`unknown screen <name>`), or when the screen still has an open note (`<name> has <n> open note(s) — answer or close them first`) |
-| `serve`        | `serve`                                                              | first line: the server URL, no trailing slash                                                                                                                                      | runs until SIGINT/SIGTERM, then 0                                                                                                                                                                                                  |
-| anything else  | —                                                                    | nothing; stderr `mock-review: unknown verb <verb>`                                                                                                                                 | 2                                                                                                                                                                                                                                  |
+| Verb           | Argv                                                  | stdout                                                                                                                                                                             | Exit                                                                                                                                                                                                                               |
+| -------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contract`     | `contract --json`                                     | `{"contractVersion":3,"package":"@555-ventures/mock-review","version":"<package.json version>"}`                                                                                   | 0                                                                                                                                                                                                                                  |
+| `check`        | `check [--json]`                                      | JSON: the `Check` object. Text: one line per finding `<severity> <kind> <file>: <message>`, then `ok` / `not ok`                                                                   | 0 (findings never change the exit)                                                                                                                                                                                                 |
+| `check --look` | `check --look <screen> [--state <s>]`                 | one written PNG path per line                                                                                                                                                      | 0; 2 with no running `serve`, without `playwright`, for an unknown screen, for a screen whose module fails to load, or for a bare `--look`                                                                                         |
+| `sweep`        | `sweep [--json]`                                      | JSON: `{contractVersion:3, inventory, queue}`. Text: `queue empty` alone when no open items; else inventory lines, a blank line, then the queue grouped under `## <file>` headings | 0                                                                                                                                                                                                                                  |
+| `answer`       | `answer (--note <id> \| --journey <id>) --text <t>`   | `answered <id>`                                                                                                                                                                    | 0; 2 on usage (including the retired `--decision` flag, refused by name), unknown id (`no note <id>` / `no conversation for journey <id>`), or an unreadable `design/notes.json`                                                   |
+| `approve`      | `approve --screen <name>`                             | `approved <name> <hash>`                                                                                                                                                           | 0; 2 on usage, when `check` is not ok (the first error finding's message), for an unknown screen (`unknown screen <name>`), or when the screen still has an open note (`<name> has <n> open note(s) — answer or close them first`) |
+| `waive`        | `waive --journey <id> --reason <text> --beats <hash>` | `waived <id>`                                                                                                                                                                      | 0; 2 on usage (all three flags required) or an unreadable `design/approval.json`                                                                                                                                                   |
+| `serve`        | `serve`                                               | first line: the server URL, no trailing slash                                                                                                                                      | runs until SIGINT/SIGTERM, then 0                                                                                                                                                                                                  |
+| anything else  | —                                                     | nothing; stderr `mock-review: unknown verb <verb>`                                                                                                                                 | 2                                                                                                                                                                                                                                  |
 
 Every refusal prints `mock-review: <reason>` on stderr.
 
@@ -44,6 +47,14 @@ Every refusal prints `mock-review: <reason>` on stderr.
 (`{hash, approvedAt, states, viewports, schemes, screenshots}`) is the one the page button used to
 write. It is the only writer of `approval.screens`; each refusal writes nothing. The reviewer page
 offers no screen-approve control and no theme picker: the operator works from files and the CLI.
+
+`waive --journey <id> --reason <text> --beats <hash>` writes `approval.journeys[id] = {...existing,
+client: 'waived', reason, beats, at}` under the design lock through the same reducer (`op:'waive'`),
+never writing `approvedAt`. It re-derives nothing — no journey-existence and no beats-freshness
+guard; the plugin's driver computes the beats hash and is the intended caller. With `waive` in
+place, the package is the only program that writes a design document, and every such write goes
+through the design lock. Over HTTP `waive` is owner-only (the client allow-list admits only
+`clientOk`).
 
 `serve` owns its own shutdown: Vite's `createServer()` registers `SIGINT`/`SIGTERM` handlers that
 exit with 128+signal before any handler registered later runs, so the CLI removes them as soon as
@@ -56,28 +67,27 @@ All writes go through `writeJsonAtomic`, which writes a per-process, per-write t
 (`<path>.<pid>.<hex>.tmp`) and then `rename`s it: the rename makes a write atomic, and the unique
 name makes concurrent writes atomic. A failed rename unlinks its temporary file before rethrowing.
 
-The package has three writers of `design/notes.json` and `design/approval.json` — the `serve`
-server, the `answer` CLI, and the plugin's `client waive` — and serialises every package write to
+The package's writers of `design/notes.json` and `design/approval.json` — the `serve` server and
+the `answer`, `approve` and `waive` verbs — serialise every write to
 those two documents through one exclusive `design/.lock`, held by one process at a time. One lock
 covers both documents, because a notes mutation can write approval in the same critical section. A
 lock is broken automatically when its holder pid is gone or its mtime is older than ten seconds; a
 lock with an empty or unparseable body counts as held. A verb that cannot acquire it within two
 seconds refuses with `design/ is locked by pid <N> — another mock-review write is in progress;
 retry` rather than waiting — exit 2 from a CLI verb, `503` from a server write. Readers do not take
-the lock. `design/.lock` is gitignored and never committed. The plugin's own `client waive` write
-does not yet take the lock.
+the lock. `design/.lock` is gitignored and never committed. The plugin no longer writes a design
+document itself: its `client waive` calls the `waive` verb.
 
 Default documents are created with an exclusive create (`wx`), so two verbs starting together
 cannot clobber each other: the loser sees the file already present and writes nothing.
 
-| File                    | Created by                                                                                                        | Written by                                                                                                                                             | Rule                                                                                                                                                                                                                                                                                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `design/notes.json`     | any host verb (`check`, `sweep`, `answer`, `serve`) when absent: `{"contractVersion":2,"notes":[],"journeys":{}}` | `answer` (applies `{op:'reply', entry:{by:"session",text}}` through the shared reducer, so `status` becomes `"answered"`); the reviewer page (spec 02) | never overwritten when present; the CLI never sets `approved` and never deletes; a present file that does not parse makes a page write answer 409, never a rewrite; a present file at `contractVersion` `1` or `2` is accepted and rewritten at `2` by the first writer that touches it; a read-only verb leaves the file byte-identical |
-| `design/approval.json`  | any host verb when absent: `{"contractVersion":2,"screens":{},"journeys":{},"theme":null}`                        | `approve --screen` (the only writer of `approval.screens`); the reviewer page's client confirm (`clientOk`); the plugin's `client waive`               | `approve --screen` is the only CLI writer; the `theme` field is kept for shape but nothing writes it; same 409 rule as `notes.json`; same `1`-or-`2` accept-and-rewrite rule as `notes.json`                                                                                                                                             |
-| `design/decisions.json` | `answer --decision` when absent: `{"contractVersion":2,"decisions":[]}`                                           | `answer --decision` appends `{screen, text, at}`                                                                                                       | a present file that fails to parse or validate is a refusal (exit 2), never replaced; a present file at `contractVersion` `1` or `2` is accepted and rewritten at `2` by the first writer that touches it; a read-only verb leaves the file byte-identical                                                                               |
-| `design/.serve.json`    | `serve` after `listen()`: `{url, pid}`                                                                            | `serve`                                                                                                                                                | deleted on SIGINT/SIGTERM/exit; a stale file is overwritten by the next `serve`; gitignored                                                                                                                                                                                                                                              |
-| `design/.lock`          | any package write to `notes.json` or `approval.json`: `{pid, at}`                                                 | the writer holding it                                                                                                                                  | present only while a write is in flight; removed on release and by a once-per-module exit handler; broken when its holder pid is gone or its mtime is older than 10 s; gitignored as `design/.lock*`                                                                                                                                     |
-| `design/screenshots/`   | `check --look`                                                                                                    | `check --look`                                                                                                                                         | one PNG per screen × state × viewport × scheme, named `<screen>-<state>-<WxH>-<scheme>.png`, the state in its `examples`-key casing                                                                                                                                                                                                      |
+| File                   | Created by                                                                                                        | Written by                                                                                                                                             | Rule                                                                                                                                                                                                                                                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `design/notes.json`    | any host verb (`check`, `sweep`, `answer`, `serve`) when absent: `{"contractVersion":3,"notes":[],"journeys":{}}` | `answer` (applies `{op:'reply', entry:{by:"session",text}}` through the shared reducer, so `status` becomes `"answered"`); the reviewer page (spec 02) | never overwritten when present; the CLI never sets `approved` and never deletes; a present file that does not parse makes a page write answer 409, never a rewrite; a present file at any `contractVersion` other than `3` is unreadable (same 409 / exit 2 rule); a read-only verb leaves the file byte-identical |
+| `design/approval.json` | any host verb when absent: `{"contractVersion":3,"screens":{},"journeys":{}}`                                     | `approve --screen` (the only writer of `approval.screens`); `waive` (journey waivers); the reviewer page's client confirm (`clientOk`)                 | the document has no `theme` key — one present makes it unreadable; the theme is whatever `mock.config.ts` declares; same 409 rule and same single-version rule as `notes.json`                                                                                                                                     |
+| `design/.serve.json`   | `serve` after `listen()`: `{url, pid}`                                                                            | `serve`                                                                                                                                                | deleted on SIGINT/SIGTERM/exit; a stale file is overwritten by the next `serve`; gitignored                                                                                                                                                                                                                        |
+| `design/.lock`         | any package write to `notes.json` or `approval.json`: `{pid, at}`                                                 | the writer holding it                                                                                                                                  | present only while a write is in flight; removed on release and by a once-per-module exit handler; broken when its holder pid is gone or its mtime is older than 10 s; gitignored as `design/.lock*`                                                                                                               |
+| `design/screenshots/`  | `check --look`                                                                                                    | `check --look`                                                                                                                                         | one PNG per screen × state × viewport × scheme, named `<screen>-<state>-<WxH>-<scheme>.png`, the state in its `examples`-key casing                                                                                                                                                                                |
 
 Liveness: `check` reports `serve.url` = the portfile's `url` only when
 `GET <url>/__mock-review/ping` answers 200 within 500 ms; any error or timeout is `null`.
@@ -93,7 +103,9 @@ verdict, thrown as `UnparseableDesignFileError` and turned into a 409 by both `P
 `POST approval`. `ok: false` never means the file is absent — `ensureDesignFiles` runs first in
 every host-touching verb and creates both documents when missing — it means the file exists and
 cannot be used: malformed JSON, an unknown `contractVersion`, or a shape this package has not
-learned.
+learned. A design document is valid at exactly one contract version: anything older is reported
+unreadable with the hand-fix remedy, and the migration path is to re-run the design stage.
+`design/decisions.json` is retired — nothing reads, writes or creates it.
 
 Five call sites, four deliberate policies, one fact underneath: `buildState` (`GET state`) reports
 the outcome and serves the existing `EMPTY_NOTES`/`EMPTY_APPROVAL` value as a documented
@@ -117,9 +129,8 @@ open questions carried to a later client-page spec; this mechanism only makes th
 
 Read-back document schemas (`src/schemas/notes.ts`, `src/schemas/approval.ts`) follow one written
 rule: **a read-back schema validates only what this package itself reads or writes; everything
-else passes through, and `contractVersion` is validated as "known", not "equal".** `Approval.theme`
-is `z.string().nullable().default(null)` under this rule, because the plugin's own `defaultApproval`
-fixture omits the key entirely. Schema normalisation this way is part of the read verdict, not
+else passes through, and `contractVersion` is validated as equal to the single pinned literal.**
+`approval.theme` is not part of the document. Schema normalisation this way is part of the read verdict, not
 drift from it — a document that parses with a default filled in is `ok: true`, and the filled value
 is what gets served, not the raw bytes. The rule is hygiene, not a fix: it lowers how often a
 document drifts out of readability but does not close the class, because the failure that started
@@ -173,7 +184,7 @@ sentence — retryable, distinct from the `409` an unreadable document answers.
 | `ping`              | GET    | 200, no body — the liveness probe `check` uses                                                                                                                                                       |
 | `state`             | GET    | `{screens, shells, journeys, themes, config, inventory, violations, notes, approval, role}`; `screens[]` and `inventory[]` each carry their module's `examples` keys                                 |
 | `notes`             | POST   | `{op:'add', note} \| {op:'update', id, fields} \| {op:'remove', id} \| {op:'reply', id, entry:{by:'owner'\|'session', text}} \| {op:'close', id, status: 'approved'\|'deferred'}` → the new document |
-| `approval`          | POST   | `{op:'approveScreen'\|'unapproveScreen', name} \| {op:'clientOk', id, beats}` → the new document; `{op:'theme'}` is retired and answers 400                                                          |
+| `approval`          | POST   | `{op:'approveScreen', name} \| {op:'clientOk', id, beats} \| {op:'waive', id, reason, beats}` → the new document; `{op:'theme'}` and `{op:'unapproveScreen'}` are retired and answer 400             |
 | `events`            | GET    | SSE: `notes`, `approval`, `files` (the last debounced 200 ms, fired for `src/**` and `mock.config.ts`); the page refetches `state` on each                                                           |
 | `/r/registry.json`  | GET    | the in-memory shadcn registry of the host's own components                                                                                                                                           |
 | `/` and `/?frame=1` | GET    | the entry document (one template for both; `?frame=1` selects the frame branch in `main.tsx`)                                                                                                        |
@@ -313,13 +324,16 @@ reviewer needs no build. Browser tests run both layouts: the linked package (the
 
 1. `npm run build` (writes `dist/`: the compiled CLI and plugin only).
 2. Commit `dist/`. It is committed at release only, never in a build batch.
-3. `git tag -f v2`.
+3. `git tag -f v3`.
 4. Push the tags.
 
-Hosts install with `npm i -D github:555ventures/mock-review#v2`. The package major equals the contract
+Hosts install with `npm i -D @555-ventures/mock-review@3`. The package major equals the contract
 version, so a contract bump is a major bump and the install tag moves with it. There is no `prepare` script. The
 runtime `dependencies` are `zod`, `react-docgen-typescript` and `typescript ~6.0.0`; `vite`, `react`
-and `react-dom` are peers, and `playwright` is an optional peer. The runtime `dependencies` also
+and `react-dom` are peers, and `playwright` is an optional peer. `files` publishes `dist`, `src/ui`
+and `src/schemas/version.ts` — the one schema module the page imports by value (the empty
+documents); every other page import of `src/schemas` is type-only, and a new value import of an
+unpublished module leaves the installed page blank. The runtime `dependencies` also
 carry the reviewer's UI libraries (`radix-ui`, `cmdk`, `lucide-react`, `class-variance-authority`,
 `clsx`, `tailwind-merge`, `react-resizable-panels`, `tw-animate-css`, `@fontsource-variable/geist`);
 `tailwindcss ^4` is a peer; the host provides `@vitejs/plugin-react` and `@tailwindcss/vite`.

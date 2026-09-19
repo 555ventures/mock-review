@@ -73,8 +73,8 @@ Required top-level: `contractVersion, ok, findings, screens, shells, journeys, t
 - **`screens[]`** `{name, file, states, shell, hash, lines}`. `name` = key of `approval.screens[<name>]` and of the look URL `<serve.url>/#/<screen>`. `hash` is the drift oracle: preflight requires `approval.screens[n].hash === check.screens[n].hash`, else STOP "changed since approval" (`stage-design.md:43-46`); must change on any edit. `states` = the screen's exported `meta.states`. `shell`, `lines`: required keys, no driver read.
 - **`shells[]`** `{name, file, examples}`. `shell-drawn` requires `check.shells.some(s => Array.isArray(s.examples) && s.examples.length > 0)` (`mocks-driver.js:348-351`) — array of example names, e.g. `["Default"]`.
 - **`journeys[]`** `{id, title, steps, edges, resolved, unresolved, persona?, beats}` (contract v2). `id` matched against the seed's `### <journey>` names (`mocks-driver.js:370`, `394`). `steps`: array of `{screen, beat?, state?}` — driver maps `steps.map(s => s.screen)` and requires each approved (`:401-407`); the seed's beat lines are compared against `steps[].beat` at `--mark journey-drawn`, and a step missing `beat` is refused there even though `check` itself only warns. `edges[]` carry an optional `say` (the client's own words for taking the edge) alongside `label`. `resolved: boolean` — `journey-drawn` refuses unless truthy (`:374`). `unresolved[]` `{from: number, to: number, reason: string}` printed as `step <from> → <to>: <reason>` (`:375`); reference reason `no control with text "Account" in ConsoleShell`. `persona` is the client's own description of who is walking the journey, optional. `beats: string | null` is server-only (`GET state`, never `check --json`) — the 12-hex sha256 of the journey's story computed from the raw (un-normalised) steps; `--mark journey-approved` refuses unless `approval.journeys[id].beats === beats`, and `null` means nothing is confirmable yet.
-- **`themes`** — array of keys from `src/themes/*.css` (basename without `.css`); `theme-picked` requires `check.themes.includes(approval.theme)` (`:442-444`).
-- **`config`** `{name, port, targets:{viewports[], schemes[]}, theme: string|null, client:{token}}` mirroring `mock.config.ts`. `theme-picked` requires `check.config.theme === approval.theme` (`:439-441`). `client open` builds `<serve.url>/?client=<config.client.token>` (`:576-577`).
+- **`themes`** — array of keys from `src/themes/*.css` (basename without `.css`); `theme-picked` requires `check.themes.includes(approval.theme)` (`:442-444`) — pre-v3 plugin mechanics; `approval.theme` no longer exists once this package ships contract v3 (see C.8), pending the sibling plugin spec `claude-plugins/specs/20260918/01-mock-contract-v3.md` (D9) retiring the `theme-picked` mark itself.
+- **`config`** `{name, port, targets:{viewports[], schemes[]}, theme: string|null, client:{token}}` mirroring `mock.config.ts`. `theme-picked` requires `check.config.theme === approval.theme` (`:439-441`) — same pre-v3 caveat. `client open` builds `<serve.url>/?client=<config.client.token>` (`:576-577`).
 - **`serve`** `{url: string|null}` — `null` exactly when no `serve` process runs for this app. `client open` refuses on null with `remedy: npx mock-review serve` (`:575`). **No trailing slash** (driver concatenates `url + '/?client=' + token`).
 
 ### B.3 `sweep --json`
@@ -121,18 +121,17 @@ Records: typed arrays, one file per seed `## Records` entity; driver verifies ex
 
 ### C.8 `design/approval.json` — package-owned (one narrow plugin write)
 ```
-{ contractVersion: 2,
+{ contractVersion: 3,
   screens:  { "<name>": { hash, approvedAt, states, viewports, schemes, screenshots } },
-  journeys: { "<id>":   { client, beats?, at?, reason?, approvedAt? } },
-  theme: string|null }
+  journeys: { "<id>":   { client, beats?, at?, reason?, approvedAt? } } }
 ```
-- `screens[<name>].hash` must equal `check.screens[<name>].hash` at approval; `approvedAt` ISO, truthiness-tested (`mocks-driver.js:398`, `404`). `journeys[<id>].client` ∈ `"ok"|"waived"|null`. Contract v2 drops `approvedAt` as the journey-approval witness: `"ok"` is now written by the client's own confirm control POSTing `{op:'clientOk', id, beats}`, If-Match on the `beats` hash `GET state` served — the entry becomes `{client:'ok', beats, at}` with **no** `approvedAt` key. `--mark journey-approved` reads `approval.journeys[id].beats === check`'s (`GET state`'s) `beats` for that journey. `theme`: picked on the page (`:436-437`).
+- `screens[<name>].hash` must equal `check.screens[<name>].hash` at approval; `approvedAt` ISO, truthiness-tested (`mocks-driver.js:398`, `404`). `journeys[<id>].client` ∈ `"ok"|"waived"|null`. Contract v2 drops `approvedAt` as the journey-approval witness: `"ok"` is now written by the client's own confirm control POSTing `{op:'clientOk', id, beats}`, If-Match on the `beats` hash `GET state` served — the entry becomes `{client:'ok', beats, at}` with **no** `approvedAt` key. `--mark journey-approved` reads `approval.journeys[id].beats === check`'s (`GET state`'s) `beats` for that journey. **Contract v3 removes `approval.theme` entirely** (spec `20260918/04-contract-v3.md` D4): there is no page-side theme pick and never a `theme-picked` mark to satisfy from this file. The theme is `mock.config.ts`'s own `theme` field, reported read-only through `check.config.theme` (spec `20260918/03-…` D5) — the session edits `mock.config.ts` at THEME, the package never writes a theme anywhere.
 - Writers: package UI; the plugin writes **only** `journeys[<j>] = {client: "waived", reason, at, beats}` via `client waive` (`mocks-driver.js:581-592`) — no `approvedAt`; extra keys `reason`, `at`, `beats` must be tolerated and preserved. A v1 row (`{approvedAt, client}`, no `beats`) still parses and round-trips both keys untouched.
-- Readers: driver at `journey-approved`/`theme-picked`/`approved`/`client waive`; genesis journey count off `Object.keys(approval.journeys)` (`genesis-driver.js:703-707`); design-stage preflight; `/spec:sketch` exit; `/spec:plan` UI-brief check (`spec/commands/plan.md:30-32`).
-- Must exist. Default `{contractVersion:1,screens:{},journeys:{},theme:null}`. `--reopen` leaves it byte-identical.
+- Readers: driver at `journey-approved`/`approved`/`client waive`; genesis journey count off `Object.keys(approval.journeys)` (`genesis-driver.js:703-707`); design-stage preflight; `/spec:sketch` exit; `/spec:plan` UI-brief check (`spec/commands/plan.md:30-32`).
+- Must exist. Default `{contractVersion:3,screens:{},journeys:{}}`. `--reopen` leaves it byte-identical.
 
-### C.9 `design/decisions.json` — package-owned, plugin-unread
-`{ contractVersion, decisions: [ { screen, text, at } ] }`. Written on `answer --decision <d>`. Nothing in the plugin reads it.
+### C.9 `design/decisions.json` — retired in contract v3
+Contract v1/v2 had a package-owned, plugin-unread `{ contractVersion, decisions: [ { screen, text, at } ] }`, written on `answer --decision <d>`, that nothing in the plugin ever read (see ambiguity 3 below). Spec `20260918/04-contract-v3.md` D3 deletes the file, its schema, and the `answer --decision` flag that wrote it — a v1/v2 host's stray `design/decisions.json` is simply left on disk, unread and unmigrated. There is no `design/decisions.json` in contract v3.
 
 ### C.10 Driver-owned files the package must NOT touch
 `design/mocks/status.json`, `design/mocks/seed.md`, `design/mocks/ledger.md` at the repo root.
@@ -144,12 +143,12 @@ Records: typed arrays, one file per seed `## Records` entity; driver verifies ex
 - Prints the served URL on its first stdout line, no trailing slash. Default port 5180 from `mock.config.ts`.
 - Long-lived dev server; while alive `check --json`'s `serve.url` is that URL, else `null`.
 - Routes `<url>/#/<screen>` per screen.
-- Reviewer UI: (1) screens/states browsing across `config.targets.viewports × schemes`, **approve** writing `approval.screens[<name>] = {hash, approvedAt, states, viewports, schemes, screenshots}` with the same hash `check` reports; (2) note raising anchored to `{screen, state, component, key, snippet}`, with a `project: true` option, into `design/notes.json`; (3) approve/reject/delete on notes and journey conversations — only the page may end a note; (4) journey approval writing `approval.journeys[<id>].approvedAt`; (5) theme pick writing `approval.theme`; (6) Components page (docgen inventory), session-only.
+- Reviewer UI: (1) screens/states browsing across `config.targets.viewports × schemes`, **approve** writing `approval.screens[<name>] = {hash, approvedAt, states, viewports, schemes, screenshots}` with the same hash `check` reports; (2) note raising anchored to `{screen, state, component, key, snippet}`, with a `project: true` option, into `design/notes.json`; (3) approve/reject/delete on notes and journey conversations — only the page may end a note; (4) journey approval writing `approval.journeys[<id>].approvedAt`; (5) Components page (docgen inventory), session-only. Contract v3 has no theme pick on the page: the theme is whatever `mock.config.ts`'s `theme` field says, reported read-only via `check.config.theme`.
 - **`?client=<token>` mode** (`mocks.md:198-206`): token matched against `config.client.token`. Client sees every journey and screen with the same controls a real user has, a note box on each screen, and nothing else — no delete, no reject, no Components page. A client-raised note is an ordinary row distinguished only by who raised it. The client's confirm control on a journey sets `approval.journeys[j].client = "ok"`.
 - Dev-only mount; zero reviewer code in the production bundle (ADR-0028).
 
 ## E. `answer`
-`mock-review answer (--note <id> | --journey <id>) --text <t> [--decision <d>]`: appends `{by, text}` to the target thread and flips `status` `open → answered`. Never sets `approved`, never deletes. `--decision` appends `{screen, text, at}` to `design/decisions.json`. Exit 0.
+`mock-review answer (--note <id> | --journey <id>) --text <t>`: appends `{by, text}` to the target thread and flips `status` `open → answered`. Never sets `approved`, never deletes. Exit 0. Contract v1/v2 also took `[--decision <d>]`, appending `{screen, text, at}` to `design/decisions.json`; contract v3 removes the flag along with the file (see C.9).
 
 ## F. `sweep`
 - Text mode lists only `open` items, grouped by file, journey requests first, inventory printed first (`mocks.md:183-185`). **Empty queue prints exactly one line** — the session loops until one line (`mocks.md:186-187`); stub prints `queue empty`.
@@ -169,7 +168,7 @@ Scaffold beneath: `npx shadcn@4.21.0 init -t vite -b radix -p nova -n app -y -s`
 ## H. Ambiguities and gaps (each needs a ruling in the spec)
 1. `check.screens` is an array but design-stage prose indexes `check.screens[<name>].hash` — array of `{name,…}` with lookup-by-name.
 2. `notes`/`approval`/`decisions` shapes are never validated by the plugin — the package guarantees them.
-3. `decisions.json` has no reader; writer = `answer --decision`.
+3. `decisions.json` has no reader; writer = `answer --decision`. Resolved by contract v3 (`20260918/04-contract-v3.md` D3): the file, its writer, and the flag are removed rather than given a reader.
 4. `project: true` is load-bearing but not in the contract's required keys — optional, documented.
 5. Exit codes of `contract`/`check` are never checked; non-JSON stdout is fatal.
 6. Package major must equal `contractVersion`.

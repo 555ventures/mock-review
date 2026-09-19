@@ -19,11 +19,11 @@ describe('mock-review sweep (built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
-  it('AC-20260917-01-3 (rewrites AC-20260915-01-18): --json reports contractVersion: 2 with the same inventory and queue it reports today', () => {
+  it('AC-20260918-04-1 (rewrites AC-20260917-01-3): --json reports contractVersion: 3 with the same inventory and queue it reports today', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-sweep-')
     const sweep = JSON.parse(run(host, ['sweep', '--json']).stdout) as Sweep
 
-    expect(sweep.contractVersion).toBe(2)
+    expect(sweep.contractVersion).toBe(3)
     expect(sweep.inventory).toContainEqual(
       expect.objectContaining({ name: 'ConsoleShell', kind: 'shell' }),
     )
@@ -60,7 +60,7 @@ describe('mock-review sweep (built dist/)', () => {
     writeFileSync(
       path.join(host, 'design', 'notes.json'),
       JSON.stringify({
-        contractVersion: 1,
+        contractVersion: 3,
         notes: [
           {
             id: 'N1',
@@ -142,7 +142,7 @@ describe('mock-review sweep (built dist/)', () => {
   it('AC-20260915-01-20: text form prints "queue empty" on a host with no open items', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-sweep-')
     mkdirSync(path.join(host, 'design'), { recursive: true })
-    writeFileSync(path.join(host, 'design', 'notes.json'), JSON.stringify({ contractVersion: 1, notes: [], journeys: {} }))
+    writeFileSync(path.join(host, 'design', 'notes.json'), JSON.stringify({ contractVersion: 3, notes: [], journeys: {} }))
 
     const r = run(host, ['sweep'])
     expect(r.stdout).toBe('queue empty\n')
@@ -154,7 +154,7 @@ describe('mock-review sweep (built dist/)', () => {
     writeFileSync(
       path.join(host, 'design', 'notes.json'),
       JSON.stringify({
-        contractVersion: 1,
+        contractVersion: 3,
         notes: [
           {
             id: 'N1',

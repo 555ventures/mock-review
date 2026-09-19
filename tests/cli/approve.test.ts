@@ -23,7 +23,7 @@ function runCheckJson(host: string): Check {
   return JSON.parse(r.stdout) as Check
 }
 
-function seedNotes(host: string, notes: unknown, journeys: unknown = {}, contractVersion = 2) {
+function seedNotes(host: string, notes: unknown, journeys: unknown = {}, contractVersion = 3) {
   mkdirSync(path.join(host, 'design'), { recursive: true })
   writeFileSync(path.join(host, 'design', 'notes.json'), JSON.stringify({ contractVersion, notes, journeys }))
 }
@@ -32,7 +32,6 @@ function readApproval(host: string): {
   contractVersion: number
   screens: Record<string, { hash: string; approvedAt: string; states: string[]; viewports: string[]; schemes: string[]; screenshots: string[] }>
   journeys: Record<string, unknown>
-  theme: string | null
 } {
   return JSON.parse(readFileSync(path.join(host, 'design', 'approval.json'), 'utf8'))
 }
@@ -136,7 +135,7 @@ describe('mock-review approve --screen (built dist/)', () => {
     ])
     const approvalPath = path.join(host, 'design', 'approval.json')
     mkdirSync(path.dirname(approvalPath), { recursive: true })
-    writeFileSync(approvalPath, JSON.stringify({ contractVersion: 2, screens: {}, journeys: {}, theme: null }))
+    writeFileSync(approvalPath, JSON.stringify({ contractVersion: 3, screens: {}, journeys: {} }))
     const before = readFileSync(approvalPath, 'utf8')
 
     const r = run(host, ['approve', '--screen', 'home'])

@@ -25,7 +25,7 @@ const REFUSAL = (rel: string) => `${rel} exists but does not parse — refusing 
 describe('AC-20260917-04-1: readDesignDoc(cwd, kind) — the one verdict', () => {
   it('returns {ok:true, doc} deep-equal to a well-formed design/approval.json', () => {
     const cwd = tmpCwd()
-    const doc = { contractVersion: 2, screens: {}, journeys: {}, theme: null }
+    const doc = { contractVersion: 3, screens: {}, journeys: {} }
     writeFileSync(path.join(cwd, 'design', 'approval.json'), JSON.stringify(doc))
 
     expect(readDesignDoc(cwd, 'approval')).toEqual({ ok: true, doc })
@@ -41,7 +41,59 @@ describe('AC-20260917-04-1: readDesignDoc(cwd, kind) — the one verdict', () =>
     })
   })
 
-  it('returns {ok:false, error} naming the file, for an unknown contractVersion (3)', () => {
+  it('AC-20260918-04-2: returns {ok:false, error} naming the file, for an unknown contractVersion (2)', () => {
+    const cwd = tmpCwd()
+    writeFileSync(
+      path.join(cwd, 'design', 'approval.json'),
+      JSON.stringify({ contractVersion: 2, screens: {}, journeys: {}, theme: null }),
+    )
+
+    expect(readDesignDoc(cwd, 'approval')).toEqual({
+      ok: false,
+      error: REFUSAL('design/approval.json'),
+    })
+  })
+
+  it('AC-20260918-04-2: returns {ok:false, error} naming the file, for an unknown contractVersion (1)', () => {
+    const cwd = tmpCwd()
+    writeFileSync(
+      path.join(cwd, 'design', 'approval.json'),
+      JSON.stringify({ contractVersion: 1, screens: {}, journeys: {} }),
+    )
+
+    expect(readDesignDoc(cwd, 'approval')).toEqual({
+      ok: false,
+      error: REFUSAL('design/approval.json'),
+    })
+  })
+
+  it('AC-20260918-04-2: a design/notes.json carrying contractVersion 2 is reported unreadable naming the file', () => {
+    const cwd = tmpCwd()
+    writeFileSync(
+      path.join(cwd, 'design', 'notes.json'),
+      JSON.stringify({ contractVersion: 2, notes: [], journeys: {} }),
+    )
+
+    expect(readDesignDoc(cwd, 'notes')).toEqual({
+      ok: false,
+      error: REFUSAL('design/notes.json'),
+    })
+  })
+
+  it('AC-20260918-04-2: a design/notes.json carrying contractVersion 1 is reported unreadable naming the file', () => {
+    const cwd = tmpCwd()
+    writeFileSync(
+      path.join(cwd, 'design', 'notes.json'),
+      JSON.stringify({ contractVersion: 1, notes: [], journeys: {} }),
+    )
+
+    expect(readDesignDoc(cwd, 'notes')).toEqual({
+      ok: false,
+      error: REFUSAL('design/notes.json'),
+    })
+  })
+
+  it('AC-20260918-04-4: an approval.json carrying a theme key is reported unreadable', () => {
     const cwd = tmpCwd()
     writeFileSync(
       path.join(cwd, 'design', 'approval.json'),
@@ -52,6 +104,33 @@ describe('AC-20260917-04-1: readDesignDoc(cwd, kind) — the one verdict', () =>
       ok: false,
       error: REFUSAL('design/approval.json'),
     })
+  })
+})
+
+describe('AC-20260918-04-7: no inline contractVersion literal survives under src/', () => {
+  function readAllSource(relDir: string): { file: string; content: string }[] {
+    const abs = path.join(repoRoot, relDir)
+    const entries = readdirSync(abs, { recursive: true }) as string[]
+    return entries
+      .filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'))
+      .map((f) => ({
+        file: path.posix.join(relDir, f.split(path.sep).join('/')),
+        content: readFileSync(path.join(abs, f), 'utf8'),
+      }))
+  }
+
+  it('no module under src/ declares an inline contractVersion literal outside src/schemas/', () => {
+    const files = readAllSource('src').filter((f) => !f.file.startsWith('src/schemas/'))
+    const INLINE_VERSION_RE = /contractVersion:\s*\d+/
+    const offenders = files.filter((f) => INLINE_VERSION_RE.test(f.content)).map((f) => f.file)
+    expect(offenders).toEqual([])
+  })
+
+  it('EMPTY_STATE.notes deep-equals EMPTY_NOTES and EMPTY_STATE.approval deep-equals EMPTY_APPROVAL', async () => {
+    const { EMPTY_STATE } = await import('../../src/ui/store/store.js')
+    const { EMPTY_NOTES, EMPTY_APPROVAL } = await import('../../src/schemas/index.js')
+    expect(EMPTY_STATE.notes).toEqual(EMPTY_NOTES)
+    expect(EMPTY_STATE.approval).toEqual(EMPTY_APPROVAL)
   })
 })
 
@@ -106,7 +185,7 @@ describe('AC-20260917-04-8: design/approval.json mutants — the live schema is 
   })
 
   const VALID: Record<string, unknown> = {
-    contractVersion: 2,
+    contractVersion: 3,
     screens: {
       home: {
         hash: 'abc123',
@@ -120,7 +199,6 @@ describe('AC-20260917-04-8: design/approval.json mutants — the live schema is 
     journeys: {
       'first-visit': { client: 'ok', beats: 'deadbeef0000', at: '2026-01-01T00:00:00.000Z' },
     },
-    theme: 'nova',
   }
 
   type Mutant = { label: string; raw: string; value: unknown }
@@ -128,14 +206,18 @@ describe('AC-20260917-04-8: design/approval.json mutants — the live schema is 
   function mutants(): Mutant[] {
     const list: Mutant[] = [
       { label: 'truncated JSON', raw: '{"contractVersion":', value: undefined },
-      { label: 'contractVersion: 3', raw: '', value: { ...VALID, contractVersion: 3 } },
+      // AC-20260918-04-2: contractVersion 2 (the prior contract) is UNKNOWN under the pin — a v2
+      // document is unreadable, never an empty one.
+      { label: 'contractVersion: 2', raw: '', value: { ...VALID, contractVersion: 2 } },
     ]
     for (const key of Object.keys(VALID)) {
       const clone = { ...VALID }
       delete clone[key]
       list.push({ label: `missing key ${key}`, raw: '', value: clone })
     }
-    list.push({ label: 'theme wrong-typed', raw: '', value: { ...VALID, theme: 42 } })
+    // AC-20260918-04-4: `theme` is no longer part of ApprovalSchema — a document carrying it
+    // fails the .strict() shape and is reported unreadable, not silently dropped.
+    list.push({ label: 'theme key present', raw: '', value: { ...VALID, theme: 'nova' } })
     list.push({ label: 'screens wrong-typed', raw: '', value: { ...VALID, screens: 'nope' } })
     list.push({ label: 'journeys.first-visit.beats wrong-typed', raw: '', value: { ...VALID, journeys: { 'first-visit': { ...(VALID.journeys as Record<string, unknown>)['first-visit'] as object, beats: 7 } } } })
     return list.map((m) => (m.raw ? m : { ...m, raw: JSON.stringify(m.value) }))
@@ -191,9 +273,9 @@ describe('AC-20260917-04-8: design/approval.json mutants — the live schema is 
 // not there.
 describe('the read and write paths derive from one verdict', () => {
   const CASES: { label: string; write?: string | undefined }[] = [
-    { label: 'well-formed', write: JSON.stringify({ contractVersion: 2, screens: {}, journeys: {}, theme: null }) },
+    { label: 'well-formed', write: JSON.stringify({ contractVersion: 3, screens: {}, journeys: {} }) },
     { label: 'truncated JSON', write: '{"contractVersion":' },
-    { label: 'unknown contractVersion', write: JSON.stringify({ contractVersion: 3, screens: {}, journeys: {}, theme: null }) },
+    { label: 'unknown contractVersion', write: JSON.stringify({ contractVersion: 2, screens: {}, journeys: {}, theme: null }) },
     { label: 'not an object', write: '[]' },
     { label: 'absent', write: undefined },
   ]

@@ -36,11 +36,11 @@ describe('mock-review check --json (built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
-  it('AC-20260917-01-2 (rewrites AC-20260915-01-5): reports contractVersion: 2 on the green fixture host, with screens/shells/themes content otherwise unchanged', () => {
+  it('AC-20260918-04-1 (rewrites AC-20260915-01-5): reports contractVersion: 3 on the green fixture host, with screens/shells/themes content otherwise unchanged', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-check-')
     const check = runCheck(host)
 
-    expect(check.contractVersion).toBe(2)
+    expect(check.contractVersion).toBe(3)
     expect(check.screens.map((s) => s.name).sort()).toEqual(['account', 'home'])
     expect(check.shells.map((s) => s.name)).toEqual(['ConsoleShell'])
     expect(check.themes).toEqual(['nova'])

@@ -43,22 +43,21 @@ describe('mock-review file layer (D9, built dist/)', () => {
     await ensureFixtures()
   }, 180_000)
 
-  it('AC-20260917-01-6 (rewrites AC-20260915-01-15: check creates): check --json creates design/notes.json and design/approval.json at contractVersion 2 on a scratch host with no design/ directory', () => {
+  it('AC-20260918-04-1 (rewrites AC-20260915-01-15: check creates): check --json creates design/notes.json and design/approval.json at contractVersion 3, with no theme key, on a scratch host with no design/ directory', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-files-')
     expect(existsSync(path.join(host, 'design', 'notes.json'))).toBe(false)
 
     run(host, ['check', '--json'])
 
     expect(JSON.parse(readFileSync(path.join(host, 'design', 'notes.json'), 'utf8'))).toEqual({
-      contractVersion: 2,
+      contractVersion: 3,
       notes: [],
       journeys: {},
     })
     expect(JSON.parse(readFileSync(path.join(host, 'design', 'approval.json'), 'utf8'))).toEqual({
-      contractVersion: 2,
+      contractVersion: 3,
       screens: {},
       journeys: {},
-      theme: null,
     })
   })
 

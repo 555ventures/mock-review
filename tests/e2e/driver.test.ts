@@ -101,7 +101,11 @@ describeIfPlugin('mocks-driver.js against the built binary (built .test-dist/, D
     }
   })
 
-  it('AC-20260915-01-23: seed-done, shell-drawn and journey-drawn each exit 0 and record their mark in status.json', (ctx) => {
+  // AC-20260918-04-9 (rewrites AC-20260915-01-23): once the sibling plugin spec (D9) has landed,
+  // both repos report contract 3 and contractSkew returns null — the driver completes with no
+  // contract-skew refusal at all. Until then this stays RED via ctx.skip's own skew reason, which
+  // is the expected state D9 describes for anyone with a plugin checkout between the two landings.
+  it('AC-20260918-04-9: seed-done, shell-drawn and journey-drawn each exit 0 and record their mark in status.json', (ctx) => {
     const skewReason = contractSkew(pluginContractTemplate, CONTRACT_VERSION)
     if (skewReason) ctx.skip(skewReason)
     setupScratch()
@@ -117,5 +121,39 @@ describeIfPlugin('mocks-driver.js against the built binary (built .test-dist/, D
     const journeyDrawn = runDriver(scratchRoot, ['--mark', 'journey-drawn', '--journey', 'first-visit'])
     expect(journeyDrawn.status).toBe(0)
     expect(statusJson(scratchRoot).journeys['first-visit']?.drawn).toBeTruthy()
+  }, 60_000)
+
+  // AC-20260918-04-10/D6: the driver's `client waive` path now shells out to the package's own
+  // `mock-review waive` verb instead of hand-writing design/approval.json itself — the observable
+  // is the BYTES, not who wrote them. The package's own `writeJsonAtomic` emits compact
+  // `JSON.stringify` with no `\n  ` indentation, unlike the driver's old `JSON.stringify(obj, null,
+  // 2) + '\n'`; the written document must also parse under ApprovalSchema and carry
+  // contractVersion 3.
+  it('AC-20260918-04-10: client waive leaves a compact (non-indented) design/approval.json parsing under ApprovalSchema at contractVersion 3', async (ctx) => {
+    const skewReason = contractSkew(pluginContractTemplate, CONTRACT_VERSION)
+    if (skewReason) ctx.skip(skewReason)
+    setupScratch()
+
+    const seedDone = runDriver(scratchRoot, ['--mark', 'seed-done'])
+    expect(seedDone.status).toBe(0)
+    const shellDrawn = runDriver(scratchRoot, ['--mark', 'shell-drawn'])
+    expect(shellDrawn.status).toBe(0)
+    const journeyDrawn = runDriver(scratchRoot, ['--mark', 'journey-drawn', '--journey', 'first-visit'])
+    expect(journeyDrawn.status).toBe(0)
+
+    const waiveRes = runDriver(scratchRoot, ['client', 'waive', '--journey', 'first-visit', '--reason', 'client unreachable'])
+    expect(waiveRes.status).toBe(0)
+
+    const approvalPath = path.join(appDir, 'design', 'approval.json')
+    const raw = readFileSync(approvalPath, 'utf8')
+    // The package's writeJsonAtomic never indents; the driver's retired hand-write did
+    // (`JSON.stringify(obj, null, 2) + '\n'`) — a compact document is the fingerprint of who wrote
+    // the bytes, not an inference from any header or comment.
+    expect(raw).not.toMatch(/\n {2}/)
+
+    const { ApprovalSchema } = await import('../../src/schemas/approval.js')
+    const parsed = ApprovalSchema.parse(JSON.parse(raw))
+    expect(parsed.contractVersion).toBe(3)
+    expect(parsed.journeys['first-visit']?.client).toBe('waived')
   }, 60_000)
 })

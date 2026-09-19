@@ -33,7 +33,7 @@ function note(fields: Partial<Note> & Pick<Note, 'screen' | 'status'>): Note {
 describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
   it('AC-20260917-03-15: screenTone is worst-of its notes: open beats answered', () => {
     const notes = [note({ screen: 'home', status: 'answered' }), note({ screen: 'home', status: 'open' })]
-    expect(screenTone('home', notes, { screens: {}, journeys: {}, contractVersion: 1, theme: null })).toBe('open')
+    expect(screenTone('home', notes, { screens: {}, journeys: {}, contractVersion: 3 })).toBe('open')
   })
 
   // AC-20260917-03-4 (D3): an all-approved screen is `approved`, never the old `answered`
@@ -43,13 +43,13 @@ describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
       note({ screen: 'home', status: 'approved' }),
       note({ screen: 'home', status: 'approved' }),
     ]
-    expect(screenTone('home', notes, { screens: {}, journeys: {}, contractVersion: 1, theme: null })).toBe('approved')
+    expect(screenTone('home', notes, { screens: {}, journeys: {}, contractVersion: 3 })).toBe('approved')
   })
 
   // AC-20260917-03-5 (D3): a screen with NO notes at all and no explicit approval renders no dot —
   // distinct from the all-approved case above, which the old `worst()` could not tell apart.
   it('AC-20260917-03-5: screenTone returns null for a screen with no notes and no approval.screens entry', () => {
-    expect(screenTone('home', [], { screens: {}, journeys: {}, contractVersion: 1, theme: null })).toBeNull()
+    expect(screenTone('home', [], { screens: {}, journeys: {}, contractVersion: 3 })).toBeNull()
   })
 
   it('AC-20260917-03-16: screenTone reports approved when approval.screens[name] exists', () => {
@@ -57,8 +57,7 @@ describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
     const approval = {
       screens: { home: { hash: 'x', approvedAt: 'now', states: [], viewports: [], schemes: [], screenshots: [] } },
       journeys: {},
-      contractVersion: 1 as const,
-      theme: null,
+      contractVersion: 3 as const,
     }
     expect(screenTone('home', notes, approval)).toBe('approved')
   })

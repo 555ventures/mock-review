@@ -4,6 +4,7 @@
 // `sync/api.ts` and comes back in as a fresh `ServerState` (Behavior section).
 import { useSyncExternalStore } from 'react'
 import type { ServerState } from '../../schemas/patches.js'
+import { EMPTY_APPROVAL, EMPTY_NOTES } from '../../schemas/version.js'
 import { getGuideOn, getSideTab, getView, setGuideOn, setSideTab, setView, type SideTab, type ViewMode } from '../prefs.js'
 
 export type Draft = {
@@ -50,8 +51,8 @@ const EMPTY_STATE: ServerState = {
   config: { name: null, port: null, targets: null, theme: null, client: null },
   inventory: [],
   violations: [],
-  notes: { contractVersion: 1, notes: [], journeys: {} },
-  approval: { contractVersion: 1, screens: {}, journeys: {}, theme: null },
+  notes: EMPTY_NOTES,
+  approval: EMPTY_APPROVAL,
   documents: { notes: { ok: true }, approval: { ok: true } },
   role: 'owner',
 }

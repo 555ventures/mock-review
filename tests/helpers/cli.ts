@@ -181,7 +181,7 @@ export function linkNodeModulesInto(hostDir: string): void {
  * test's otherwise-fresh scratch copy. Matched by PREFIX (not exact name, D6): a crash mid-break
  * can leave `.lock.<pid>.stale` behind (D2's rationale), and a fixture copy must exclude that too,
  * or the next test's scratch host would hang for 2s on a lock it never took out itself. */
-export const DESIGN_STATE_FILES = ['notes.json', 'approval.json', 'decisions.json', '.serve.json', '.lock'] as const
+export const DESIGN_STATE_FILES = ['notes.json', 'approval.json', '.serve.json', '.lock'] as const
 
 /** Copies a fixture host (excluding node_modules and any design/ state file a prior run may have
  * written into the source fixture) to an exact destination and builds an isolated node_modules
@@ -253,12 +253,14 @@ export function buildScratchPackage(exclude: readonly string[] = []): { dir: str
 }
 
 /** D8 of specs/20260915/03: materialises the package under `<hostDir>/node_modules/@555-ventures/mock-review/`
- * exactly as a real `npm install` would leave it post-collapse — `.test-dist/` (the CLI + plugin,
- * built by tests/setup.ts's `ensureFixtures`) as that package's own `dist/`, `src/ui/` copied in
- * verbatim (D7's `files: ["dist", "src/ui"]` — the reviewer ships as source, compiled by the host
- * at serve time, never by this repo's own build), and the package's own `package.json` (so the
- * plugin's `pkgRoot` resolution and any `require('../../package.json')`-style read find a real
- * file at the expected relative depth). `hostDir` must already have its own `node_modules` (see
+ * exactly as a real `npm install` would leave it post-collapse — this follows package.json's own
+ * `files` array (D11): `.test-dist/` (the CLI + plugin, built by tests/setup.ts's `ensureFixtures`)
+ * stands in for the published `dist/`, and every other entry in `files` (e.g. `src/ui`,
+ * `src/schemas/version.ts`) is copied verbatim from the repo root, file or directory, at the same
+ * relative path — the reviewer ships as source, compiled by the host at serve time, never by this
+ * repo's own build. The package's own `package.json` is copied too, so the plugin's `pkgRoot`
+ * resolution and any `require('../../package.json')`-style read find a real file at the expected
+ * relative depth. `hostDir` must already have its own `node_modules` (see
  * `linkNodeModulesInto`/`copyFixtureHost`) — this only adds the one scoped package into it, it
  * never builds a fresh node_modules of its own. Returns the installed `dist/cli.js` path, which a
  * browser test starts `serve` from to prove the installed layout (JSX physically under
@@ -269,7 +271,19 @@ export function installPackageInto(hostDir: string): string {
   const pkgDir = path.join(hostDir, 'node_modules', '@555-ventures', 'mock-review')
   mkdirSync(pkgDir, { recursive: true })
   cpSync(testDistDir, path.join(pkgDir, 'dist'), { recursive: true })
-  cpSync(path.join(repoRoot, 'src', 'ui'), path.join(pkgDir, 'src', 'ui'), { recursive: true })
+
+  const pkgJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+    files?: unknown
+  }
+  const files = Array.isArray(pkgJson.files) ? (pkgJson.files as unknown[]) : []
+  for (const entry of files) {
+    if (typeof entry !== 'string' || entry === 'dist') continue
+    const src = path.join(repoRoot, entry)
+    const dest = path.join(pkgDir, entry)
+    mkdirSync(path.dirname(dest), { recursive: true })
+    cpSync(src, dest, { recursive: true })
+  }
+
   cpSync(path.join(repoRoot, 'package.json'), path.join(pkgDir, 'package.json'))
   return path.join(pkgDir, 'dist', 'cli.js')
 }

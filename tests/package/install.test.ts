@@ -33,8 +33,8 @@ const MOVED_TO_DEPENDENCIES = [
 describe('package install shape (D7)', () => {
   const pkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as PackageJson
 
-  it('AC-20260915-03-8: files = ["dist", "src/ui"], build compiles the CLI/plugin only, no release:check script', () => {
-    expect(pkg.files).toEqual(['dist', 'src/ui'])
+  it('AC-20260915-03-8: files = ["dist", "src/ui", "src/schemas/version.ts"], build compiles the CLI/plugin only, no release:check script', () => {
+    expect(pkg.files).toEqual(['dist', 'src/ui', 'src/schemas/version.ts'])
     expect(pkg.scripts?.build).toBe('tsc -p tsconfig.build.json && chmod +x dist/cli.js')
     expect(pkg.scripts?.['release:check']).toBeUndefined()
   })

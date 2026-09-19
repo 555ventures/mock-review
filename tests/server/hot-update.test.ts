@@ -4,9 +4,9 @@
 // specs/20260918/03 D5) gives the mandatory `mock.config.ts` `theme: 'nova'` seed — without it
 // the fixture's own stylesheet never imports `nova.css` and nothing in this file measures
 // anything real. The theme source moved from `design/approval.json` to the host's own declared
-// config (D5); the two mid-test `design/approval.json` writes below keep a `theme` field only
-// because `ApprovalSchema` still tolerates one in the read-back document (D5's Data Model note) —
-// neither write is what makes the frame import `nova.css` any more.
+// config (D5); spec 04 D4 then removes `theme` from `ApprovalSchema` entirely, so the two mid-test
+// `design/approval.json` writes below write a bare `EMPTY_APPROVAL` with no `theme` key at all —
+// carrying one would now make the document unreadable (spec 04 D4).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -147,7 +147,7 @@ describe('AC-20260916-01-2/-3: design/** writes send nothing (or D7\'s inert .ht
     // design/approval.json likewise.
     since = frames.length
     const approvalPath = path.join(host, 'design', 'approval.json')
-    writeFileSync(`${approvalPath}.tmp`, JSON.stringify({ ...EMPTY_APPROVAL, theme: 'nova' }))
+    writeFileSync(`${approvalPath}.tmp`, JSON.stringify(EMPTY_APPROVAL))
     renameSync(`${approvalPath}.tmp`, approvalPath)
     await settle(1500)
     assertNoBroadReload(fullReloadsSince(frames, since))
@@ -209,7 +209,7 @@ describe('AC-20260916-01-2/-3: design/** writes send nothing (or D7\'s inert .ht
     await settle(2000)
 
     const approvalPath = path.join(host, 'design', 'approval.json')
-    writeFileSync(`${approvalPath}.tmp`, JSON.stringify({ ...EMPTY_APPROVAL, theme: 'nova' }))
+    writeFileSync(`${approvalPath}.tmp`, JSON.stringify(EMPTY_APPROVAL))
     renameSync(`${approvalPath}.tmp`, approvalPath)
 
     await settle(2000)

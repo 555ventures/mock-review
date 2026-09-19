@@ -192,13 +192,6 @@ export function applyApprovalPatch(approval: Approval, patch: ApprovalPatch, ctx
       return { ...approval, screens: { ...approval.screens, [patch.name]: entry } }
     }
 
-    case 'unapproveScreen': {
-      if (!(patch.name in approval.screens)) return approval
-      const nextScreens = { ...approval.screens }
-      delete nextScreens[patch.name]
-      return { ...approval, screens: nextScreens }
-    }
-
     case 'clientOk': {
       // D8: the client confirm is a fresh stamp, not a merge onto whatever the entry held before
       // (a prior v1 `{approvedAt, client}` row's `approvedAt` is intentionally dropped here —
@@ -211,6 +204,20 @@ export function applyApprovalPatch(approval: Approval, patch: ApprovalPatch, ctx
         journeys: {
           ...approval.journeys,
           [patch.id]: { ...existing, client: 'ok', beats: ctx.beatsHash(patch.id) ?? undefined, at: new Date().toISOString() },
+        },
+      }
+    }
+
+    case 'waive': {
+      // D6: the verb's fresh stamp, mirroring `clientOk` above — `{client:'waived', reason,
+      // beats, at}` only, never `approvedAt`. Per D6, no journey-existence or beats-freshness
+      // guard belongs here; the verb is the intended caller and re-derives nothing.
+      const existing = approval.journeys[patch.id]
+      return {
+        ...approval,
+        journeys: {
+          ...approval.journeys,
+          [patch.id]: { ...existing, client: 'waived', reason: patch.reason, beats: patch.beats, at: new Date().toISOString() },
         },
       }
     }

@@ -75,8 +75,9 @@ export type LookOptions = {
   config: Config
   /** The screen's full state list, used when `state` is omitted. */
   states: string[]
-  /** D22: `approval.theme`, when one is picked — folded into the frame URL as `_theme=<key>` so a
-   * capture carries the picked theme now that the frame no longer fetches `GET state` (D20). */
+  /** D22: the theme, when one is set (spec 03 D5: sourced from `check.config.theme`, not the
+   * approval document) — folded into the frame URL as `_theme=<key>` so a capture carries the
+   * picked theme now that the frame no longer fetches `GET state` (D20). */
   theme?: string
 }
 

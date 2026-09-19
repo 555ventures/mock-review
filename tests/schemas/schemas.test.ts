@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ensureFixtures, greenHost } from '../setup.js'
@@ -41,27 +41,29 @@ describe('schemas', () => {
     }
   })
 
-  it('AC-20260917-01-7 (rewrites AC-20260915-01-2: contract): tests/fixtures/contract.json itself reports contractVersion 2', () => {
-    expect(contract).toMatchObject({ contractVersion: 2 })
+  it('AC-20260918-04-1 (rewrites AC-20260915-01-2: contract): tests/fixtures/contract.json itself reports contractVersion 3', () => {
+    expect(contract).toMatchObject({ contractVersion: 3 })
   })
 
-  it('AC-20260917-01-7 (rewrites AC-20260915-01-2: contract): contract --json, check --json and sweep --json each report contractVersion 2 and satisfy tests/fixtures/contract.json required-key lists on the green fixture', () => {
+  it('AC-20260918-04-1 (rewrites AC-20260915-01-2: contract): contract --json reports contractVersion 3 and a version matching package.json, and check --json/sweep --json each report contractVersion 3 and satisfy tests/fixtures/contract.json required-key lists on the green fixture', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-schemas-')
+    const pkg = readJsonFile(path.join(testsDir, '..', 'package.json')) as { version: string }
 
-    const contractJson = JSON.parse(run(host, ['contract', '--json']).stdout) as { contractVersion: number }
-    expect(contractJson.contractVersion).toBe(2)
+    const contractJson = JSON.parse(run(host, ['contract', '--json']).stdout) as { contractVersion: number; version: string }
+    expect(contractJson.contractVersion).toBe(3)
+    expect(contractJson.version).toBe(pkg.version)
     expect(missingContractKeys(contract, 'contract', contractJson)).toEqual([])
 
     const checkJson = JSON.parse(run(host, ['check', '--json']).stdout) as { contractVersion: number }
-    expect(checkJson.contractVersion).toBe(2)
+    expect(checkJson.contractVersion).toBe(3)
     expect(missingContractKeys(contract, 'check', checkJson)).toEqual([])
 
     const sweepJson = JSON.parse(run(host, ['sweep', '--json']).stdout) as { contractVersion: number }
-    expect(sweepJson.contractVersion).toBe(2)
+    expect(sweepJson.contractVersion).toBe(3)
     expect(missingContractKeys(contract, 'sweep', sweepJson)).toEqual([])
   })
 
-  it('AC-20260915-01-2: notes.json, approval.json and decisions.json satisfy their contract shapes after answer --decision', () => {
+  it('AC-20260918-04-3: answer --decision exits 2, creates no design/decisions.json, and notes.json still satisfies its contract shape', () => {
     const host = copyFixtureHost(greenHost, 'mock-review-schemas-')
     // Ensures design/notes.json + approval.json exist (D9) before answer runs.
     run(host, ['check', '--json'])
@@ -82,14 +84,12 @@ describe('schemas', () => {
     writeFileSync(notesPath, JSON.stringify(notes))
 
     const r = run(host, ['answer', '--note', 'N1', '--text', 'use the card', '--decision', 'cards, not tables'])
-    expect(r.status).toBe(0)
+    expect(r.status).toBe(2)
+    expect(existsSync(path.join(host, 'design', 'decisions.json'))).toBe(false)
 
     expect(missingContractKeys(contract, 'notes', readJsonFile(notesPath) as Record<string, unknown>)).toEqual([])
     expect(
       missingContractKeys(contract, 'approval', readJsonFile(path.join(host, 'design', 'approval.json')) as Record<string, unknown>),
-    ).toEqual([])
-    expect(
-      missingContractKeys(contract, 'decisions', readJsonFile(path.join(host, 'design', 'decisions.json')) as Record<string, unknown>),
     ).toEqual([])
   })
 })
