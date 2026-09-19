@@ -39,7 +39,7 @@ export function ComponentsPage({ selected, from }: { selected: string | null; fr
   const inventory: ServerInventoryRow[] = data?.inventory ?? []
   const screens = data?.screens ?? []
   const violations = data?.violations ?? []
-  const theme = data?.approval.theme ?? null
+  const theme = data?.config.theme ?? null
 
   const byName = (name: string) => inventory.find((c) => c.name === name)
   const sel = selected && byName(selected) ? selected : null

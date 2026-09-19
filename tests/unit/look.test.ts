@@ -1,4 +1,4 @@
-// AC-20260915-02-17 (D22): `check --look` folds `approval.theme` into the frame URL as
+// AC-20260915-02-17 (D22): `check --look` folds the picked theme into the frame URL as
 // `_theme=<key>` (the frame no longer fetches `GET state`, D20, so a capture must carry the theme
 // itself). Exercised as a true unit test of `look()`'s own URL construction — no real browser, no
 // running serve: `resolvePlaywright` resolves `playwright` from the host root via Node's own
@@ -6,6 +6,13 @@
 // records every `goto` URL onto a process-global array is a real (if minimal) module Node
 // actually loads, not a mock swapped in over an import — `look.ts` never imports `playwright`
 // statically, by design (spec 01/02 must load with no `playwright` present at all).
+//
+// specs/20260918/03 D5: `look()`'s own `LookOptions.theme` parameter and URL-folding are
+// unchanged by this spec — only its CALLER (`src/cli/check.ts`'s `themeFor`) moves from reading
+// `design/approval.json` to `check.config.theme` (i.e. `mock.config.ts`). That source swap has no
+// File Plan row for `src/analysis/look.ts`, so this file's direct `theme: 'nova'` argument to
+// `look()` below still exercises the one thing this file owns; it is not, itself, a red test for
+// this spec.
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
-import { contractSkew, copyHostInto, linkInstalledBin, registerScratchDir, spawnWithTimeout } from '../helpers/cli.js'
+import { contractSkew, copyHostInto, linkInstalledBin, registerScratchDir, run, spawnWithTimeout } from '../helpers/cli.js'
 import { startServeIn, stopServe, type Serve } from '../helpers/serve.js'
 import { CONTRACT_VERSION } from '../../src/schemas/version.js'
 
@@ -132,18 +132,17 @@ describeIfReady('AC-20260917-02-18: mocks-driver.js reaches journey-approved the
     serve = await startServeIn(appDir)
     const page = await browser.newPage()
     try {
+      // D4 (specs/20260918/03): the page no longer offers an Approve-screen control — the session
+      // runs the verb instead, against the same host the browser is pointed at (A2: safe beside a
+      // running serve, its own cacheDir).
       for (const screen of ['home', 'account']) {
-        await page.goto(`${serve.url}/#/${screen}`, { waitUntil: 'networkidle' })
-        const approveScreenButton = page.getByRole('button', { name: 'Approve screen' })
-        await expect.poll(() => approveScreenButton.count(), SLOW_POLL).toBeGreaterThan(0)
-        await approveScreenButton.click()
-        await page.getByRole('button', { name: 'Approve', exact: true }).click()
-        await expect.poll(() => {
-          const approval = JSON.parse(readFileSync(path.join(appDir, 'design', 'approval.json'), 'utf8')) as {
-            screens: Record<string, { approvedAt: string | null }>
-          }
-          return approval.screens[screen]?.approvedAt
-        }, SLOW_POLL).not.toBeNull()
+        const approveResult = run(appDir, ['approve', '--screen', screen])
+        expect(approveResult.status).toBe(0)
+        expect(approveResult.stdout.trim()).toMatch(new RegExp(`^approved ${screen} [0-9a-f]+$`))
+        const approval = JSON.parse(readFileSync(path.join(appDir, 'design', 'approval.json'), 'utf8')) as {
+          screens: Record<string, { approvedAt: string | null }>
+        }
+        expect(approval.screens[screen]?.approvedAt).not.toBeNull()
       }
 
       // The CLIENT's own confirm — a real POST clientOk carrying the hash `GET state` served,
@@ -192,30 +191,22 @@ describeIfReady('AC-20260917-02-18: mocks-driver.js reaches journey-approved the
       }
       expect(statusJson(scratchRoot).journeys['first-visit']?.beats).toBe(approvalOnDisk.journeys['first-visit']?.beats)
 
-      // The theme pick, on `page` — which never visited a `?client=` URL and so stayed
-      // genuinely owner-role throughout (the client confirm above ran in its own, now-closed
-      // browser context) — the theme Select is owner-only. Same selector as the passing
-      // tests/browser/surfaces.test.ts:333 case, with no text fallback: a missing control must
-      // fail here, at the control, not 20s later at the approval.json poll below.
+      // D5 (specs/20260918/03): the theme pick is retired from the page entirely — there is no
+      // Select to click. The theme is whatever `mock.config.ts` declares (A1: mocks-driver.js
+      // already reads `check.config.theme` at both its THEME sites, never `approval.theme`), so
+      // the session edits the file directly — the same mechanism `--mark theme-picked` has always
+      // read from on the driver side. `page` visits `#/home` first only to prove the retired
+      // control is genuinely gone, not to reach it.
       await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
-      const themeSelect = page.getByRole('combobox', { name: /Theme/i })
-      await expect.poll(() => themeSelect.count(), SLOW_POLL).toBeGreaterThan(0)
-      await themeSelect.first().click()
-      await page.getByRole('option', { name: 'nova' }).click()
-
-      // The theme pick is a PATCH /approval round trip (client click -> POST -> write
-      // approval.json -> return); the driver's `--mark theme-picked` reads approval.json
-      // straight off disk (readApprovalRaw in mocks-driver.js) and refuses with "approval.theme
-      // is missing" if run before that write lands, so wait for it explicitly rather than racing
-      // the click against the driver invocation below.
-      await expect.poll(() => {
-        const approval = JSON.parse(readFileSync(path.join(appDir, 'design', 'approval.json'), 'utf8')) as { theme: string | null }
-        return approval.theme
-      }, SLOW_POLL).toBe('nova')
+      expect(await page.getByRole('combobox', { name: /Theme/i }).count()).toBe(0)
 
       const configPath = path.join(appDir, 'mock.config.ts')
       const config = readFileSync(configPath, 'utf8')
-      writeFileSync(configPath, config.replace('theme: null', "theme: 'nova'"))
+      const themedConfig = config.replace('theme: null', "theme: 'nova'")
+      if (themedConfig === config) {
+        throw new Error(`could not find "theme: null" in ${configPath}`)
+      }
+      writeFileSync(configPath, themedConfig)
 
       const themePicked = runDriver(scratchRoot, ['--mark', 'theme-picked'])
       expect(themePicked.status).toBe(0)

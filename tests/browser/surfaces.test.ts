@@ -417,30 +417,30 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
-  it('AC-20260915-03-10 (AC-20260915-02-15) / AC-20260915-04-11: the theme Select appears only when the host has src/themes/*.css, and picking nova applies its stylesheet', async () => {
-    serve = await startServe(greenHost)
+  // AC-20260918-03-5 (D5, rewrites AC-20260915-03-10): the theme Select is retired outright — no
+  // host, themed or not, renders one. The theme is whatever `mock.config.ts` declares; the fixture
+  // ships `theme: null` (tests/fixtures/host/mock.config.ts:11) and `src/themes/nova.css` exists,
+  // so this test edits the SCRATCH host's config to `theme: 'nova'` before `startServeIn` —
+  // anchored on the parsed literal `theme: null`, never on source text generally (pipeline rules §
+  // Gotchas / AC-20260917-02-20's citation) — and asserts the frame requests `nova.css` with no UI
+  // control ever driving that choice.
+  it('AC-20260918-03-5: no theme Select renders, and the mock frame requests the stylesheet mock.config.ts declares', async () => {
+    const host = copyFixtureHost(greenHost, 'mock-review-themed-config-')
+    const configPath = path.join(host, 'mock.config.ts')
+    const config = readFileSync(configPath, 'utf8')
+    const themedConfig = config.replace('theme: null', "theme: 'nova'")
+    if (themedConfig === config) {
+      throw new Error(`could not find "theme: null" in ${configPath}`)
+    }
+    writeFileSync(configPath, themedConfig)
+
+    serve = await startServeIn(host)
     const page = await browser.newPage()
     try {
       await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
-      const themeSelect = page.getByRole('combobox', { name: /Theme/i })
-      await expect.poll(() => themeSelect.count(), SLOW_POLL).toBeGreaterThan(0)
-      await themeSelect.first().click()
-      await page.getByRole('option', { name: 'nova' }).click()
 
-      const currentUrl = serve.url
-      await expect.poll(async () => {
-        const res = await fetch(`${currentUrl}/__mock-review/state`)
-        const state = (await res.json()) as { approval: { theme: string | null } }
-        return state.approval.theme
-      }, SLOW_POLL).toBe('nova')
+      expect(await page.getByRole('combobox', { name: /Theme/i }).count()).toBe(0)
 
-      // Picking a theme triggers a genuine iframe reload (D18e: the frame entry only reads
-      // `approval.theme` once, at script load, so it must reload to pick up the new value) —
-      // server.transformIndexHtml + the entry module's own transform (specs/20260915/03 D1: the
-      // `/@id/__x00__mock-review:entry` virtual module, not the old `/@fs/` frame entry) + the
-      // state fetch round trip take roughly 900ms-1.5s under load, and expect.poll's default
-      // ~2.5s window is sometimes too tight for that when running inside the full suite. Widen
-      // the window; the assertion itself is unchanged.
       await expect.poll(async () => {
         const hrefs = await page.locator('iframe').first().evaluate((el: HTMLIFrameElement) => {
           const doc = el.contentDocument
@@ -449,17 +449,17 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
         return hrefs.some((h: string | null) => h?.includes('themes/nova.css'))
       }, SLOW_POLL).toBe(true)
 
-      // D22: the Components page's own preview iframes (catalog/Preview.tsx) carry the picked
-      // theme too, now that the frame no longer fetches GET state. A hash-only change on an
+      // D5: the Components page's own preview iframes (catalog/Preview.tsx) carry the declared
+      // theme too — `data?.config.theme`, not `data?.approval.theme`. A hash-only change on an
       // already-loaded page is a same-document navigation, not a real page load — `page.goto`
       // with `waitUntil: 'networkidle'` here hangs for the full timeout because the app's own
       // long-lived SSE connection (`EventSource('/__mock-review/events')`, open for the page's
-      // whole lifetime) never lets the network go idle, and no new "load" ever fires for Playwright
-      // to resolve against. Driving the hash change directly (as a real in-app link click would)
-      // and polling for the result avoids relying on a navigation lifecycle event that a
-      // client-side router's hash change was never going to produce.
-      // ComponentsPage only mounts a `Preview` (and its iframe) once a component is selected
-      // (`?c=<name>`) — the bare list has none.
+      // whole lifetime) never lets the network go idle, and no new "load" ever fires for
+      // Playwright to resolve against. Driving the hash change directly (as a real in-app link
+      // click would) and polling for the result avoids relying on a navigation lifecycle event a
+      // client-side router's hash change was never going to produce. ComponentsPage only mounts a
+      // `Preview` (and its iframe) once a component is selected (`?c=<name>`) — the bare list has
+      // none.
       await page.evaluate(() => {
         location.hash = '#/components?c=WalletSummary'
       })
@@ -472,7 +472,7 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     }
   }, 60_000)
 
-  it('AC-20260915-02-15: a host with no src/themes/*.css renders no theme control', async () => {
+  it('AC-20260915-02-15 (unaffected by D5): a host with no src/themes/*.css renders no theme control', async () => {
     const host = copyFixtureHost(greenHost, 'mock-review-nothemes-')
     rmSync(path.join(host, 'src', 'themes'), { recursive: true, force: true })
     serve = await startServeIn(host)
@@ -480,6 +480,39 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
     try {
       await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
       expect(await page.getByRole('combobox', { name: /Theme/i }).count()).toBe(0)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  // AC-20260918-03-4 (D4): the owner sees no control that approves a screen anywhere on the
+  // page — neither a button whose accessible name matches /Approve screen/i, nor the status line
+  // NotesPanel's header used to render above the notes list. `home` starts with no
+  // `approval.screens` entry and no notes, exactly the state the pre-image control was reachable
+  // from (AC-20260917-03-21's own pre-image fixture) — the strongest case for the control's
+  // absence, since a screen with a note would already hide it for an unrelated reason.
+  it('AC-20260918-03-4: the reviewer page renders no Approve-screen control and no status line above the notes list', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+
+      const rightSidebar = page.locator('[data-slot="sidebar"][data-side="right"]')
+      const header = rightSidebar.locator('[data-slot="sidebar-header"]')
+      await expect.poll(() => header.count(), SLOW_POLL).toBeGreaterThan(0)
+
+      expect(await page.getByRole('button', { name: /Approve screen/i }).count()).toBe(0)
+      // The pre-image status line rendered a colour dot (span.rounded-full) directly in this
+      // header, above the notes list, independent of any sidebar screen/journey dot elsewhere on
+      // the page (those are scoped to the LEFT sidebar and are unaffected by D4).
+      expect(await header.locator('span.rounded-full').count()).toBe(0)
+
+      // Same absence on a second screen, so this isn't merely "home happens to have nothing to
+      // approve".
+      await page.goto(`${serve.url}/#/account`, { waitUntil: 'networkidle' })
+      await expect.poll(() => header.count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await page.getByRole('button', { name: /Approve screen/i }).count()).toBe(0)
     } finally {
       await page.close()
       await stop()

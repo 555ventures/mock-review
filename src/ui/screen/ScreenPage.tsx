@@ -17,7 +17,7 @@ import { useJourneyGuide, type GuideStep } from '../journeys/useJourneyGuide.js'
 import { locate, type LocateEdge } from '../journeys/locate.js'
 import { href, type Route } from '../router/route.js'
 import { screenLabel } from '../store/labels.js'
-import { journeyTone, notesHere, projectNotes, sameState, screenStates, screenTone } from '../store/selectors.js'
+import { journeyTone, notesHere, projectNotes, sameState, screenStates } from '../store/selectors.js'
 import { getStore, useStore } from '../store/store.js'
 import type { Verdict } from '../notes/notes-ui.js'
 import type { JourneyConversation } from '../../schemas/index.js'
@@ -54,9 +54,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   const states = screenRow ? screenStates(screenRow) : []
   const state = route.state && states.includes(route.state) ? route.state : (states[0] ?? 'default')
   const notes = (data?.notes.notes ?? EMPTY_NOTES) as UiNote[]
-  const approval = data?.approval ?? { contractVersion: 1 as const, screens: {}, journeys: {}, theme: null }
   const role = data?.role ?? 'owner'
-  const themes = data?.themes ?? []
   const config = data?.config
 
   const journey = route.journey ? data?.journeys.find((j) => j.id === route.journey) : undefined
@@ -259,7 +257,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     return frames.every((v) => boxesBy[v]?.[n.id] === null)
   }
 
-  const sTone = screenTone(route.screen, notes, approval)
   const journeyThread = journey ? (data?.notes.journeys[journey.id]?.thread ?? []) : []
 
   return (
@@ -292,9 +289,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
           showNotes={showNotes}
           onShowNotesChange={(v) => getStore().setUi({ showNotes: v })}
           notesOnScreenCount={here.length}
-          themes={themes}
-          currentTheme={approval.theme}
-          onThemeChange={(key) => void actions.pickTheme(key)}
           onOpenInScreens={() => getStore().setUi({ sideTab: 'screens' })}
           hasMobile={hasMobile}
         />
@@ -306,7 +300,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             h={deviceH}
             screen={route.screen}
             state={state}
-            theme={approval.theme}
+            theme={config?.theme ?? null}
             title={screenLabel(route.screen)}
             notes={notes}
             showNotes={showNotes && !journey}
@@ -354,16 +348,12 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
           </div>
         ) : (
           <NotesPanel
-            role={role}
-            screen={route.screen}
             state={state}
-            screenTone={sTone}
             here={here}
             project={project}
             selected={selected}
             onSelect={select}
             onAddNote={(target) => noteOnScreen(target)}
-            onApproveScreen={() => void actions.approveScreen(route.screen)}
             listRef={notesListRef}
           />
         ))}

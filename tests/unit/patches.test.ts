@@ -130,9 +130,14 @@ describe('AC-20260915-02-11: applyApprovalPatch', () => {
     expect(typeof entry.at).toBe('string')
   })
 
-  it('theme sets approval.theme', () => {
-    const result = applyApprovalPatch(EMPTY_APPROVAL, { op: 'theme', key: 'nova' }, ctx())
-    expect(result.theme).toBe('nova')
+  // AC-20260918-03-6 (D5): `op:'theme'` is retired from `ApprovalPatchSchema` entirely, mirroring
+  // AC-20260917-02-13's own `approveJourney` case just below — any role posting it is refused at
+  // the schema, never reaching `applyApprovalPatch` (the route-level 400 is
+  // tests/server/api.test.ts's own AC-6 case).
+  it('AC-20260918-03-6: ApprovalPatchSchema refuses a theme op outright', async () => {
+    const { ApprovalPatchSchema } = await import('../../src/schemas/patches.js')
+    const result = ApprovalPatchSchema.safeParse({ op: 'theme', key: 'nova' })
+    expect(result.success).toBe(false)
   })
 
   // AC-20260917-02-13 (D9): `approveJourney` is removed from `ApprovalPatchSchema` entirely — any

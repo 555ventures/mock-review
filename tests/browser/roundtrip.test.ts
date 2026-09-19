@@ -280,7 +280,11 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
     }
   }, 60_000)
 
-  it('AC-20260915-03-5 (AC-20260915-02-20): Approve screen writes approval.screens.home with the check --json hash, and a new note un-approves it', async () => {
+  // D4 (specs/20260918/03): the "Approve screen" button is gone from the page — the screen is now
+  // approved through the verb, `mock-review approve --screen <name>`, run against the same live
+  // host the browser is pointed at (A2: a one-shot verb is safe beside a running serve, its own
+  // cacheDir).
+  it('AC-20260915-03-5 (AC-20260915-02-20): mock-review approve --screen home writes approval.screens.home with the check --json hash, and a new note un-approves it', async () => {
     serve = await startServe(greenHost)
     const { url: serveUrl, host: serveHost } = serve
     const page = await browser.newPage()
@@ -295,10 +299,9 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
       const homeDot = homeItem.locator('span.rounded-full').first()
       const homeDotColor = () => homeDot.evaluate((el: Element) => getComputedStyle(el).backgroundColor)
 
-      const approveScreenButton = page.getByRole('button', { name: 'Approve screen' })
-      await expect.poll(() => approveScreenButton.count(), SLOW_POLL).toBeGreaterThan(0)
-      await approveScreenButton.click()
-      await page.getByRole('button', { name: 'Approve', exact: true }).click()
+      const approveResult = run(serveHost, ['approve', '--screen', 'home'])
+      expect(approveResult.status).toBe(0)
+      expect(approveResult.stdout.trim()).toMatch(/^approved home [0-9a-f]+$/)
 
       const checkOut = run(serveHost, ['check', '--json'])
       const check = JSON.parse(checkOut.stdout) as { screens: Array<{ name: string; hash: string }> }
@@ -514,15 +517,14 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
     }
   }, 60_000)
 
-  // AC-20260917-03-21 (D11): under D3 a fresh screen (no notes, no approval.screens entry) has
-  // tone `null`, not `'answered'` — D5's amended clause hands that header off to D11, which keeps
-  // the "Approve screen" control reachable at `null` (no dot to paint, but the approve control
-  // still shows, since approving is the only way such a screen turns blue). AC-20260915-03-5 is
-  // the pre-existing approve-a-fresh-screen flow test in this same file and is left untouched —
-  // it is failing for this same reason and is the ui worker's to fix, not this test's.
-  it('AC-20260917-03-21: a screen with no notes and no approval.screens entry shows Approve screen with no status dot, and clicking it writes approval.screens', async () => {
+  // AC-20260917-03-21 (D11, rewritten by specs/20260918/03 D4): under D3 a fresh screen (no
+  // notes, no approval.screens entry) has tone `null`, not `'answered'` — the notes panel header
+  // shows no status dot either way (D4 collapsed it to the group heading and count; there was
+  // never a per-screen dot IN the panel to begin with, only the left sidebar's, checked
+  // elsewhere). Approving now happens through the verb, not a page control.
+  it('AC-20260917-03-21: a screen with no notes and no approval.screens entry shows no status dot in its panel header, and mock-review approve --screen writes approval.screens', async () => {
     serve = await startServe(greenHost)
-    const { url: serveUrl } = serve
+    const { url: serveUrl, host: serveHost } = serve
     const page = await browser.newPage()
     try {
       await page.goto(`${serveUrl}/#/home`, { waitUntil: 'networkidle' })
@@ -535,11 +537,10 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-18/-19/-20: ra
       await expect.poll(() => header.count(), SLOW_POLL).toBeGreaterThan(0)
 
       expect(await header.locator('span.rounded-full').count()).toBe(0)
-      const approveScreenButton = header.getByRole('button', { name: 'Approve screen' })
-      await expect.poll(() => approveScreenButton.count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await header.getByRole('button', { name: /Approve screen/i }).count()).toBe(0)
 
-      await approveScreenButton.click()
-      await page.getByRole('button', { name: 'Approve', exact: true }).click()
+      const approveResult = run(serveHost, ['approve', '--screen', 'home'])
+      expect(approveResult.status).toBe(0)
 
       await expect.poll(async () => {
         const res = await fetch(`${serveUrl}/__mock-review/state`)

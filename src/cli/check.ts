@@ -3,23 +3,17 @@
 import { runCheck } from '../analysis/check.js'
 import { serveUrl } from '../analysis/liveness.js'
 import { look } from '../analysis/look.js'
-import { readDesignDoc } from '../files/json.js'
-import type { Approval, Check, Config } from '../schemas/index.js'
+import type { Check, Config } from '../schemas/index.js'
 import { ServerStateSchema } from '../schemas/patches.js'
 import { fail, writeFlushed } from './io.js'
 
-/** D5/D23: `--theme` for `check --look`'s frame captures — `approval.theme` when
- * `readDesignDoc` reports the file readable and a theme is picked, `undefined` otherwise. This
- * silent fallback is DELIBERATE, unlike `sweep`/`answer`'s refusal: a screenshot capture must
- * never fail just because `design/approval.json` is unpicked or unreadable — it derives from the
- * one verdict (`readDesignDoc`) but keeps its own permissive policy on top of it. */
-function themeFor(cwd: string): string | undefined {
-  const result = readDesignDoc(cwd, 'approval')
-  if (!result.ok) return undefined
-  // `readDesignDoc`'s return type is keyed on the runtime `kind` argument, not narrowed by it —
-  // the cast is safe because `kind: 'approval'` above guarantees `doc` is an `Approval`.
-  const approval = result.doc as Approval
-  return approval.theme ?? undefined
+/** D5: `--theme` for `check --look`'s frame captures now reads the host's own declared theme
+ * (`check.config.theme`) instead of `approval.theme` — the page pick this spec retires never had
+ * a plugin reader, while `mocks-driver.js` reads `check.config.theme` at both its THEME sites
+ * (A1). The deliberate `undefined` fallback stays: a screenshot capture must never fail just
+ * because the host declares no theme. */
+function themeFor(check: Check): string | undefined {
+  return check.config.theme ?? undefined
 }
 
 /** D21/review-2: when `--state` is omitted, `--look` must capture every state using the same
@@ -77,7 +71,7 @@ export async function checkVerb(
       fail('--look needs a valid mock.config.ts')
     }
     const resolvedConfig: Config = config
-    const theme = themeFor(cwd)
+    const theme = themeFor(check)
 
     const paths = await look({
       root: cwd,

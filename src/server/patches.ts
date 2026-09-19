@@ -214,9 +214,5 @@ export function applyApprovalPatch(approval: Approval, patch: ApprovalPatch, ctx
         },
       }
     }
-
-    case 'theme': {
-      return { ...approval, theme: patch.key }
-    }
   }
 }

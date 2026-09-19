@@ -165,10 +165,13 @@ describe('AC-20260917-04-8: design/approval.json mutants — the live schema is 
         // under D4's `.default(null)`), never a hand-written expectation naming that field.
         expect(state.approval).toEqual(ApprovalSchema.parse(mutant.value))
       } else {
+        // D5: `op:'theme'` is retired from the wire — a surviving op (`approveScreen`) is what
+        // exercises this mutant probe now; the corrupted document refuses at the read, before the
+        // reducer ever sees which op it was asked to apply.
         const postRes = await fetch(`${serve.url}/__mock-review/approval`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ op: 'theme', key: 'classic' }),
+          body: JSON.stringify({ op: 'approveScreen', name: 'home' }),
         })
         expect(postRes.status).toBe(409)
         const body = (await postRes.json()) as { error: string }

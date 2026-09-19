@@ -126,26 +126,12 @@ export function useNoteActions() {
     }, undefined)
   }, [])
 
-  const approveScreen = useCallback(async (name: string): Promise<void> => {
-    await run(async () => {
-      await patchApproval({ op: 'approveScreen', name })
-      await refresh()
-    }, undefined)
-  }, [])
-
   // D7: the confirm is If-Match on the story hash — `beats` is the hash the page was served
   // (`ServerJourney.beats`), echoed back verbatim so the server can tell a stale page from a
   // fresh one.
   const clientOk = useCallback(async (id: string, beats: string): Promise<void> => {
     await run(async () => {
       await patchApproval({ op: 'clientOk', id, beats })
-      await refresh()
-    }, undefined)
-  }, [])
-
-  const pickTheme = useCallback(async (key: string): Promise<void> => {
-    await run(async () => {
-      await patchApproval({ op: 'theme', key })
       await refresh()
     }, undefined)
   }, [])
@@ -159,8 +145,6 @@ export function useNoteActions() {
     reanchorNote,
     replyJourney,
     approveJourney,
-    approveScreen,
     clientOk,
-    pickTheme,
   }
 }

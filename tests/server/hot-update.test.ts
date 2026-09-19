@@ -1,10 +1,14 @@
 // AC-20260916-01-2, AC-20260916-01-3 (D8 of specs/20260916/01): a Vite dev server built the same
 // way `serve.ts` builds one, on a scratch copy of `tests/fixtures/host`, with a raw `vite-hmr`
-// WebSocket counting `full-reload` frames. D8 gives the exact config; A8 gives the mandatory
-// `approval.theme: "nova"` seed — without it the fixture's own stylesheet never imports
-// `nova.css` and nothing in this file measures anything real.
+// WebSocket counting `full-reload` frames. D8 gives the exact config; A8 (amended by
+// specs/20260918/03 D5) gives the mandatory `mock.config.ts` `theme: 'nova'` seed — without it
+// the fixture's own stylesheet never imports `nova.css` and nothing in this file measures
+// anything real. The theme source moved from `design/approval.json` to the host's own declared
+// config (D5); the two mid-test `design/approval.json` writes below keep a `theme` field only
+// because `ApprovalSchema` still tolerates one in the read-back document (D5's Data Model note) —
+// neither write is what makes the frame import `nova.css` any more.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createServer, type ViteDevServer } from 'vite'
 import { ensureFixtures, greenHost } from '../setup.js'
@@ -73,11 +77,21 @@ describe('AC-20260916-01-2/-3: design/** writes send nothing (or D7\'s inert .ht
     await ensureFixtures()
     host = copyFixtureHost(greenHost, 'hot-update-')
 
-    // Preconditions (AC-2): every design file present before the server starts, approval seeded
-    // with theme "nova" (A8) or nothing below is ever measured.
+    // Preconditions (AC-2): every design file present before the server starts, and (D5) the
+    // host's own mock.config.ts declares theme: 'nova' — the frame's theme source now, not
+    // approval.json — or nothing below is ever measured. Anchored on the parsed literal
+    // `theme: null` the fixture ships (tests/fixtures/host/mock.config.ts:11), never on source
+    // text generally (pipeline rules § Gotchas).
     mkdirSync(path.join(host, 'design'), { recursive: true })
     writeFileSync(path.join(host, 'design', 'notes.json'), JSON.stringify(EMPTY_NOTES))
-    writeFileSync(path.join(host, 'design', 'approval.json'), JSON.stringify({ ...EMPTY_APPROVAL, theme: 'nova' }))
+    writeFileSync(path.join(host, 'design', 'approval.json'), JSON.stringify(EMPTY_APPROVAL))
+    const configPath = path.join(host, 'mock.config.ts')
+    const config = readFileSync(configPath, 'utf8')
+    const themedConfig = config.replace('theme: null', "theme: 'nova'")
+    if (themedConfig === config) {
+      throw new Error(`could not find "theme: null" in ${configPath}`)
+    }
+    writeFileSync(configPath, themedConfig)
     mkdirSync(path.join(host, 'design', 'mocks'), { recursive: true })
     writeFileSync(path.join(host, 'design', 'mocks', 'status.json'), JSON.stringify({ ok: true }))
     mkdirSync(path.join(host, 'design', 'shell'), { recursive: true })

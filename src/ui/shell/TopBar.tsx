@@ -1,4 +1,4 @@
-// Reference §2: screen-mode top bar. D10: the theme Select, gated on the host having themes.
+// Reference §2: screen-mode top bar.
 import { ChevronDown, Columns2, Monitor, PanelRight, Smartphone, SquareDashedMousePointer } from 'lucide-react'
 import { Kbd } from '../components/ui/kbd.js'
 import { Badge } from '../components/ui/badge.js'
@@ -18,7 +18,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu.js'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select.js'
 import { Separator } from '../components/ui/separator.js'
 import { SidebarTrigger } from '../components/ui/sidebar.js'
 import { Toggle } from '../components/ui/toggle.js'
@@ -51,9 +50,6 @@ export function TopBar({
   showNotes,
   onShowNotesChange,
   notesOnScreenCount,
-  themes,
-  currentTheme,
-  onThemeChange,
   onOpenInScreens,
   hasMobile,
 }: {
@@ -71,9 +67,6 @@ export function TopBar({
   showNotes: boolean
   onShowNotesChange: (v: boolean) => void
   notesOnScreenCount: number
-  themes: string[]
-  currentTheme: string | null
-  onThemeChange: (key: string) => void
   onOpenInScreens: () => void
 }) {
   return (
@@ -138,20 +131,6 @@ export function TopBar({
         </Breadcrumb>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        {themes.length > 0 && (
-          <Select {...(currentTheme ? { value: currentTheme } : {})} onValueChange={onThemeChange}>
-            <SelectTrigger size="sm" aria-label="Theme">
-              <SelectValue placeholder="Theme" />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              {themes.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
         <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={view} onValueChange={(v) => v && onViewChange(v as ViewMode)}>
           <Tooltip>
             <TooltipTrigger asChild>

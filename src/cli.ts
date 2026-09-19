@@ -52,6 +52,13 @@ async function main(argv: string[]): Promise<number> {
       return 0
     }
 
+    case 'approve': {
+      const { approveVerb } = await import('./cli/approve.js')
+      const result = await approveVerb(cwd, { screen: values.screen })
+      await writeFlushed(process.stdout, result + '\n')
+      return 0
+    }
+
     case 'serve': {
       const { serveVerb } = await import('./cli/serve.js')
       // Never resolves during normal operation; the process exits from within `startServe`'s own

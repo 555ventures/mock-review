@@ -1,20 +1,22 @@
 // AC-20260916-01-4, AC-20260916-01-5 [env: SKIP_BROWSER]: a design write (a note add) must never
 // reload the reviewer document, in `mock-review serve` (AC-4) and in a host embedding
 // `mockReview()` in its own vite.config.ts (AC-5) alike; AC-5 additionally proves a host src/**
-// edit still reloads the frame document alone in that embedded mount (D3). A8: every scratch
-// host's design/approval.json is seeded with theme "nova" before its server starts, or the
-// Tailwind reload this spec fixes never even fires (the fixture's default CSS never links a
-// themed stylesheet without it) and these tests would measure nothing. Playwright is imported
-// dynamically inside this skipIf-gated describe (see tests/browser/surfaces.test.ts's header note
-// on why SKIP_BROWSER=1 still lets this file collect).
+// edit still reloads the frame document alone in that embedded mount (D3). A8 (amended by
+// specs/20260918/03 D5): every scratch host's `mock.config.ts` is seeded with `theme: 'nova'`
+// before its server starts, or the Tailwind reload this spec fixes never even fires (the
+// fixture's default CSS never links a themed stylesheet without it) and these tests would
+// measure nothing — the theme source moved from `design/approval.json` (D9) to the host's own
+// declared config (D5), and every reader (including the frame) now follows that one value.
+// Playwright is imported dynamically inside this skipIf-gated describe (see
+// tests/browser/surfaces.test.ts's header note on why SKIP_BROWSER=1 still lets this file
+// collect).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { ensureFixtures, greenHost } from '../setup.js'
 import { copyFixtureHost, installPackageInto, removeScratchDir } from '../helpers/cli.js'
 import { startServeIn, stopServe, type Serve } from '../helpers/serve.js'
-import { EMPTY_APPROVAL } from '../../src/schemas/index.js'
 
 it.skipIf(process.env.SKIP_BROWSER !== '1')(
   '[env: SKIP_BROWSER] this file\'s browser assertions were NOT run: SKIP_BROWSER=1 skipped them all',
@@ -37,10 +39,19 @@ const NOTE_PATCH = {
   },
 }
 
-/** Seeds `design/approval.json` with `theme: "nova"` (A8) before a server ever starts on `host`. */
+/** D5: seeds `mock.config.ts`'s declared `theme: 'nova'` (A8) before a server ever starts on
+ * `host` — the frame, the reviewer page and the screenshot capture all read `config.theme` now,
+ * never `design/approval.json`. Anchored on the parsed literal `theme: null` the fixture ships
+ * (tests/fixtures/host/mock.config.ts:11), not on source text generally (pipeline rules §
+ * Gotchas / AC-20260917-02-20's citation). */
 function seedNovaTheme(host: string): void {
-  mkdirSync(path.join(host, 'design'), { recursive: true })
-  writeFileSync(path.join(host, 'design', 'approval.json'), JSON.stringify({ ...EMPTY_APPROVAL, theme: 'nova' }))
+  const configPath = path.join(host, 'mock.config.ts')
+  const config = readFileSync(configPath, 'utf8')
+  const themed = config.replace('theme: null', "theme: 'nova'")
+  if (themed === config) {
+    throw new Error(`seedNovaTheme: could not find "theme: null" in ${configPath}`)
+  }
+  writeFileSync(configPath, themed)
 }
 
 /** Plants a marker on `window` that only survives while the document itself is never reloaded (a

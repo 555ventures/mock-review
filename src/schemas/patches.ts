@@ -128,12 +128,6 @@ export const ApprovalPatchSchema = z.discriminatedUnion('op', [
       beats: z.string(),
     })
     .strict(),
-  z
-    .object({
-      op: z.literal('theme'),
-      key: z.string(),
-    })
-    .strict(),
 ])
 
 export type ApprovalPatch = z.infer<typeof ApprovalPatchSchema>

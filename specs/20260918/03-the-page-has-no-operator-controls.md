@@ -1,6 +1,6 @@
 ---
 date: 2026-09-18
-status: hardened
+status: done
 tier: critical
 area: cli
 design: false
@@ -9,7 +9,9 @@ depends_on: [specs/20260918/02-one-reply-and-the-page-ends-a-note.md]
 depended_on_by: [specs/20260918/04-contract-v3.md]
 brief: n/a
 spiked: 2026-09-18
+build_base: main
 open_markers: 0
+diff_base: d1c7e1717bd4691d9152c913613f78927b073bfa
 ---
 
 # The page has no operator controls
@@ -57,6 +59,7 @@ nothing about the two documents' shape changes.
 | src/ui/shell/TopBar.tsx | MODIFY | ui | D5: the theme `Select` and its `themes`/`currentTheme`/`onThemeChange` props deleted |
 | src/ui/catalog/ComponentsPage.tsx | MODIFY | ui | D5: `theme` reads `data?.config.theme` |
 | docs/design/design-reference.md | MODIFY | other | D6: Amendments entry for the two removed controls |
+| README.md | MODIFY | other | D6: the serve paragraph drops "approve screens/journeys/theme" and names `mock-review approve --screen` and mock.config.ts as the theme source |
 | tests/cli/approve.test.ts | CREATE | tests | AC-20260918-03-1, AC-20260918-03-2, AC-20260918-03-3 |
 | tests/server/api.test.ts | MODIFY | tests | AC-20260918-03-6; also the three other tests that POST `op:'theme'` as an unrelated step (`AC-20260917-02-11`, the review-pass-3 unparseable case, and `AC-20260917-01-12`'s migration pair) switch to a surviving op |
 | tests/browser/surfaces.test.ts | MODIFY | tests | AC-20260918-03-4, AC-20260918-03-5 |
@@ -202,6 +205,17 @@ button by name, and a design-reference consistency test asserts the control is d
 files are now File Plan rows and **fixed, not waived**. What genuinely survives untouched is the
 `approveScreen` wire op itself and the server tests that exercise it directly, which D4 keeps on
 purpose because the new verb's reducer call uses it.
+
+**Build deviations (2026-09-18, folded at review close).** The check-failure refusal has no exact
+sentence in the spec, so its test asserts only that stderr contains the first error finding's own
+message. `tests/unit/look.test.ts` gained only a comment: it tests `look()`'s URL folding, which D5's
+`themeFor` change does not reach. `tests/unit/design-reference.test.ts` was left untouched: its row
+was a collision note with spec 02, and its generic dated-entry assertion already holds. D4's "header
+collapses to the group heading and count" was read as keeping `SidebarHeader`: the pre-authored
+browser tests assert a right-sidebar header on screens with no notes, so the THIS SCREEN heading,
+count and `+ Note` now sit in an always-rendered sidebar header, outside the scrolling list, while
+PROJECT keeps its sticky in-panel header. The design-reference amendment names the controls but not
+this position change.
 
 ## Canonical Delta
 

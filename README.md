@@ -47,8 +47,10 @@ design/examples/          # never read by this package
 
 `npx mock-review serve` starts the host's own Vite dev server with the package's Vite plugin
 mounted, and prints its URL. Open it to browse screens, shells and journeys, draw notes, and
-approve screens/journeys/theme. The reviewer ships as source (`src/ui/`) and compiles through the
-host's own Vite pipeline (`@vitejs/plugin-react`, `@tailwindcss/vite`) — there is no prebuilt page.
+approve journeys. The page has no screen-approve or theme control: `mock-review approve --screen
+<name>` records a screen's approval, and the theme is whatever `mock.config.ts` declares. The
+reviewer ships as source (`src/ui/`) and compiles through the host's own Vite pipeline
+(`@vitejs/plugin-react`, `@tailwindcss/vite`) — there is no prebuilt page.
 
 Add `?client=<token>` (matching `mock.config.ts`'s `client.token`) to open the page in the
 **client role**: Search, Components and every Delete/Reject/Approve control are hidden, and each

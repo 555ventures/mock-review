@@ -2,6 +2,21 @@
 
 ## Amendments
 
+### 2026-09-18 — specs/20260918/03-the-page-has-no-operator-controls.md
+
+"The page has no operator controls" removes the two operator-only controls ADR-0029 rules were
+never supposed to be on the page: the notes panel's **Approve-screen header** — its `StatusLine`
+(status dot, title, "Approve screen" button and confirm dialog, §5, §13 rule 33) — and the top
+bar's **theme `Select`** (§0.3, §2). Neither surface described below is current; both are retired
+surfaces now, kept in this document only as history. The notes panel's right-sidebar header
+collapses to the group heading, its count and the `+ Note` button (§5's "Two resizable groups"
+table and "Group header" passage still describe that part correctly). The theme is no longer picked
+on the page at all — it is whatever the host's `mock.config.ts` declares, read by the reviewer
+frames and the components catalog alike (§0.3's "Light only" passage is superseded: a host with
+themes now renders whichever one its config names, with no page control to change it). Approval is
+now written by `mock-review approve --screen <name>`, run from the CLI rather than clicked on the
+page; the underlying `op:'approveScreen'` record shape is unchanged.
+
 ### 2026-09-18 — specs/20260918/02-one-reply-and-the-page-ends-a-note.md
 
 "One reply, and the page ends a note" gives a note a fourth pin tone and gives both roles the

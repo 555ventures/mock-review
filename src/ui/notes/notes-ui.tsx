@@ -1,7 +1,7 @@
 // Reference §4 TONE table + the note UI kit: stock shadcn parts (Badge, Item, Button, Textarea,
 // AlertDialog) with default styling. The only custom styling is the status color, which shadcn
 // has no variant for.
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { Badge } from '../components/ui/badge.js'
 import { Button } from '../components/ui/button.js'
 import { Separator } from '../components/ui/separator.js'
@@ -34,58 +34,6 @@ export const TONE: Record<PinTone, { box: string; pin: string }> = {
 
 export function StatusDot({ tone }: { tone: Exclude<PinTone, 'draft'> }) {
   return <span className={`size-2 shrink-0 rounded-full ${TONE[tone].pin}`} />
-}
-
-/** Dot + title (+ approve button and its confirmation while yellow, or while untouched — D11) —
- * one status line for journey and screen mode. `tone: null` (D11) means the screen carries no
- * notes at all: no dot to paint (D5's no-grey-circle rule), but the approve control still shows,
- * since approving is the only way such a screen turns blue. */
-export function StatusLine({
-  tone,
-  title,
-  approveLabel,
-  description,
-  onApprove,
-}: {
-  tone: Exclude<PinTone, 'draft'> | null
-  title: string
-  approveLabel: string
-  description: string
-  onApprove: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <div className="flex min-h-8 items-center gap-2">
-        {tone && <StatusDot tone={tone} />}
-        <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
-        {(tone === 'answered' || tone === null) && (
-          <Button size="sm" onClick={() => setOpen(true)}>
-            {approveLabel}
-          </Button>
-        )}
-      </div>
-      <AlertDialog open={open} onOpenChange={setOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Approve {title}?</AlertDialogTitle>
-            <AlertDialogDescription>{description}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                onApprove()
-                setOpen(false)
-              }}
-            >
-              Approve
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  )
 }
 
 export function NotePin({ tone, children, floating }: { tone: PinTone; children: ReactNode; floating?: boolean }) {
