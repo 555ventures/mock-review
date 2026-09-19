@@ -37,6 +37,10 @@ function unapproveScreen(approval, name) {
  * D6/D16: `applyNotesPatch(notes, patch, approval = EMPTY_APPROVAL)` -> `{ notes, approval }`.
  * `approval` is read (never required) so rule 6 can un-approve a screen in the same call; a
  * caller with no approval document yet (e.g. a pure unit test) may omit it.
+ *
+ * D2/Contracts: `patch` is `AppliedNotesPatch`, not the wire `NotesPatch` — the HTTP boundary
+ * (`plugin.ts`) rewrites a client's `reply.entry.by` to `'client'`, a value the wire enum does
+ * not admit, before calling this reducer. Only the route layer parses the narrow wire type.
  */
 export function applyNotesPatch(notes, patch, approval = EMPTY_APPROVAL) {
     switch (patch.op) {
@@ -84,16 +88,30 @@ export function applyNotesPatch(notes, patch, approval = EMPTY_APPROVAL) {
             const nextNotes = { ...notes, notes: notes.notes.filter((n) => n.id !== patch.id) };
             return { notes: nextNotes, approval };
         }
-        case 'journey': {
-            const existing = notes.journeys[patch.id] ?? { status: 'open', thread: [] };
-            let status = patch.status ?? existing.status;
-            let thread = existing.thread;
-            // D7 rule 7: any reply (an `entry`) reopens the journey's conversation regardless of any
-            // `status` the caller also passed.
-            if (patch.entry) {
-                thread = [...thread, patch.entry];
-                status = 'open';
+        case 'reply': {
+            // D1: `id` resolves note-first, exactly as `close` does — the route layer (`plugin.ts`)
+            // has already confirmed the id names a real note or a real journey (seeding a default
+            // `{status:'open', thread:[]}` conversation when it was a journey with none yet) before
+            // this reducer ever runs, so both branches below are total over what actually reaches them.
+            // D1/D7 rule 6/7: attribution alone decides the resulting status, from ANY current status —
+            // a session reply answers, anyone else's reply reopens.
+            const status = patch.entry.by === 'session' ? 'answered' : 'open';
+            const idx = notes.notes.findIndex((n) => n.id === patch.id);
+            if (idx !== -1) {
+                const existing = notes.notes[idx];
+                if (!existing)
+                    return { notes, approval };
+                const updated = { ...existing, thread: [...existing.thread, patch.entry], status };
+                const nextArr = notes.notes.slice();
+                nextArr[idx] = updated;
+                const nextNotes = { ...notes, notes: nextArr };
+                // D7 rule 6: a NOTE reply whose resulting status is `open` un-approves that note's screen.
+                // Journey replies never touch approval (below).
+                const nextApproval = status === 'open' && updated.screen !== null ? unapproveScreen(approval, updated.screen) : approval;
+                return { notes: nextNotes, approval: nextApproval };
             }
+            const existingJourney = notes.journeys[patch.id] ?? { status: 'open', thread: [] };
+            const thread = [...existingJourney.thread, patch.entry];
             const nextNotes = { ...notes, journeys: { ...notes.journeys, [patch.id]: { status, thread } } };
             return { notes: nextNotes, approval };
         }
@@ -140,13 +158,6 @@ export function applyApprovalPatch(approval, patch, ctx) {
             };
             return { ...approval, screens: { ...approval.screens, [patch.name]: entry } };
         }
-        case 'unapproveScreen': {
-            if (!(patch.name in approval.screens))
-                return approval;
-            const nextScreens = { ...approval.screens };
-            delete nextScreens[patch.name];
-            return { ...approval, screens: nextScreens };
-        }
         case 'clientOk': {
             // D8: the client confirm is a fresh stamp, not a merge onto whatever the entry held before
             // (a prior v1 `{approvedAt, client}` row's `approvedAt` is intentionally dropped here —
@@ -162,8 +173,18 @@ export function applyApprovalPatch(approval, patch, ctx) {
                 },
             };
         }
-        case 'theme': {
-            return { ...approval, theme: patch.key };
+        case 'waive': {
+            // D6: the verb's fresh stamp, mirroring `clientOk` above — `{client:'waived', reason,
+            // beats, at}` only, never `approvedAt`. Per D6, no journey-existence or beats-freshness
+            // guard belongs here; the verb is the intended caller and re-derives nothing.
+            const existing = approval.journeys[patch.id];
+            return {
+                ...approval,
+                journeys: {
+                    ...approval.journeys,
+                    [patch.id]: { ...existing, client: 'waived', reason: patch.reason, beats: patch.beats, at: new Date().toISOString() },
+                },
+            };
         }
     }
 }

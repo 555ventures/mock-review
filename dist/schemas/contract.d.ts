@@ -1,7 +1,7 @@
 import { z } from 'zod';
 /** D1: `contract --json`'s shape. Never touches the host filesystem. */
 export declare const ContractSchema: z.ZodObject<{
-    contractVersion: z.ZodLiteral<2>;
+    contractVersion: z.ZodLiteral<3>;
     package: z.ZodString;
     version: z.ZodString;
 }, z.core.$strict>;

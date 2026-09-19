@@ -15,10 +15,10 @@ export declare const FindingSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     message: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
     kind: z.ZodEnum<{
-        size: "size";
-        twin: "twin";
         states: "states";
         beats: "beats";
+        size: "size";
+        twin: "twin";
     }>;
     severity: z.ZodLiteral<"warn">;
     file: z.ZodString;
@@ -100,7 +100,7 @@ export type ServeStatus = z.infer<typeof ServeStatusSchema>;
 /** D1/D5-D8: the full `check --json` shape. `config` is either the validated host config or the
  * all-null placeholder (D6). */
 export declare const CheckSchema: z.ZodObject<{
-    contractVersion: z.ZodLiteral<2>;
+    contractVersion: z.ZodLiteral<3>;
     ok: z.ZodBoolean;
     findings: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodEnum<{
@@ -115,10 +115,10 @@ export declare const CheckSchema: z.ZodObject<{
         message: z.ZodString;
     }, z.core.$strict>, z.ZodObject<{
         kind: z.ZodEnum<{
-            size: "size";
-            twin: "twin";
             states: "states";
             beats: "beats";
+            size: "size";
+            twin: "twin";
         }>;
         severity: z.ZodLiteral<"warn">;
         file: z.ZodString;

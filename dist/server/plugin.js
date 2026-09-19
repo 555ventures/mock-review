@@ -1,7 +1,7 @@
-import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureDesignFiles, readDesignDocOrThrow, UnparseableDesignFileError, writeJsonAtomic } from '../files/json.js';
+import { DesignLockedError, ensureDesignFiles, readDesignDocOrThrow, UnparseableDesignFileError, withDesignLock, writeJsonAtomic, } from '../files/json.js';
+import { screenshotsFor } from '../files/screenshots.js';
 import { runnerOf } from '../analysis/vite-runner.js';
 import { loadConfig, NULL_CONFIG } from '../analysis/config.js';
 import { discoverHost } from '../analysis/discover.js';
@@ -140,22 +140,6 @@ async function configFor(cwd, runner) {
 function getRunner(server, viteVersion) {
     return runnerOf(server.environments.ssr, { root: server.config.root, viteVersion });
 }
-function escapeRegExp(value) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-/** D23: matches `^<name>-<state>-<WxH>-<scheme>\.png$` exactly — a plain `startsWith(name + '-')`
- * also matched a sibling screen whose name shares `name` as a prefix (e.g. `home` matching
- * `home-detail-...png`). */
-function screenshotsFor(cwd, name) {
-    const dir = path.join(cwd, 'design', 'screenshots');
-    if (!existsSync(dir))
-        return [];
-    const pattern = new RegExp(`^${escapeRegExp(name)}-[^-]+-\\d+x\\d+-[^-]+\\.png$`);
-    return readdirSync(dir)
-        .filter((f) => pattern.test(f))
-        .sort()
-        .map((f) => path.posix.join('design', 'screenshots', f));
-}
 function ctxFromState(cwd, state) {
     return {
         hash: (name) => state.screens.find((s) => s.name === name)?.hash ?? '',
@@ -168,21 +152,23 @@ function ctxFromState(cwd, state) {
 function forceClientThread(thread) {
     return thread.map((entry) => ({ ...entry, by: 'client' }));
 }
-/** D6/D11: op-level admission for a client-role request, decided with no document access — an op
- * a client may never issue (`update`, `remove`, a bare `journey` with no `entry`) is 403
- * regardless of whether the target id exists, so a never-permitted op can never be used to probe
- * existence. Checked BEFORE the 404 pre-check, restoring the original op-then-404 ordering.
- * `add` and `journey` (with an `entry`) are transformed here (thread entries forced to `client`);
- * `close` is admitted at this stage unconditionally — its per-target ownership gate needs the
- * current document and runs later, inside the write lock, AFTER the 404 pre-check
- * (`clientOwnsCloseTarget` below): D11's 404-before-403 governs THAT gate specifically, not
- * op-level admission. Returns `null` when the op itself is never allowed for a client. */
+/** D2/D6/D11: op-level admission for a client-role request, decided with no document access — an
+ * op a client may never issue (`update`, `remove`) is 403 regardless of whether the target id
+ * exists, so a never-permitted op can never be used to probe existence. Checked BEFORE the 404
+ * pre-check, restoring the original op-then-404 ordering. `add` and `reply` are transformed here
+ * (thread entries forced to `by: 'client'` — the wire enum never admits `'client'` itself, so no
+ * request can forge this attribution); `close` is admitted at this stage unconditionally — its
+ * per-target ownership gate needs the current document and runs later, inside the write lock,
+ * AFTER the 404 pre-check (`clientOwnsCloseTarget` below): D11's 404-before-403 governs THAT gate
+ * specifically, not op-level admission. Returns `null` when the op itself is never allowed for a
+ * client. Returns `AppliedNotesPatch`, not `NotesPatch` — the widened type `by: 'client'` needs to
+ * land in (D2/Contracts). */
 function clientNotesOpPatch(patch) {
     if (patch.op === 'add') {
         return { ...patch, note: { ...patch.note, thread: forceClientThread(patch.note.thread) } };
     }
-    if (patch.op === 'journey') {
-        return patch.entry ? { ...patch, entry: { ...patch.entry, by: 'client' } } : null;
+    if (patch.op === 'reply') {
+        return { ...patch, entry: { ...patch.entry, by: 'client' } };
     }
     if (patch.op === 'close')
         return patch;
@@ -209,6 +195,12 @@ function clientApprovalPatch(patch) {
  * (the textbook use of 409), and 400 would wrongly suggest the client sent something bad. */
 function sendUnparseable(res, err) {
     sendJson(res, 409, { error: err.message });
+}
+/** D4: `withDesignLock` refused to acquire `design/.lock` within its acquire window — a retryable
+ * 503, distinct from the 409 `sendUnparseable` answers for a document that read fine but doesn't
+ * parse. */
+function sendLocked(res, err) {
+    sendJson(res, 503, { error: err.message });
 }
 /** D24: the standard refusal body for every gated route but `GET /` (which answers plain text). */
 function sendRefused(res) {
@@ -277,90 +269,132 @@ async function handlePostNotes(req, res, cwd, runner) {
     }
     const appliedPatch = patch;
     await withWriteLock(async () => {
-        let notes;
-        let approval;
-        try {
-            // `readDesignDocOrThrow`'s return type is keyed on the runtime `kind` argument, not
-            // narrowed by it — each cast is safe because the literal `kind` above guarantees the shape.
-            notes = readDesignDocOrThrow(cwd, 'notes');
-            // review-2: `applyNotesPatch`'s rule-6 un-approve reads `approval` too and the patch may
-            // write it back (see below) — an unparsable `approval.json` is just as much a reason to
-            // refuse this write as an unparsable `notes.json`, or rule 6 would silently run against an
-            // empty approval document and the real (corrupt) file would never surface to anyone.
-            approval = readDesignDocOrThrow(cwd, 'approval');
-        }
-        catch (err) {
-            if (err instanceof UnparseableDesignFileError) {
-                sendUnparseable(res, err);
-                return;
+        // D4: the journey-existence probe (`buildState`) must never run while the cross-process file
+        // lock is held — it renders through Vite, and holding `design/.lock` across that would make
+        // every CLI write in the repo queue behind a page render. So it is hoisted above the lock as
+        // an UNLOCKED pre-read: decide here, off an unlocked read of `notes.json`, whether `close`'s
+        // (D1: or `reply`'s — it resolves an id note-first exactly as `close` does) target is missing
+        // from both `notes.notes` and `notes.journeys` — the only case that ever needs the probe —
+        // and if so run `buildState` now. An unreadable pre-read just means "no probe": the locked
+        // re-read below will hit the same `UnparseableDesignFileError` and refuse through the normal
+        // 409 path.
+        let closeProbeIsJourney;
+        if (appliedPatch.op === 'close' || appliedPatch.op === 'reply') {
+            let preNotes;
+            try {
+                preNotes = readDesignDocOrThrow(cwd, 'notes');
             }
-            throw err;
-        }
-        // D23: `update`/`remove` for an id with no row in the current document answer 404 and change
-        // nothing — never a silent no-op 200.
-        if ((appliedPatch.op === 'update' || appliedPatch.op === 'remove') &&
-            !notes.notes.some((n) => n.id === appliedPatch.id)) {
-            res.statusCode = 404;
-            res.end();
-            return;
-        }
-        // D6: `op:'update'`'s write-path scope invariant — checked against the MERGED note (existing
-        // + patch fields), not the patch fields alone, so a patch that would leave the note claiming
-        // both kinds (or neither) is refused 400. Runs after the 404 pre-check above (the id is known
-        // to exist by this point) and before `applyNotesPatch` ever sees the patch. `AddNoteSchema`'s
-        // own `superRefine` covers `op:'add'`; the read-back schemas (`src/schemas/notes.ts`) stay
-        // permissive on purpose (D6) — an existing contradictory note still loads and renders, it just
-        // can't be updated into staying contradictory.
-        if (appliedPatch.op === 'update') {
-            const existing = notes.notes.find((n) => n.id === appliedPatch.id);
-            if (existing) {
-                const mergedScreen = appliedPatch.fields.screen !== undefined ? appliedPatch.fields.screen : existing.screen;
-                const mergedProject = appliedPatch.fields.project !== undefined ? appliedPatch.fields.project : existing.project;
-                if (scopeViolation({ screen: mergedScreen, project: mergedProject })) {
-                    sendJson(res, 400, { error: 'invalid notes patch' });
-                    return;
+            catch {
+                preNotes = undefined;
+            }
+            if (preNotes) {
+                const isNote = preNotes.notes.some((n) => n.id === appliedPatch.id);
+                if (!isNote && !(appliedPatch.id in preNotes.journeys)) {
+                    const state = await buildState(cwd, role, runner);
+                    closeProbeIsJourney = state.journeys.some((j) => j.id === appliedPatch.id);
                 }
             }
         }
-        // D10/D11: `close` may target a note or a journey conversation. A note match is checked
-        // first; when the id is not a note and not yet a `notes.journeys` entry, this mirrors how
-        // `op:'journey'` treats a missing entry — except `close` must first confirm the id names a
-        // REAL journey (`state.journeys`), since unlike `op:'journey'` it must answer 404 for an id
-        // that is neither a note nor a journey at all (AC-20260917-02-15's "exists nowhere" case).
-        // Only once the id is confirmed real is a default `{status:'open', thread:[]}` entry seeded
-        // so the reducer below has something to update — mirroring `op:'journey'`'s own default.
-        if (appliedPatch.op === 'close') {
-            const isNote = notes.notes.some((n) => n.id === appliedPatch.id);
-            if (!isNote && !(appliedPatch.id in notes.journeys)) {
-                const state = await buildState(cwd, role, runner);
-                const isJourney = state.journeys.some((j) => j.id === appliedPatch.id);
-                if (!isJourney) {
+        try {
+            await withDesignLock(cwd, async () => {
+                let notes;
+                let approval;
+                try {
+                    // `readDesignDocOrThrow`'s return type is keyed on the runtime `kind` argument, not
+                    // narrowed by it — each cast is safe because the literal `kind` above guarantees the
+                    // shape. This is the AUTHORITATIVE read — taken under the lock, it is acted on
+                    // whatever the unlocked pre-read above saw, including a target seeded by someone else
+                    // between the two reads.
+                    notes = readDesignDocOrThrow(cwd, 'notes');
+                    // review-2: `applyNotesPatch`'s rule-6 un-approve reads `approval` too and the patch may
+                    // write it back (see below) — an unparsable `approval.json` is just as much a reason to
+                    // refuse this write as an unparsable `notes.json`, or rule 6 would silently run against
+                    // an empty approval document and the real (corrupt) file would never surface to anyone.
+                    approval = readDesignDocOrThrow(cwd, 'approval');
+                }
+                catch (err) {
+                    if (err instanceof UnparseableDesignFileError) {
+                        sendUnparseable(res, err);
+                        return;
+                    }
+                    throw err;
+                }
+                // D23: `update`/`remove` for an id with no row in the current document answer 404 and
+                // change nothing — never a silent no-op 200.
+                if ((appliedPatch.op === 'update' || appliedPatch.op === 'remove') &&
+                    !notes.notes.some((n) => n.id === appliedPatch.id)) {
                     res.statusCode = 404;
                     res.end();
                     return;
                 }
-                notes = { ...notes, journeys: { ...notes.journeys, [appliedPatch.id]: { status: 'open', thread: [] } } };
-            }
-            // D11: the ownership gate — a client may close only a note or journey conversation they
-            // themselves opened. Runs only after the 404 pre-check above has confirmed the target
-            // exists, so it never leaks existence.
-            if (role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
-                res.statusCode = 403;
-                res.end();
+                // D6: `op:'update'`'s write-path scope invariant — checked against the MERGED note
+                // (existing + patch fields), not the patch fields alone, so a patch that would leave the
+                // note claiming both kinds (or neither) is refused 400. Runs after the 404 pre-check
+                // above (the id is known to exist by this point) and before `applyNotesPatch` ever sees
+                // the patch. `AddNoteSchema`'s own `superRefine` covers `op:'add'`; the read-back schemas
+                // (`src/schemas/notes.ts`) stay permissive on purpose (D6) — an existing contradictory
+                // note still loads and renders, it just can't be updated into staying contradictory.
+                if (appliedPatch.op === 'update') {
+                    const existing = notes.notes.find((n) => n.id === appliedPatch.id);
+                    if (existing) {
+                        const mergedScreen = appliedPatch.fields.screen !== undefined ? appliedPatch.fields.screen : existing.screen;
+                        const mergedProject = appliedPatch.fields.project !== undefined ? appliedPatch.fields.project : existing.project;
+                        if (scopeViolation({ screen: mergedScreen, project: mergedProject })) {
+                            sendJson(res, 400, { error: 'invalid notes patch' });
+                            return;
+                        }
+                    }
+                }
+                // D1/D10/D11: `close` and `reply` alike may target a note or a journey conversation. A
+                // note match is checked first; when the id is not a note and not yet a `notes.journeys`
+                // entry, both ops must first confirm the id names a REAL journey — unknown everywhere
+                // answers 404 (AC-20260917-02-15's "exists nowhere" case, AC-20260918-02-1's unknown-id
+                // case). D4: the locked re-read is authoritative — if the target is now present (seeded
+                // by another writer between the pre-read and this read), it's acted on directly and the
+                // probe is never consulted. The probe's answer is consulted only when this re-read ALSO
+                // finds neither. Only once the id is confirmed real is a default `{status:'open',
+                // thread:[]}` entry seeded so the reducer below has something to update/append to.
+                if (appliedPatch.op === 'close' || appliedPatch.op === 'reply') {
+                    const isNote = notes.notes.some((n) => n.id === appliedPatch.id);
+                    if (!isNote && !(appliedPatch.id in notes.journeys)) {
+                        const isJourney = closeProbeIsJourney ?? false;
+                        if (!isJourney) {
+                            res.statusCode = 404;
+                            res.end();
+                            return;
+                        }
+                        notes = { ...notes, journeys: { ...notes.journeys, [appliedPatch.id]: { status: 'open', thread: [] } } };
+                    }
+                    // D11: the ownership gate — a client may CLOSE only a note or journey conversation
+                    // they themselves opened. `reply` carries no such gate (D2's whole point: a client
+                    // replying, including to someone else's note, is never refused). Runs only after the
+                    // 404 pre-check above has confirmed the target exists, so it never leaks existence.
+                    if (appliedPatch.op === 'close' && role === 'client' && !clientOwnsCloseTarget(appliedPatch.id, notes)) {
+                        res.statusCode = 403;
+                        res.end();
+                        return;
+                    }
+                }
+                const result = applyNotesPatch(notes, appliedPatch, approval);
+                // D2: stamped at the write site, not in the pure `applyNotesPatch` reducer — stamping
+                // inside it would break `unapproveScreen`'s no-op identity check and rewrite
+                // `approval.json` on every note patch.
+                const stampedNotes = { ...result.notes, contractVersion: CONTRACT_VERSION };
+                writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), stampedNotes);
+                if (result.approval !== approval) {
+                    const stampedApproval = { ...result.approval, contractVersion: CONTRACT_VERSION };
+                    writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedApproval);
+                }
+                sendJson(res, 200, stampedNotes);
+            });
+        }
+        catch (err) {
+            if (err instanceof DesignLockedError) {
+                sendLocked(res, err);
                 return;
             }
+            throw err;
         }
-        const result = applyNotesPatch(notes, appliedPatch, approval);
-        // D2: stamped at the write site, not in the pure `applyNotesPatch` reducer — stamping inside
-        // it would break `unapproveScreen`'s no-op identity check and rewrite `approval.json` on
-        // every note patch.
-        const stampedNotes = { ...result.notes, contractVersion: CONTRACT_VERSION };
-        writeJsonAtomic(path.join(cwd, 'design', 'notes.json'), stampedNotes);
-        if (result.approval !== approval) {
-            const stampedApproval = { ...result.approval, contractVersion: CONTRACT_VERSION };
-            writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedApproval);
-        }
-        sendJson(res, 200, stampedNotes);
     });
 }
 async function handlePostApproval(req, res, cwd, runner) {
@@ -424,22 +458,36 @@ async function handlePostApproval(req, res, cwd, runner) {
                 return;
             }
         }
-        let approval;
+        // D4: the file lock wraps only this read→apply→write span — `buildState` and the validation
+        // guards above run unlocked, still inside the in-process `withWriteLock`, so a cross-process
+        // lock is never held across a Vite render.
         try {
-            approval = readDesignDocOrThrow(cwd, 'approval');
+            await withDesignLock(cwd, async () => {
+                let approval;
+                try {
+                    approval = readDesignDocOrThrow(cwd, 'approval');
+                }
+                catch (err) {
+                    if (err instanceof UnparseableDesignFileError) {
+                        sendUnparseable(res, err);
+                        return;
+                    }
+                    throw err;
+                }
+                const next = applyApprovalPatch(approval, appliedPatch, ctxFromState(cwd, state));
+                // D2: stamped at the write site, not inside the pure `applyApprovalPatch` reducer.
+                const stampedNext = { ...next, contractVersion: CONTRACT_VERSION };
+                writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedNext);
+                sendJson(res, 200, stampedNext);
+            });
         }
         catch (err) {
-            if (err instanceof UnparseableDesignFileError) {
-                sendUnparseable(res, err);
+            if (err instanceof DesignLockedError) {
+                sendLocked(res, err);
                 return;
             }
             throw err;
         }
-        const next = applyApprovalPatch(approval, appliedPatch, ctxFromState(cwd, state));
-        // D2: stamped at the write site, not inside the pure `applyApprovalPatch` reducer.
-        const stampedNext = { ...next, contractVersion: CONTRACT_VERSION };
-        writeJsonAtomic(path.join(cwd, 'design', 'approval.json'), stampedNext);
-        sendJson(res, 200, stampedNext);
     });
 }
 async function handleEvents(req, res, server, cwd, runner) {

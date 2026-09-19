@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type ThreadEntry } from './notes.js';
 /** D5/D23: `add`'s `note` shape — `NoteSchema.omit({id:true})` plus a `superRefine` that rejects
  * a caller-supplied `id` outright. Plain `.omit({id:true})` alone is not enough: `NoteSchema` is
  * `.passthrough()` (D5's page-owned extras — `rect`/`viewport`/`whole` — round-trip through it),
@@ -62,18 +63,15 @@ export declare const NotesPatchSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     op: z.ZodLiteral<"remove">;
     id: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
-    op: z.ZodLiteral<"journey">;
+    op: z.ZodLiteral<"reply">;
     id: z.ZodString;
-    status: z.ZodOptional<z.ZodEnum<{
-        open: "open";
-        answered: "answered";
-        approved: "approved";
-        deferred: "deferred";
-    }>>;
-    entry: z.ZodOptional<z.ZodObject<{
-        by: z.ZodString;
+    entry: z.ZodObject<{
+        by: z.ZodEnum<{
+            owner: "owner";
+            session: "session";
+        }>;
         text: z.ZodString;
-    }, z.core.$strict>>;
+    }, z.core.$strict>;
 }, z.core.$strict>, z.ZodObject<{
     op: z.ZodLiteral<"close">;
     id: z.ZodString;
@@ -83,20 +81,30 @@ export declare const NotesPatchSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     }>;
 }, z.core.$strict>], "op">;
 export type NotesPatch = z.infer<typeof NotesPatchSchema>;
+/** D2/Contracts: the wire enum and the reducer's input are deliberately DIFFERENT types.
+ * `clientNotesOpPatch` rewrites a client's entry to `by: 'client'`, which the wire enum does not
+ * admit — and the repo forbids `as`, so the rewrite needs somewhere legal to land.
+ * `applyNotesPatch` takes this widened form; only the HTTP boundary parses the narrow one. */
+export type AppliedNotesPatch = Exclude<NotesPatch, {
+    op: 'reply';
+}> | (Omit<Extract<NotesPatch, {
+    op: 'reply';
+}>, 'entry'> & {
+    entry: ThreadEntry;
+});
 /** D6/Contracts: `POST approval` body. */
 export declare const ApprovalPatchSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     op: z.ZodLiteral<"approveScreen">;
-    name: z.ZodString;
-}, z.core.$strict>, z.ZodObject<{
-    op: z.ZodLiteral<"unapproveScreen">;
     name: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
     op: z.ZodLiteral<"clientOk">;
     id: z.ZodString;
     beats: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
-    op: z.ZodLiteral<"theme">;
-    key: z.ZodString;
+    op: z.ZodLiteral<"waive">;
+    id: z.ZodString;
+    reason: z.ZodString;
+    beats: z.ZodString;
 }, z.core.$strict>], "op">;
 export type ApprovalPatch = z.infer<typeof ApprovalPatchSchema>;
 /** D6: the base `JourneySchema` now carries `persona`/step `state`/edge `say` itself (D1); this
@@ -133,8 +141,8 @@ export type ServerJourney = z.infer<typeof ServerJourneySchema>;
 export declare const ServerInventoryRowSchema: z.ZodObject<{
     name: z.ZodString;
     kind: z.ZodEnum<{
-        shell: "shell";
         component: "component";
+        shell: "shell";
     }>;
     props: z.ZodRecord<z.ZodString, z.ZodString>;
     doc: z.ZodString;
@@ -226,8 +234,8 @@ export declare const ServerStateSchema: z.ZodObject<{
     inventory: z.ZodArray<z.ZodObject<{
         name: z.ZodString;
         kind: z.ZodEnum<{
-            shell: "shell";
             component: "component";
+            shell: "shell";
         }>;
         props: z.ZodRecord<z.ZodString, z.ZodString>;
         doc: z.ZodString;
@@ -236,7 +244,7 @@ export declare const ServerStateSchema: z.ZodObject<{
     }, z.core.$strict>>;
     violations: z.ZodArray<z.ZodString>;
     notes: z.ZodObject<{
-        contractVersion: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>;
+        contractVersion: z.ZodLiteral<3>;
         notes: z.ZodArray<z.ZodObject<{
             id: z.ZodString;
             screen: z.ZodNullable<z.ZodString>;
@@ -270,7 +278,7 @@ export declare const ServerStateSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strict>;
     approval: z.ZodObject<{
-        contractVersion: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>;
+        contractVersion: z.ZodLiteral<3>;
         screens: z.ZodRecord<z.ZodString, z.ZodObject<{
             hash: z.ZodString;
             approvedAt: z.ZodString;
@@ -289,7 +297,6 @@ export declare const ServerStateSchema: z.ZodObject<{
             reason: z.ZodOptional<z.ZodString>;
             approvedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>;
-        theme: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     }, z.core.$strict>;
     role: z.ZodEnum<{
         client: "client";

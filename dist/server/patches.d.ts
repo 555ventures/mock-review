@@ -1,11 +1,15 @@
 import type { Approval, Config, NullConfig, Notes } from '../schemas/index.js';
-import type { ApprovalPatch, NotesPatch } from '../schemas/patches.js';
+import type { AppliedNotesPatch, ApprovalPatch } from '../schemas/patches.js';
 /**
  * D6/D16: `applyNotesPatch(notes, patch, approval = EMPTY_APPROVAL)` -> `{ notes, approval }`.
  * `approval` is read (never required) so rule 6 can un-approve a screen in the same call; a
  * caller with no approval document yet (e.g. a pure unit test) may omit it.
+ *
+ * D2/Contracts: `patch` is `AppliedNotesPatch`, not the wire `NotesPatch` — the HTTP boundary
+ * (`plugin.ts`) rewrites a client's `reply.entry.by` to `'client'`, a value the wire enum does
+ * not admit, before calling this reducer. Only the route layer parses the narrow wire type.
  */
-export declare function applyNotesPatch(notes: Notes, patch: NotesPatch, approval?: Approval): {
+export declare function applyNotesPatch(notes: Notes, patch: AppliedNotesPatch, approval?: Approval): {
     notes: Notes;
     approval: Approval;
 };

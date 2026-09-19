@@ -2,7 +2,6 @@ export type AnswerFlags = {
     note: string | undefined;
     journey: string | undefined;
     text: string | undefined;
-    decision: string | undefined;
 };
-export declare function answerVerb(cwd: string, flags: AnswerFlags): string;
+export declare function answerVerb(cwd: string, flags: AnswerFlags): Promise<string>;
 //# sourceMappingURL=answer.d.ts.map

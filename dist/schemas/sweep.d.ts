@@ -3,8 +3,8 @@ import { z } from 'zod';
 export declare const InventoryRowSchema: z.ZodObject<{
     name: z.ZodString;
     kind: z.ZodEnum<{
-        shell: "shell";
         component: "component";
+        shell: "shell";
     }>;
     props: z.ZodRecord<z.ZodString, z.ZodString>;
     doc: z.ZodString;
@@ -28,12 +28,12 @@ export declare const QueueItemSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type QueueItem = z.infer<typeof QueueItemSchema>;
 export declare const SweepSchema: z.ZodObject<{
-    contractVersion: z.ZodLiteral<2>;
+    contractVersion: z.ZodLiteral<3>;
     inventory: z.ZodArray<z.ZodObject<{
         name: z.ZodString;
         kind: z.ZodEnum<{
-            shell: "shell";
             component: "component";
+            shell: "shell";
         }>;
         props: z.ZodRecord<z.ZodString, z.ZodString>;
         doc: z.ZodString;

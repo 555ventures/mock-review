@@ -1,9 +1,10 @@
 import { z } from 'zod';
 /** D4: READ-BACK SCHEMA. It validates only what this package itself reads or writes; anything
- * else passes through, and `contractVersion` is checked as "known", not "equal". `theme` defaults
- * to `null` on read because the plugin's own `defaultApproval` omits the key entirely (A3) — the
- * inferred type stays `string | null`, so no consumer changes. This rule LOWERS the frequency of
- * a swallowed read; it does NOT close it, because a missing required key is not an extra key. */
+ * else passes through, and `contractVersion` is checked as "equal" to the single pinned literal
+ * (spec 04 D2) — a document from any other version is reported unreadable, not silently accepted.
+ * `theme` is no longer part of this document (spec 04 D4): the theme is whatever `mock.config.ts`
+ * declares, read through `check.config.theme`. This rule LOWERS the frequency of a swallowed
+ * read; it does NOT close it, because a missing required key is not an extra key. */
 /** D1: `design/approval.json`'s `screens{}` map value — this package never writes one (spec 02
  * does), but `.strict()` since it is an object this package's own writers must not corrupt. */
 export declare const ScreenApprovalSchema: z.ZodObject<{
@@ -33,7 +34,7 @@ export declare const JourneyApprovalSchema: z.ZodObject<{
 }, z.core.$loose>;
 export type JourneyApproval = z.infer<typeof JourneyApprovalSchema>;
 export declare const ApprovalSchema: z.ZodObject<{
-    contractVersion: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<2>]>;
+    contractVersion: z.ZodLiteral<3>;
     screens: z.ZodRecord<z.ZodString, z.ZodObject<{
         hash: z.ZodString;
         approvedAt: z.ZodString;
@@ -52,7 +53,6 @@ export declare const ApprovalSchema: z.ZodObject<{
         reason: z.ZodOptional<z.ZodString>;
         approvedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>;
-    theme: z.ZodDefault<z.ZodNullable<z.ZodString>>;
 }, z.core.$strict>;
 export type Approval = z.infer<typeof ApprovalSchema>;
 //# sourceMappingURL=approval.d.ts.map
