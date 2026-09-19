@@ -1,0 +1,6 @@
+dist/
+.test-dist/
+
+# byte-for-byte copy of the plugin's spec/templates/mock/contract.json —
+# tests/unit/contract-skew.test.ts asserts byte equality, so reformatting breaks it
+tests/fixtures/contract.json
