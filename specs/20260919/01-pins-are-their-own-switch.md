@@ -1,6 +1,6 @@
 ---
 date: 2026-09-19
-status: implementing
+status: done
 tier: standard
 area: ui
 design: false
@@ -47,6 +47,7 @@ store's defaults and the journey-mode pin rule have tests for the first time.
 | D14 | `tests/unit/design-reference.test.ts` stops hard-coding a date: the first-entry assertion becomes "the first `### YYYY-MM-DD` heading after `## Amendments` is the newest date in the document", derived by parsing every entry heading and comparing. (AC-20260919-01-14) | `:28`'s `toContain('2026-09-18')` breaks on every future amendment, making the next spec pay for this one's doc edit. |
 | D15 | `tests/unit/store.test.ts` is created — the repo's first unit test over `store.ts`. (AC-20260919-01-4, AC-20260919-01-5, AC-20260919-01-6, AC-20260919-01-7) | Nothing currently asserts any `UiState` default; the only safety net for "pins default on" is nine browser tests that would pass a silent flip to `false` in eight of them. |
 | D16 | `tests/browser/surfaces.test.ts`'s AC-20260915-02-2 is rewritten, not deleted: the two halves that still hold (mark mode works with the panel hidden; the panel does not open on commit) become this spec's regression pin, and the pin-hidden assertion inverts. Its title's `reference §4 / rule 26` citation becomes `rule 39`. (AC-20260919-01-1, AC-20260919-01-15) | It is the only test in the repo that exercises authoring with the panel closed; the behaviour it guards is half-retired, not retired. |
+| D17 | `docs/design/README.md` joins the File Plan (MODIFY, other): its atlas count goes 59 → 60, and a reproduction note records that `06`, `37` and `60` are captured from this package (`mock-review serve` against `tests/fixtures/host`, same 1600×1000 / `deviceScaleFactor: 1` framing) rather than from the prototype. Added 2026-09-19 at review, on the disposer's `fix` recommendation for the out-of-plan edit. [no-ac: documentation-only — the count and the provenance note have no runtime surface, and no test reads this README; asserting the count in a test would only restate `ls docs/design/atlas \| wc -l`] | D12 adds a 60th atlas file, which makes the README's stated count false — reverting the edit would leave the document lying about its own folder. The provenance note exists because `capture-atlas.mjs` still drives the prototype, which has no Pins control: a future re-run would silently overwrite `06` and `37` with pre-split shots and quietly undo D12. |
 
 ## File Plan
 
@@ -67,6 +68,7 @@ store's defaults and the journey-mode pin rule have tests for the first time.
 | docs/design/atlas/06-topbar-chrome-screen-mode.png | MODIFY | other | D12 re-capture with the Pins toggle present and pressed |
 | docs/design/atlas/37-notes-panel-hidden.png | MODIFY | other | D12 re-capture: panel absent, pins now visible on the mock |
 | docs/design/atlas/60-pins-hidden-panel-open.png | CREATE | other | D12 new: Pins unpressed, panel open, no pins or ghosts on the mock |
+| docs/design/README.md | MODIFY | other | D17 the atlas count (59 → 60) and the note that `06`/`37`/`60` are captured from this package, not the prototype |
 
 Orchestrator duty, outside the table: the three atlas captures are driven from a running
 `mock-review serve` against `tests/fixtures/host` in one browser session (37 and 60 differ by
@@ -331,6 +333,44 @@ mistake by hoisting the filter above measurement; D6 keeps measurement where it 
 AC-20260919-01-11 and A6 exist because this session logged an escape in exactly this file: an
 assertion that read the same value before and after the action it guarded. If the fixture cannot
 be made to overflow, the honest move is to drop the test, not to ship one that cannot fail.
+
+## Build notes (folded from the deviations sidecar at close, 2026-09-19)
+
+Six departures were logged during the build. None is promoted to the host's Gotchas section: that
+section sits at its cap of 15, and every entry there is live and durable, so displacing one to bank
+a trap seen exactly once would be a bad trade. Each is recorded here instead; a second occurrence
+of any of them is the argument for promotion.
+
+- **`initialUi` gained `export`.** D1's Contract block shows only `enterMarking` newly exported, but
+  AC-20260919-01-6 asserts `initialUi().notesPanel`/`.pins` by direct import. Body unchanged.
+- **D9 needed a double-`requestAnimationFrame` its text does not mention.** Applying D9's three
+  literal edits verbatim still failed AC-20260919-01-11 by ~240px: `[data-notes-scroll]`'s enclosing
+  `ResizablePanel` (`react-resizable-panels`) reports a near-full-list `clientHeight` at the moment a
+  synchronous `getBoundingClientRect()` runs on remount, settling to its real height only after its
+  `ResizeObserver` fires a frame later. D9's own fix is what first makes this race reachable — it is
+  the first case where the effect fires on the exact render a fresh scroll container mounts. The
+  measure-and-scroll body is now wrapped in the same double-rAF coalescing idiom `DeviceFrames`
+  already uses (design rule 17); the three literal edits are unchanged. **This is the one entry
+  closest to Gotchas-worthy** — it is a third-party timing trap, not a local slip — and it is the
+  one to promote if anything else in this repo ever measures inside a resizable panel.
+- **AC-20260919-01-12's first draft read a background control through an open modal.** It polled for
+  the Pins toggle while the command palette's stock Radix `Dialog` was still open, which
+  `aria-hidden`s the whole app root. This is the **second recorded occurrence** of the class already
+  in the host's Gotchas (cited there to AC-20260915-02-19); a third earns a standing guard per the
+  incident policy. Fixed by reading the baseline before the palette opens.
+- **AC-20260919-01-13 and the spec's own paste-ready prose contradicted each other.** The AC bans the
+  literal `showNotes` document-wide; D13's dictated §2 replacement text names it twice. The AC and
+  its literal test were kept and the four amendment markers reworded to cite the prototype's boolean
+  by line (`ReviewLayer.tsx:512-515`, `:524`). Precedent: the same test already bans three other
+  literals document-wide, and the 2026-09-17/18 Amendments entries were written around that ban, so
+  a history entry avoiding the banned string is this document's established convention. A
+  second-opinion consult concurred and supplied the wording.
+- **AC-20260919-01-5's prose cites "59 scanned files"; the real count is 60.** The test hard-codes
+  neither — it asserts the SHALL clause (zero regex hits) plus a non-vacuous `files.length > 0`
+  guard, matching D14's own reason for never baking a soon-stale number into an assertion.
+- **A typecheck error in the authored tests.** `tests/unit/design-reference.test.ts`'s
+  newest-amendment `reduce` tripped `TS18048`; fixed by narrowing the parsed dates to `string[]` with
+  a type predicate rather than a `?? ''` fallback. No change to the assertion's meaning.
 
 ## Canonical Delta
 

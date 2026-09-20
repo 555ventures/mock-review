@@ -241,6 +241,10 @@ wrapper as the iframe, where the frame's own rects are already in local coordina
 is `[data-journey-ring]`, one per found control, hidden when the control is not visible in the frame's
 viewport or is clipped by a scrolling ancestor, styled by the reviewer's `index.css`.
 
+Pin and ghost painting is gated by its own `pins` chrome flag, independent of whether the notes
+panel is mounted; entering mark mode turns it on. Box measurement runs regardless, because the
+outdated-anchor check reads the same box map whether or not anything is painted.
+
 ### Approval semantics
 
 `approveScreen` records the screen's current hash, the ISO time, its states, the configured viewports
@@ -350,6 +354,11 @@ document written by an older build always loads.
 The reviewer page's notes panel shows exactly two groups: the notes on the screen being viewed,
 and the project's own notes. A note anchored to another screen is never listed; it is reached
 through that screen's sidebar entry.
+
+A whole-screen note and a project note never paint on the mock; only area notes do, and the
+selector that chooses them keys on the note's `whole` marker, never on its `component`, because an
+area note on a host that emits no `data-component` resolves to the screen anchor exactly as a
+whole-screen note does.
 
 A status dot reports where its own item sits in the review lifecycle, over its own notes only:
 red when any note is open, yellow when none is open and any is answered, blue when it has notes
