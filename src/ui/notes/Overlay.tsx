@@ -33,7 +33,7 @@ export function Overlay({
   return (
     <>
       {visible.map(({ note, box, ownDevice }) => {
-        if (!box || note.whole) return null
+        if (!box) return null
         if (!ownDevice) {
           return note.component === SCREEN_ANCHOR ? null : (
             <div

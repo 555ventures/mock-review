@@ -258,11 +258,13 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
 
   // Escaped from spec 02's review: the port folded pins, draft and the marking surface into one
   // `Overlay` and gated the whole thing on `showNotes`, so "Mark an area" became a no-op with the
-  // Notes panel hidden. The prototype gates only the pins (`ReviewLayer.tsx:212` vs `:234`/`:241`),
-  // and reference rule 26 ties pins to `showNotes` but mark mode to `marking` alone. Steps 5-6 pin
-  // that split: marking works with the panel hidden, and the saved note's pin stays hidden until
-  // the panel is shown again — the panel must NOT open on commit.
-  it('AC-20260915-02-2 (escape, reference §4 / rule 26): with the Notes panel hidden, M mounts the crosshair overlay, a drag opens the New note dialog, and the saved pin stays hidden until the panel is shown', async () => {
+  // Notes panel hidden. This spec (01-pins-are-their-own-switch, rule 39) deletes that coupling
+  // outright: `pins` and `notesPanel` are independent store booleans (D1), so the HALF of the old
+  // escape that was itself the conflation — the saved pin staying hidden until the panel reopens —
+  // is retired, and its assertion INVERTS (AC-20260919-01-1). The other half — mark mode still
+  // works with the panel hidden, and the panel still does not open itself on commit — is this
+  // spec's regression pin, carried over unchanged (AC-20260919-01-15).
+  it('AC-20260919-01-1, AC-20260919-01-15 (rule 39): with the Notes panel hidden, M mounts the crosshair overlay, a drag opens the New note dialog, and the saved note paints its pin while the panel stays closed', async () => {
     serve = await startServe(greenHost)
     const page = await browser.newPage()
     try {
@@ -304,21 +306,305 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
 
       // Second escape from this AC: the `[data-note]` assertion below used to run straight off the
       // `notes.json` poll above. That poll only proves the SERVER wrote the file — `addNote` awaits
-      // `refresh()` (`useNoteActions.ts`), so the file lands before the page has re-rendered. The
-      // assertion therefore fired against pre-refresh DOM and read 0 whether or not the panel gates
-      // the pin: it read 0 before the drag too, so it never once observed the state it names, and
-      // would have passed with the gating deleted. Gate on a CLIENT-side signal that only moves
-      // after the refresh applies — the Notes toggle's own count badge, which stays mounted while
-      // the panel is hidden (`TopBar.tsx`) — so what follows is a real observation.
+      // `refresh()` (`useNoteActions.ts`), so the file lands before the page has re-rendered. Gate
+      // on a CLIENT-side signal that only moves after the refresh applies — the Notes toggle's own
+      // count badge, which stays mounted while the panel is hidden (`TopBar.tsx`) — so what follows
+      // is a real observation.
       await expect.poll(() => notesToggle.innerText(), SLOW_POLL).toMatch(/1/)
 
-      // The pin is not in the accessibility tree behind a closed panel — locate it by attribute
-      // (gotcha AC-20260915-02-19), and assert the panel did not open itself on commit.
-      expect(await page.locator('[data-note]').count()).toBe(0)
+      // AC-20260919-01-1: the pin now paints on the mock with the panel closed — pre-image this
+      // read `.toBe(0)`, the exact conflation rule 39 removes. AC-20260919-01-15: the panel still
+      // does not open itself on commit.
+      expect(await page.locator('[data-note]').count()).toBeGreaterThan(0)
       expect(await page.locator('[data-notes-scroll]').count()).toBe(0)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260919-01-2 (D1/D6/D7): turning the Pins toggle off with the Notes panel open removes every pin and ghost from the mock while the panel keeps listing the same rows', async () => {
+    serve = await startServe(greenHost)
+    const { host: serveHost } = serve
+    const notesPath = path.join(serveHost, 'design', 'notes.json')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(path.dirname(notesPath), { recursive: true })
+    // `viewport: 'desktop'` (a D5 page-owned passthrough extra) plus Both view below is what makes
+    // this same note also render a ghost in the mobile frame — `ownDevice` is false there, and the
+    // note's own component (WalletSummary, not SCREEN_ANCHOR) is exactly the case Overlay.tsx:38
+    // still ghosts.
+    writeFileSync(
+      notesPath,
+      JSON.stringify({
+        contractVersion: 3,
+        notes: [
+          {
+            id: 'N001',
+            screen: 'home',
+            state: 'Default',
+            component: 'WalletSummary',
+            key: '0',
+            snippet: 'USD 128.50',
+            status: 'open',
+            thread: [{ by: 'owner', text: 'check this' }],
+            viewport: 'desktop',
+          },
+        ],
+        journeys: {},
+      }),
+    )
+
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+
+      await page.locator('[aria-label="Both"]').click()
+      await expect.poll(() => page.getByText('Mobile 360').count(), SLOW_POLL).toBeGreaterThan(0)
+
+      const row = page.locator('[data-row="N001"]')
+      await expect.poll(() => row.count(), SLOW_POLL).toBeGreaterThan(0)
+      const rowsBefore = await page.locator('[data-row]').count()
+
+      await expect.poll(() => page.locator('[data-note]').count(), SLOW_POLL).toBeGreaterThan(0)
+      await expect.poll(() => page.locator('[data-ghost]').count(), SLOW_POLL).toBeGreaterThan(0)
+
+      const pinsToggle = page.getByRole('button', { name: 'Pins' })
+      await expect.poll(() => pinsToggle.count(), SLOW_POLL).toBeGreaterThan(0)
+      await pinsToggle.click()
+
+      await expect.poll(() => page.locator('[data-note]').count(), SLOW_POLL).toBe(0)
+      await expect.poll(() => page.locator('[data-ghost]').count(), SLOW_POLL).toBe(0)
+      expect(await page.locator('[data-row]').count()).toBe(rowsBefore)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260919-01-3 (rule 39): entering mark mode via M turns pins on and leaves them on after Esc exits', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+
+      const pinsToggle = page.getByRole('button', { name: 'Pins' })
+      await expect.poll(() => pinsToggle.count(), SLOW_POLL).toBeGreaterThan(0)
+      await expect.poll(() => pinsToggle.getAttribute('aria-pressed'), SLOW_POLL).toBe('true')
+      await pinsToggle.click()
+      await expect.poll(() => pinsToggle.getAttribute('aria-pressed'), SLOW_POLL).toBe('false')
+
+      await page.keyboard.press('m')
+      await expect.poll(() => page.locator('.cursor-crosshair').count(), SLOW_POLL).toBeGreaterThan(0)
+      await expect.poll(() => pinsToggle.getAttribute('aria-pressed'), SLOW_POLL).toBe('true')
+
+      await page.keyboard.press('Escape')
+      await expect.poll(() => page.locator('.cursor-crosshair').count(), SLOW_POLL).toBe(0)
+      expect(await pinsToggle.getAttribute('aria-pressed')).toBe('true')
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260919-01-9 (rule 26): a journey paints no pins and hides both the Pins and Mark an area controls, and M stays inert', async () => {
+    serve = await startServe(greenHost)
+    const { host: serveHost } = serve
+    const notesPath = path.join(serveHost, 'design', 'notes.json')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(path.dirname(notesPath), { recursive: true })
+    writeFileSync(
+      notesPath,
+      JSON.stringify({
+        contractVersion: 3,
+        notes: [
+          {
+            id: 'N001',
+            screen: 'home',
+            state: 'Default',
+            component: 'WalletSummary',
+            key: '0',
+            snippet: 'USD 128.50',
+            status: 'open',
+            thread: [{ by: 'owner', text: 'check this' }],
+          },
+        ],
+        journeys: {},
+      }),
+    )
+
+    const page = await browser.newPage()
+    try {
+      // Screen mode first: the Pins control and this note's pin are both offered here — proving
+      // their absence below is journey-specific, not merely "the control doesn't exist yet".
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+      await expect.poll(() => page.getByRole('button', { name: 'Pins' }).count(), SLOW_POLL).toBeGreaterThan(0)
+      await expect.poll(() => page.locator('[data-note]').count(), SLOW_POLL).toBeGreaterThan(0)
+
+      await page.goto(`${serve.url}/#/home?j=first-visit&step=0`, { waitUntil: 'networkidle' })
+      const frame = page.locator('iframe').first()
+      await expect.poll(() =>
+        frame.evaluate((el: HTMLIFrameElement) => !!el.contentDocument?.querySelector('[data-to="Account"]')),
+      SLOW_POLL).toBe(true)
+
+      expect(await page.locator('[data-note]').count()).toBe(0)
+      expect(await page.getByRole('button', { name: 'Pins' }).count()).toBe(0)
+      expect(await page.getByRole('button', { name: 'Mark an area' }).count()).toBe(0)
+
+      await page.keyboard.press('m')
+      expect(await page.locator('.cursor-crosshair').count()).toBe(0)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260919-01-10 (D7/D8): a whole-screen note saved with N lists as "Whole screen" but paints no box, pin or ghost, and leaves pins on', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+
+      const notesToggle = page.getByRole('button', { name: /Notes/ })
+      await expect.poll(() => notesToggle.count(), SLOW_POLL).toBeGreaterThan(0)
+      const rowsBefore = await page.locator('[data-row]').count()
+      const notesBefore = await page.locator('[data-note]').count()
+      const ghostsBefore = await page.locator('[data-ghost]').count()
+
+      await page.keyboard.press('n')
+      const dialog = page.getByRole('dialog', { name: /New note/i })
+      await expect.poll(() => dialog.isVisible(), SLOW_POLL).toBe(true)
+      await dialog.getByRole('textbox').fill('Whole-screen concern')
+      await dialog.getByRole('button', { name: 'Save' }).click()
+      await expect.poll(() => dialog.isVisible(), SLOW_POLL).toBe(false)
+
+      await expect.poll(() => page.locator('[data-row]').count(), SLOW_POLL).toBe(rowsBefore + 1)
+      const rowTexts = await page.locator('[data-row]').allTextContents()
+      expect(rowTexts.some((t) => t.includes('Whole screen'))).toBe(true)
+
+      expect(await page.locator('[data-note]').count()).toBe(notesBefore)
+      expect(await page.locator('[data-ghost]').count()).toBe(ghostsBefore)
+
+      const pinsToggle = page.getByRole('button', { name: 'Pins' })
+      await expect.poll(() => pinsToggle.count(), SLOW_POLL).toBeGreaterThan(0)
+      expect(await pinsToggle.getAttribute('aria-pressed')).toBe('true')
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  // AC-20260919-01-11 / A6 (D9): the fixture host is seeded with 40 notes on `home` so the panel's
+  // "This screen" group overflows its scrollable section — 39 whole-screen filler rows (no pin, no
+  // box, cheap to seed in bulk) plus one real area note (anchored on WalletSummary, so it has a
+  // resolvable box and paints exactly one clickable pin) placed LAST, so its row sits below the
+  // panel's initial scroll position.
+  it("AC-20260919-01-11 (D9): clicking a pin with the Notes panel closed, then opening the panel, scrolls that note's row into view", async () => {
+    serve = await startServe(greenHost)
+    const { host: serveHost } = serve
+    const notesPath = path.join(serveHost, 'design', 'notes.json')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(path.dirname(notesPath), { recursive: true })
+    const fillerCount = 39
+    const targetId = 'N999'
+    const notes = [
+      ...Array.from({ length: fillerCount }, (_, i) => {
+        const id = `N${String(i + 1).padStart(3, '0')}`
+        return {
+          id,
+          screen: 'home',
+          state: 'Default',
+          component: '__screen',
+          key: '0',
+          snippet: null,
+          status: 'open',
+          thread: [{ by: 'owner', text: `filler ${id}` }],
+          whole: true,
+        }
+      }),
+      {
+        id: targetId,
+        screen: 'home',
+        state: 'Default',
+        component: 'WalletSummary',
+        key: '0',
+        snippet: 'USD 128.50',
+        status: 'open',
+        thread: [{ by: 'owner', text: 'the target note' }],
+      },
+    ]
+    writeFileSync(notesPath, JSON.stringify({ contractVersion: 3, notes, journeys: {} }))
+
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+
+      // Close the panel first — A6's scenario is a pin click with the panel already hidden. Under
+      // the pre-image coupling this alone empties the mock of every pin (the bug rule 39 fixes),
+      // which is the first thing that makes this test fail before that wave lands.
+      const notesToggle = page.getByRole('button', { name: /Notes/ })
+      await expect.poll(() => notesToggle.count(), SLOW_POLL).toBeGreaterThan(0)
+      await notesToggle.click()
+      await expect.poll(() => page.locator('[data-notes-scroll]').count(), SLOW_POLL).toBe(0)
+
+      const pin = page.getByRole('button', { name: `Open note ${targetId}` })
+      await expect.poll(() => pin.count(), SLOW_POLL).toBeGreaterThan(0)
+      await pin.click()
+
+      // Clicking a pin opens the thread dialog regardless of panel state (Behavior section) — close
+      // it before opening the panel so the row assertions below read a settled DOM.
+      const cardDialog = page.getByRole('dialog')
+      await expect.poll(() => cardDialog.isVisible(), SLOW_POLL).toBe(true)
+      await page.keyboard.press('Escape')
 
       await notesToggle.click()
-      await expect.poll(() => page.locator('[data-note]').count(), SLOW_POLL).toBeGreaterThan(0)
+      const scrollContainer = page.locator('[data-notes-scroll]').first()
+      await expect.poll(() => scrollContainer.count(), SLOW_POLL).toBeGreaterThan(0)
+
+      const row = page.locator(`[data-row="${targetId}"]`)
+      await expect.poll(() => row.count(), SLOW_POLL).toBeGreaterThan(0)
+
+      await expect.poll(() => scrollContainer.evaluate((el) => el.scrollTop), SLOW_POLL).toBeGreaterThan(0)
+
+      const rowBox = await row.boundingBox()
+      const containerBox = await scrollContainer.boundingBox()
+      if (!rowBox || !containerBox) throw new Error('row or scroll container has no bounding box')
+      expect(rowBox.y).toBeGreaterThanOrEqual(containerBox.y - 1)
+      expect(rowBox.y + rowBox.height).toBeLessThanOrEqual(containerBox.y + containerBox.height + 1)
+    } finally {
+      await page.close()
+      await stop()
+    }
+  }, 60_000)
+
+  it('AC-20260919-01-12 (D11): the command palette offers Toggle pins in screen mode as the owner, flips pin painting, and hides the action during a journey', async () => {
+    serve = await startServe(greenHost)
+    const page = await browser.newPage()
+    try {
+      await page.goto(`${serve.url}/#/home`, { waitUntil: 'networkidle' })
+
+      // Gotcha (AC-20260915-02-19): Playwright's `getByRole` reads the accessibility tree, and an
+      // open Radix `Dialog` `aria-hidden`s the whole app root — so the Pins button is unfindable by
+      // role while the palette is open. Read its baseline BEFORE opening the palette; this still
+      // fails against any build where pins do not default on, so it stays non-vacuous.
+      const pinsToggle = page.getByRole('button', { name: 'Pins' })
+      await expect.poll(() => pinsToggle.count(), SLOW_POLL).toBeGreaterThan(0)
+      await expect.poll(() => pinsToggle.getAttribute('aria-pressed'), SLOW_POLL).toBe('true')
+
+      await page.keyboard.press('Control+k')
+      const palette = page.getByRole('dialog', { name: 'Search' })
+      await expect.poll(() => palette.isVisible(), SLOW_POLL).toBe(true)
+      const toggleItem = palette.getByRole('option', { name: 'Toggle pins' })
+      await expect.poll(() => toggleItem.count(), SLOW_POLL).toBeGreaterThan(0)
+
+      await toggleItem.click()
+      await expect.poll(() => palette.isVisible(), SLOW_POLL).toBe(false)
+      await expect.poll(() => pinsToggle.getAttribute('aria-pressed'), SLOW_POLL).toBe('false')
+
+      await page.goto(`${serve.url}/#/home?j=first-visit&step=0`, { waitUntil: 'networkidle' })
+      await page.keyboard.press('Control+k')
+      const journeyPalette = page.getByRole('dialog', { name: 'Search' })
+      await expect.poll(() => journeyPalette.isVisible(), SLOW_POLL).toBe(true)
+      expect(await journeyPalette.getByRole('option', { name: 'Toggle pins' }).count()).toBe(0)
     } finally {
       await page.close()
       await stop()

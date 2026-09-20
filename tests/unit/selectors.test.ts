@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process'
 import { globSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { screenTone, stateTone, journeyTone, notesHere, projectNotes, worst } from '../../src/ui/store/selectors.js'
+import { areaNotesOn, screenTone, stateTone, journeyTone, notesHere, projectNotes, worst } from '../../src/ui/store/selectors.js'
 import type { Note } from '../../src/schemas/index.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -149,6 +149,22 @@ describe('AC-20260915-02-4: store selectors (tone derivations)', () => {
     expect(
       journeyTone('j', { j: { status: 'deferred', thread: [] } as unknown as { status: Note['status']; thread: [] } }),
     ).toBe('approved')
+  })
+
+  // AC-20260919-01-8 (D5): `areaNotesOn` filters on the note's own `whole` marker and the
+  // screen/state pair only — it never excludes on `component === SCREEN_ANCHOR`, because
+  // `anchorFor` resolves an area note to SCREEN_ANCHOR whenever no `[data-component]` ancestor is
+  // found (`anchor.ts:52`), which is every note on every host with no components tagged — a
+  // component-based filter would blank every pin in production. The third fixture note (a
+  // different screen) proves the screen test alone is enough; no `project` clause exists to test
+  // because project notes already carry `screen: null`.
+  it('AC-20260919-01-8: areaNotesOn keeps a screen-anchored area note and drops only the one marked whole, ignoring a note on another screen', () => {
+    const notes = [
+      { screen: 'home', state: 'default', component: '__screen' },
+      { screen: 'home', state: 'default', component: '__screen', whole: true },
+      { screen: 'other', state: 'default' },
+    ]
+    expect(areaNotesOn('home', 'default', notes)).toEqual([notes[0]])
   })
 
   it('src/ui/store/*.ts never uses `!.` non-null assertions (D2)', () => {

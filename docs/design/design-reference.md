@@ -2,6 +2,20 @@
 
 ## Amendments
 
+### 2026-09-19 — specs/20260919/01-pins-are-their-own-switch.md
+
+"Pins are their own switch" splits the prototype's single Notes-toggle boolean (the `useState(true)`
+bound at `ReviewLayer.tsx:512-515` and re-read at `:524`) — which mounted the right-hand Notes panel
+*and* gated whether note pins and ghosts painted on the mock — into two independent chrome flags,
+`notesPanel` and `pins`, both defaulting on and neither persisted. Hiding the Notes panel no
+longer wipes the annotations off the artwork; the pins get their own top-bar `Toggle` (§2) and their
+own palette action (§9). The coupling this document asserted in §2's Notes toggle passage, in §5,
+and in rule 26's condition is retired: rule 26 now reads `pins && !journey`. New rule 39 records the
+one place the two flags still touch — every entry into mark mode forces `pins` on, so an author can
+never draw into a canvas that will not show what they drew. `N` and the panel's Add note are not
+mark mode and keep forcing the **panel** only (§7.2). Atlas `06` and `37` are re-captured and
+`60-pins-hidden-panel-open.png` is added.
+
 ### 2026-09-18 — specs/20260918/03-the-page-has-no-operator-controls.md
 
 "The page has no operator controls" removes the two operator-only controls ADR-0029 rules were
@@ -227,10 +241,21 @@ Atlas: `24-marking-mode-on-crosshair.png`.
 `Button variant="outline" size="sm" asChild` → `<a href="#/<screen>?state=<state>">` with
 `<Monitor /> Open in Screens`; clicking also switches the left sidebar to the Screens tab.
 
+**Pins toggle** (**Amended 2026-09-19** (see Amendments): no prototype counterpart —
+`src/ui/shell/TopBar.tsx`), screen mode only, directly after Mark an area:
+`Toggle variant="outline" size="sm"` bound to `pins`, content `<Pin /> Pins` — text label, no
+`aria-label`, no badge, the glyph never swaps; tooltip `Show note pins on the mock · Mark an area
+turns them on`. It hides and shows the pins and ghosts painted on the mock (§4) and nothing else:
+the Notes panel, the draft box and the marking overlay are unaffected. Hidden in journey mode
+together with Mark an area (rule 26). Atlas: `60-pins-hidden-panel-open.png`.
+
 **Notes toggle** (`:512-515`): a vertical `Separator` (`mx-1 …`), then
-`Toggle variant="outline" size="sm"` bound to `showNotes`, content `<PanelRight /> Notes` plus, in
-screen mode only, a `Badge variant="secondary"` with the count of notes on this screen. No badge in
-journey mode. Atlas: `37-notes-panel-hidden.png`.
+`Toggle variant="outline" size="sm"` bound to `notesPanel` (**Amended 2026-09-19** (see
+Amendments): the prototype bound this toggle to the same boolean rule 26 read at `:524` to paint
+the pins — that job now belongs to `pins` above), content `<PanelRight /> Notes` plus, in screen
+mode only, a `Badge variant="secondary"`
+with the count of notes on this screen. No badge in journey mode. Hiding the panel leaves the
+pins on the mock. Atlas: `37-notes-panel-hidden.png`.
 
 ---
 
@@ -311,7 +336,9 @@ alias of `approved`'s blue.
 
 **Layout.** shadcn `Sidebar side="right" collapsible="none"` with
 `className="sticky top-0 h-svh w-80 border-l"` (`:537`) — 320px, full viewport height. Rendered only
-when `showNotes` is true.
+when `notesPanel` is true (**Amended 2026-09-19** (see Amendments): the flag that mounts this panel
+was the one the prototype also read to paint the pins; it no longer gates them — that is `pins`,
+§2).
 
 **Approve-screen header** (`:540-549`): a `SidebarHeader className="gap-2 border-b
 border-sidebar-border"` containing `StatusLine` — shown **only** when the screen's derived tone is
@@ -448,7 +475,9 @@ dialog opens (`:182-198`, `:344-356`). The draft remembers which device it was d
 
 ### 7.2 Whole-screen and project notes
 
-`noteOnScreen(target)` (`:359-366`) skips mark mode entirely: it forces the notes panel visible,
+`noteOnScreen(target)` (`:359-366`) skips mark mode entirely: it forces the notes panel visible
+(**Amended 2026-09-19** (see Amendments): that still holds, and the Pins toggle is untouched — a
+whole-screen or project note paints no pin, so there is nothing for it to reveal; rule 39),
 clears marking/re-anchor/card, and opens the dialog with a zero-size box and `whole: true`;
 `target === "rest"` additionally sets `about: "project"`. A project note is stored with empty
 `screen`/`state` and `project: true` (`:369`).
@@ -566,9 +595,12 @@ shadcn `CommandDialog` with `title="Search"` and
   2. **Journeys** — every journey (icon `Route`) followed by each step as
      `{title} {i+1} · {stepLabel}`.
   3. **Components** — every component key (icon `Blocks`), label `nameOfKey`.
-  4. **Actions** — "Components" (`LayoutGrid`); "Mark an area" (`SquareDashedMousePointer`) and
-     "Toggle notes panel" (`PanelRight`) **only when the host passes those handlers** — i.e. on a
-     screen, not on the Components page (`ReviewLayer:662`, `ComponentsPage:203`).
+  4. **Actions** — "Components" (`LayoutGrid`); "Mark an area" (`SquareDashedMousePointer`),
+     "Toggle pins" (`Pin`) and "Toggle notes panel" (`PanelRight`) **only when the host passes
+     those handlers** — i.e. on a screen, not on the Components page (`ReviewLayer:662`,
+     `ComponentsPage:203`). (**Amended 2026-09-19** (see Amendments): "Toggle pins" is new, and is
+     journey-suppressed exactly like "Mark an area" rather than merely owner-gated, so the palette
+     can never flip `pins` where no pin can paint.)
 - Selecting a journey *title* also turns the guide on (`:49`); selecting a step does not (`:54`).
 - Opens/closes on **⌘K / Ctrl+K** — `isPaletteKey` (`:10`) — bound both on the parent window (`:16-20`)
   and inside every mock iframe (`ReviewLayer:157-159`), so it works while focus is in the mock.
@@ -749,9 +781,12 @@ Every rule below is implemented; each cites its line.
     page (`useJourneyGuide.ts:54-59`); the marking overlay forwards wheel to the iframe
     (`ReviewLayer.tsx:245`).
 26. **Journey mode has no screen notes**: note pins and mark mode are suppressed
-    (`showNotes && !journey`, `marking && !journey`, `:524`), `M`/`N` do nothing (`:393`), the notes
-    toggle loses its count (`:514`), and the header offers "Open in Screens" instead — which also
-    flips the left sidebar to the Screens tab (`:497-501`).
+    (`pins && !journey`, `marking && !journey`, `:524`) (**Amended 2026-09-19** (see Amendments):
+    the first condition previously read the Notes-panel flag — the same boolean that mounts §5's
+    panel — and now reads `pins`), `M`/`N` do nothing (`:393`), the notes
+    toggle loses its count (`:514`), the Pins and Mark an area toggles are hidden outright rather
+    than disabled, and the header offers "Open in Screens" instead — which also flips the left
+    sidebar to the Screens tab (`:497-501`).
 27. **A journey in the URL brings its list forward**: the sidebar switches to the Journeys tab
     (`AppSidebar.tsx:25`), and starting a journey from the sidebar or the palette turns the guide on
     (`AppSidebar.tsx:54`, `CommandPalette.tsx:49`).
@@ -779,6 +814,15 @@ Every rule below is implemented; each cites its line.
 37. **Changing the selected component resets the chosen example** (`ComponentsPage.tsx:67`).
 38. **An unknown `state`, `c` or `example` degrades silently** to Default / no selection / the first
     example (`main.tsx:64`, `ComponentsPage.tsx:69,74`, `catalog.ts:38`).
+39. **Entering mark mode turns pins on and leaves them on** (**Amended 2026-09-19** (see
+    Amendments)): every way into `marking` — `M`, the Mark an area toggle, the palette's "Mark an
+    area", and Re-anchor from a note thread — also sets `pins: true` (`store.ts`, `enterMarking`),
+    so a drawn area, a saved note and a re-anchored pin are always visible where they land; before
+    this rule, saving with pins hidden changed nothing on screen but the Notes count. The forcing
+    happens on entry only: turning pins off *while* marking is respected until the next entry, and
+    leaving mark mode by any of its exits never touches `pins`. `N` and the panel's Add note are
+    not mark mode — whole-screen and project notes paint no pin (§7.2) — so they keep forcing the
+    **panel** (`notesPanel: true`), never the pins.
 
 ---
 

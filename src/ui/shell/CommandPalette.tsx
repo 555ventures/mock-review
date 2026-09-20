@@ -1,6 +1,6 @@
 // Reference §9/D11: the ⌘K command palette. Client role hides the Components group and Actions.
 import { useEffect } from 'react'
-import { Blocks, LayoutGrid, Monitor, PanelRight, Route, SquareDashedMousePointer } from 'lucide-react'
+import { Blocks, LayoutGrid, Monitor, PanelRight, Pin, Route, SquareDashedMousePointer } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -23,9 +23,11 @@ export function isPaletteKey(e: KeyboardEvent): boolean {
 export function CommandPalette({
   onMark,
   onToggleNotes,
+  onTogglePins,
 }: {
   onMark?: (() => void) | undefined
   onToggleNotes?: (() => void) | undefined
+  onTogglePins?: (() => void) | undefined
 }) {
   const data = useStore((s) => s.data)
   const paletteOpen = useStore((s) => s.ui.paletteOpen)
@@ -133,6 +135,12 @@ export function CommandPalette({
                   <CommandItem value="Toggle notes panel" onSelect={() => run(onToggleNotes)}>
                     <PanelRight />
                     Toggle notes panel
+                  </CommandItem>
+                )}
+                {onTogglePins && (
+                  <CommandItem value="Toggle pins" onSelect={() => run(onTogglePins)}>
+                    <Pin />
+                    Toggle pins
                   </CommandItem>
                 )}
               </CommandGroup>

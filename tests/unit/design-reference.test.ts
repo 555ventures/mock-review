@@ -14,18 +14,35 @@ const designReferencePath = path.join(repoRoot, 'docs', 'design', 'design-refere
 describe('AC-20260917-03-13: docs/design/design-reference.md carries a dated Amendments entry and drops the retired passages', () => {
   const doc = readFileSync(designReferencePath, 'utf8')
 
-  // D10 (spec 02, 2026-09-18): a new Amendments entry lands on top of the 2026-09-17 one — the
-  // fourth pin tone, the client's Approve/Defer controls, the owner's new Defer, and the
-  // already-landed `Notice` banner. "Newest first" (D7) means the FIRST entry after the heading
-  // must now carry today's date, not 2026-09-17's.
-  it('has a top-level ## Amendments section whose first entry is dated 2026-09-18', () => {
+  // AC-20260919-01-14 (D14): the pre-image version of this test hard-coded a date
+  // (`toContain('2026-09-18')`), which breaks on every future amendment — the next spec pays for
+  // this one's doc edit. Rewritten generically: parse every `### YYYY-MM-DD` entry heading after
+  // `## Amendments` and require the FIRST to be the newest (the maximum), so a 2026-09-20 entry
+  // added above this test would pass unedited and a 2026-09-16 entry added above would fail.
+  //
+  // AC-20260919-01-13 (D13): folded into the same test rather than left standalone, so this can
+  // never pass vacuously before spec 01's own 2026-09-19 Amendments entry actually lands — today
+  // the document's dates alone already satisfy "first is newest" (both existing entries are
+  // 2026-09-18), so only the showNotes/rule-26 half below makes this genuinely fail pre-image.
+  it('AC-20260919-01-13, AC-20260919-01-14: has a top-level ## Amendments section whose first entry is the newest dated entry, and no surviving assertion of the retired showNotes coupling remains', () => {
     const amendmentsMatch = /^## Amendments\b/m.exec(doc)
     expect(amendmentsMatch).not.toBeNull()
-    const from = amendmentsMatch ? amendmentsMatch.index : 0
-    const afterHeading = doc.slice(from + (amendmentsMatch?.[0].length ?? 0))
-    // "Newest first" (D7) — the first entry after the heading must carry today's date.
-    const firstEntry = afterHeading.trimStart()
-    expect(firstEntry.slice(0, 200)).toContain('2026-09-18')
+    const from = amendmentsMatch ? amendmentsMatch.index + amendmentsMatch[0].length : 0
+    const afterHeading = doc.slice(from)
+
+    const headingDates = [...afterHeading.matchAll(/^### (\d{4}-\d{2}-\d{2})\b/gm)]
+      .map((m) => m[1])
+      .filter((d): d is string => d !== undefined)
+    expect(headingDates.length).toBeGreaterThan(0)
+    const first = headingDates[0]
+    if (!first) throw new Error('no dated Amendments entry found')
+    const newest = headingDates.reduce((a, b) => (b > a ? b : a), first)
+    expect(first).toBe(newest)
+
+    // D13: `showNotes` is retired everywhere in the document (§2's Notes toggle passage, §5, and
+    // rule 26's condition), and rule 26 now reads `pins && !journey`.
+    expect(doc).not.toContain('showNotes')
+    expect(doc).toContain('pins && !journey')
   })
 
   it('no longer contains D1\'s retired PROJECT-group membership rule', () => {

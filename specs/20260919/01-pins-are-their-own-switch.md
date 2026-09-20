@@ -1,6 +1,6 @@
 ---
 date: 2026-09-19
-status: hardened
+status: implementing
 tier: standard
 area: ui
 design: false
@@ -9,7 +9,9 @@ depends_on: []
 depended_on_by: []
 brief: n/a
 spiked: 2026-09-19
+build_base: main
 open_markers: 0
+diff_base: b19be20e2ef411a6cdb9ab8e00189eb46adf5cca
 ---
 
 # Pins are their own switch
