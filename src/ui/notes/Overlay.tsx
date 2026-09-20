@@ -3,12 +3,11 @@
 // (`frame/DeviceFrames.tsx`), which also owns pointer-event geometry (it knows the wrapper's scale).
 import type { PointerEvent, WheelEvent } from 'react'
 import { TONE, NotePin } from './notes-ui.js'
-import { SCREEN_ANCHOR, type Box, type UiNote, type Viewport } from './anchor.js'
+import { SCREEN_ANCHOR, type Box, type UiNote } from './anchor.js'
 
 export type VisibleNote = { note: UiNote; box: Box | null; ownDevice: boolean }
 
 export function Overlay({
-  viewport: _viewport,
   visible,
   marking,
   drag,
@@ -20,7 +19,6 @@ export function Overlay({
   onPointerUp,
   onWheel,
 }: {
-  viewport: Viewport
   visible: VisibleNote[]
   marking: boolean
   drag: Box | null

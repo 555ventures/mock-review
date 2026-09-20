@@ -12,7 +12,6 @@ import {
 import { Card } from '../components/ui/card.js'
 import { Overlay, type VisibleNote } from '../notes/Overlay.js'
 import {
-  anchorFor,
   resolveBox,
   resolveGhost,
   rectOf,
@@ -27,8 +26,6 @@ export type DeviceSpec = { key: Viewport; width: number; label: string }
 
 export const GAP = 32
 export const CAPTION = 28
-
-export type DraftBox = { viewport: Viewport; box: Box; whole?: boolean }
 
 function ownDevice(n: UiNote, v: Viewport): boolean {
   return !n.viewport || n.viewport === v
@@ -281,10 +278,13 @@ function Device({
     onDraw(viewport, b)
   }
 
-  // Reference §4 / rule 26: `showNotes` hides the note pins and ghosts only — the draft box and the
-  // marking overlay (`marking`) are independent of the Notes panel, exactly as the prototype gates
-  // them (`ReviewLayer.tsx:212` pins vs `:234` draft / `:241` overlay). Gating the whole `Overlay`
-  // on `showNotes` made "Mark an area" a no-op with the panel closed.
+  // `showNotes` hides the note pins and ghosts only — the draft box and the marking overlay
+  // (`marking`) are independent of the Notes panel, exactly as the prototype gates them
+  // (`ReviewLayer.tsx:212` pins vs `:234` draft / `:241` overlay), and as reference §5 (the panel
+  // "rendered only when `showNotes` is true") plus atlas `37-notes-panel-hidden.png` record it.
+  // Gating the whole `Overlay` on `showNotes` made "Mark an area" a no-op with the panel closed —
+  // the spec-02 escape pinned by AC-20260915-02-2. NOTE: rule 26 is *not* the authority here; it
+  // governs journey mode (`&& !journey`), which is the separate gate applied in `ScreenPage`.
   const visible: VisibleNote[] = showNotes
     ? notes
         .filter((n) => n.screen === screen && sameState(n.state, state))
@@ -329,7 +329,6 @@ function Device({
               />
             ))}
             <Overlay
-              viewport={viewport}
               visible={visible}
               marking={marking}
               drag={drag?.box ?? null}
@@ -420,8 +419,4 @@ export function DeviceFrames({
       ))}
     </div>
   )
-}
-
-export function anchorForDraw(root: HTMLElement, box: Box) {
-  return anchorFor(root, box)
 }
