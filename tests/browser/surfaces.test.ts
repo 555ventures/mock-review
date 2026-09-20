@@ -302,6 +302,16 @@ describe.skipIf(process.env.SKIP_BROWSER === '1')('AC-20260915-02-1/-2/-15/-16: 
         }, SLOW_POLL)
         .toBeGreaterThan(0)
 
+      // Second escape from this AC: the `[data-note]` assertion below used to run straight off the
+      // `notes.json` poll above. That poll only proves the SERVER wrote the file — `addNote` awaits
+      // `refresh()` (`useNoteActions.ts`), so the file lands before the page has re-rendered. The
+      // assertion therefore fired against pre-refresh DOM and read 0 whether or not the panel gates
+      // the pin: it read 0 before the drag too, so it never once observed the state it names, and
+      // would have passed with the gating deleted. Gate on a CLIENT-side signal that only moves
+      // after the refresh applies — the Notes toggle's own count badge, which stays mounted while
+      // the panel is hidden (`TopBar.tsx`) — so what follows is a real observation.
+      await expect.poll(() => notesToggle.innerText(), SLOW_POLL).toMatch(/1/)
+
       // The pin is not in the accessibility tree behind a closed panel — locate it by attribute
       // (gotcha AC-20260915-02-19), and assert the panel did not open itself on commit.
       expect(await page.locator('[data-note]').count()).toBe(0)
