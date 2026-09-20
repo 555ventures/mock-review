@@ -1,6 +1,6 @@
 {
   "name": "@555-ventures/mock-review",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "The mock reviewer CLI and page for the spec pipeline's mock app (contract v3).",
   "license": "MIT",
   "repository": {
