@@ -25,7 +25,8 @@ export type UiState = {
   selected: string | null
   cardOpen: boolean
   draft: Draft | null
-  showNotes: boolean
+  notesPanel: boolean // was: showNotes — mounts the right-hand panel (and the JourneyPanel)
+  pins: boolean // was: showNotes — paints note pins and ghosts on the mock (rule 39)
   paletteOpen: boolean
 }
 
@@ -59,7 +60,7 @@ const EMPTY_STATE: ServerState = {
 
 export { EMPTY_STATE }
 
-function initialUi(): UiState {
+export function initialUi(): UiState {
   return {
     view: getView(),
     sideTab: getSideTab(),
@@ -69,9 +70,16 @@ function initialUi(): UiState {
     selected: null,
     cardOpen: false,
     draft: null,
-    showNotes: true,
+    notesPanel: true,
+    pins: true,
     paletteOpen: false,
   }
+}
+
+/** Rule 39: every entry into mark mode turns pins on and leaves them on. The spread order makes
+ * the rule unoverridable; the `Omit` makes it uncircumventable. */
+export function enterMarking(extra: Partial<Omit<UiState, 'marking' | 'pins'>> = {}): Partial<UiState> {
+  return { ...extra, marking: true, pins: true }
 }
 
 export type Store = {
@@ -124,7 +132,8 @@ export function createStore(): Store {
       state = { ...state, ui: { ...state.ui, ...resolved } }
       // D2/rule 31: `view`, `sideTab` and `guideOn` are the three prefs the reference persists
       // across a reload — every path that changes them goes through this one store update, so
-      // this is the one place that needs to call back out to `prefs.ts`.
+      // this is the one place that needs to call back out to `prefs.ts`. `notesPanel` and `pins`
+      // (D1) are chrome like the other five UiState fields, deliberately not among the three.
       if (resolved.view !== undefined) setView(resolved.view)
       if (resolved.sideTab !== undefined) setSideTab(resolved.sideTab)
       if (resolved.guideOn !== undefined) setGuideOn(resolved.guideOn)

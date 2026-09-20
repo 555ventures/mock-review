@@ -1,5 +1,5 @@
 // Reference §2: screen-mode top bar.
-import { ChevronDown, Columns2, Monitor, PanelRight, Smartphone, SquareDashedMousePointer } from 'lucide-react'
+import { ChevronDown, Columns2, Monitor, Pin, PanelRight, Smartphone, SquareDashedMousePointer } from 'lucide-react'
 import { Kbd } from '../components/ui/kbd.js'
 import { Badge } from '../components/ui/badge.js'
 import {
@@ -47,8 +47,10 @@ export function TopBar({
   reanchorId,
   marking,
   onMarkingChange,
-  showNotes,
-  onShowNotesChange,
+  pins,
+  onPinsChange,
+  notesPanel,
+  onNotesPanelChange,
   notesOnScreenCount,
   onOpenInScreens,
   hasMobile,
@@ -64,8 +66,10 @@ export function TopBar({
   reanchorId: string | null
   marking: boolean
   onMarkingChange: (v: boolean) => void
-  showNotes: boolean
-  onShowNotesChange: (v: boolean) => void
+  pins: boolean
+  onPinsChange: (v: boolean) => void
+  notesPanel: boolean
+  onNotesPanelChange: (v: boolean) => void
   notesOnScreenCount: number
   onOpenInScreens: () => void
 }) {
@@ -182,8 +186,18 @@ export function TopBar({
             <TooltipContent>Drag over the mock to note an area · Esc exits</TooltipContent>
           </Tooltip>
         )}
+        {!journey && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Toggle variant="outline" size="sm" pressed={pins} onPressedChange={onPinsChange}>
+                <Pin /> Pins
+              </Toggle>
+            </TooltipTrigger>
+            <TooltipContent>Show note pins on the mock · Mark an area turns them on</TooltipContent>
+          </Tooltip>
+        )}
         <Separator orientation="vertical" className="mx-1 data-vertical:h-4 data-vertical:self-auto" />
-        <Toggle variant="outline" size="sm" pressed={showNotes} onPressedChange={onShowNotesChange}>
+        <Toggle variant="outline" size="sm" pressed={notesPanel} onPressedChange={onNotesPanelChange}>
           <PanelRight /> Notes{!journey && <Badge variant="secondary">{notesOnScreenCount}</Badge>}
         </Toggle>
       </div>

@@ -19,7 +19,7 @@ import {
   type UiNote,
   type Viewport,
 } from '../notes/anchor.js'
-import { sameState } from '../store/selectors.js'
+import { areaNotesOn, sameState } from '../store/selectors.js'
 import { frameSrc, parseFrameHash, replaceFrameHash, sameScreenState } from './frameRoute.js'
 
 export type DeviceSpec = { key: Viewport; width: number; label: string }
@@ -123,7 +123,7 @@ function Device({
   theme,
   title,
   notes,
-  showNotes,
+  pins,
   marking,
   draft,
   ring,
@@ -144,7 +144,7 @@ function Device({
   theme: string | null
   title: string
   notes: UiNote[]
-  showNotes: boolean
+  pins: boolean
   marking: boolean
   draft: Box | null
   ring: string[]
@@ -278,17 +278,16 @@ function Device({
     onDraw(viewport, b)
   }
 
-  // `showNotes` hides the note pins and ghosts only — the draft box and the marking overlay
-  // (`marking`) are independent of the Notes panel, exactly as the prototype gates them
-  // (`ReviewLayer.tsx:212` pins vs `:234` draft / `:241` overlay), and as reference §5 (the panel
-  // "rendered only when `showNotes` is true") plus atlas `37-notes-panel-hidden.png` record it.
-  // Gating the whole `Overlay` on `showNotes` made "Mark an area" a no-op with the panel closed —
-  // the spec-02 escape pinned by AC-20260915-02-2. NOTE: rule 26 is *not* the authority here; it
-  // governs journey mode (`&& !journey`), which is the separate gate applied in `ScreenPage`.
-  const visible: VisibleNote[] = showNotes
-    ? notes
-        .filter((n) => n.screen === screen && sameState(n.state, state))
-        .map((n) => ({ note: n, box: boxes[n.id] ?? null, ownDevice: ownDevice(n, viewport) }))
+  // Rule 39: `pins` gates the note pins and ghosts only — the draft box and the marking overlay
+  // (`marking`) are independent of it, exactly as the prototype gated them (`ReviewLayer.tsx:212`
+  // pins vs `:234` draft / `:241` overlay). Gating the whole `Overlay` on the panel's own boolean
+  // made "Mark an area" a no-op with the panel closed — the spec-02 escape pinned by
+  // AC-20260915-02-2. `areaNotesOn` (D5) owns the whole-note exclusion; measurement above still
+  // sees every note (D6) so `isOutdatedNote` keeps reading a box map that includes whole-screen
+  // notes. NOTE: rule 26 is *not* the authority here; it governs journey mode (`&& !journey`),
+  // which is the separate gate applied in `ScreenPage`.
+  const visible: VisibleNote[] = pins
+    ? areaNotesOn(screen, state, notes).map((n) => ({ note: n, box: boxes[n.id] ?? null, ownDevice: ownDevice(n, viewport) }))
     : []
 
   return (
@@ -356,7 +355,7 @@ export function DeviceFrames({
   theme,
   title,
   notes,
-  showNotes,
+  pins,
   marking,
   draftByViewport,
   ring,
@@ -377,7 +376,7 @@ export function DeviceFrames({
   theme: string | null
   title: string
   notes: UiNote[]
-  showNotes: boolean
+  pins: boolean
   marking: boolean
   draftByViewport: (v: Viewport) => Box | null
   ring: string[]
@@ -403,7 +402,7 @@ export function DeviceFrames({
           theme={theme}
           title={title}
           notes={notes}
-          showNotes={showNotes}
+          pins={pins}
           marking={marking}
           draft={draftByViewport(spec.key)}
           ring={ring}

@@ -85,6 +85,19 @@ export function statesOf(screen: { meta?: { states?: string[] }; examples?: Reco
   return ordered
 }
 
+/** D5/rule 39: the notes that paint on the mock for this screen/state. Filters on `whole`, never
+ * on `component === SCREEN_ANCHOR`: `anchorFor` resolves an area note to `SCREEN_ANCHOR` whenever
+ * no `[data-component]` ancestor is found — which is every note on every host today — so a
+ * component-based filter would blank every pin in production. Project notes already carry
+ * `screen: null` and are excluded by the screen test alone; no separate `project` clause exists. */
+export function areaNotesOn<N extends { screen: string | null; state: string | null; whole?: boolean }>(
+  screen: string,
+  state: string,
+  notes: readonly N[],
+): N[] {
+  return notes.filter((n) => n.screen === screen && sameState(n.state, state) && !n.whole)
+}
+
 /** D21: the page's actual state list for a `ServerState.screens[]` row. The row itself carries
  * `states` (the raw `meta.states` entries) and `examples` (the screen module's example keys,
  * D21) as flat arrays; this adapts that shape into `statesOf`'s duck-typed module shape so every

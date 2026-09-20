@@ -12,7 +12,7 @@ on 2026-09-15.
 | file | what it is |
 | --- | --- |
 | `design-reference.md` | the written contract: every surface, control, state, tone, shortcut and behaviour rule, each cited to `file:line` in the prototype |
-| `atlas/` | 59 screenshots — one per surface/state named `NN-<surface>-<state>.png` |
+| `atlas/` | 60 screenshots — one per surface/state named `NN-<surface>-<state>.png` |
 | `capture-atlas.mjs` | the exact Playwright script that produced the atlas |
 
 ## The rule
@@ -53,3 +53,11 @@ Two notes on reproducing it:
   in the earlier shots too.
 - Screenshot numbering is sequential in script order, so inserting a capture renumbers everything
   after it. The reference cites files by name — update both together.
+- **Not every shot still comes from the prototype.** `06-topbar-chrome-screen-mode.png`,
+  `37-notes-panel-hidden.png` and `60-pins-hidden-panel-open.png` were re-captured from *this
+  package* (`mock-review serve` against `tests/fixtures/host`, same 1600×1000 / `deviceScaleFactor: 1`
+  framing) because they photograph the Pins toggle, which has no prototype counterpart
+  (`design-reference.md` §2, rule 39, and the 2026-09-19 Amendments entry). Re-running
+  `capture-atlas.mjs` against the prototype would overwrite `06` and `37` with pre-split versions
+  that show no Pins control and an empty canvas behind a hidden panel — restore those three from
+  git rather than from a prototype run.

@@ -18,7 +18,7 @@ import { locate, type LocateEdge } from '../journeys/locate.js'
 import { href, type Route } from '../router/route.js'
 import { screenLabel } from '../store/labels.js'
 import { journeyTone, notesHere, projectNotes, sameState, screenStates } from '../store/selectors.js'
-import { getStore, useStore } from '../store/store.js'
+import { enterMarking, getStore, useStore } from '../store/store.js'
 import type { Verdict } from '../notes/notes-ui.js'
 import type { JourneyConversation } from '../../schemas/index.js'
 import { useShortcuts } from './useShortcuts.js'
@@ -79,17 +79,15 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   const selected = ui.selected
   const cardOpen = ui.cardOpen
   const draft = ui.draft
-  // `showNotes` is chrome, like `view`/`sideTab`/`guideOn` (reference rule 31 lists only
-  // `guide-off`/`view`/`side-tab` as sessionStorage-persisted; `showNotes` is not among them, so it
-  // stays store-only, no `prefs.ts` entry) — read/written through the store like the other five,
-  // but deliberately NOT part of the screen-change reset above: it must survive navigation.
-  const showNotes = ui.showNotes
-
-  // D27: reset on `route.screen` only — a state or journey-step change within the same screen
-  // must reset nothing, so `route.screen` (not `route` itself) is the only dependency.
-  useEffect(() => {
-    getStore().setUi({ marking: false, reanchor: null, selected: null, cardOpen: false, draft: null })
-  }, [route.screen])
+  // D1: `notesPanel` and `pins` are chrome, like `view`/`sideTab`/`guideOn` (reference rule 31
+  // lists only `guide-off`/`view`/`side-tab` as sessionStorage-persisted; neither successor of
+  // `showNotes` joins them, so both stay store-only, no `prefs.ts` entry) — read/written through
+  // the store like the other five, but deliberately NOT part of the screen-change reset below:
+  // they must survive navigation. `notesPanel` mounts the right-hand panel (and the JourneyPanel);
+  // `pins` paints note pins and ghosts on the mock — two unrelated jobs the old single boolean
+  // conflated (rule 39).
+  const notesPanel = ui.notesPanel
+  const pins = ui.pins
 
   const rootsRef = useRef<Partial<Record<Viewport, HTMLElement | null>>>({})
   const [frameLoads, setFrameLoads] = useState(0)
@@ -109,6 +107,15 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   const notesListRef = useRef<HTMLDivElement>(null)
   const scrollToRow = useRef<string | null>(null)
 
+  // D27: reset on `route.screen` only — a state or journey-step change within the same screen
+  // must reset nothing, so `route.screen` (not `route` itself) is the only dependency. D9: the
+  // scroll-to-row marker is cleared here too, so a pin click just before navigating away never
+  // fires a scroll on the new screen's list.
+  useEffect(() => {
+    getStore().setUi({ marking: false, reanchor: null, selected: null, cardOpen: false, draft: null })
+    scrollToRow.current = null
+  }, [route.screen])
+
   // Rule 18: selecting a note from the mock scrolls the sidebar's own note list to that row — it
   // never scrolls the page. A list ref (`notesListRef`, passed down to `NotesPanel`) plus a
   // `[data-row]` attribute on each row (`notes/notes-ui.tsx`'s `NoteRow`) let this reach into the
@@ -117,7 +124,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   // up and scroll the document too.
   const select = useCallback(
     (id: string, fromList: boolean) => {
-      if (!fromList) scrollToRow.current = id
+      scrollToRow.current = fromList ? null : id
       const n = notes.find((x) => x.id === id)
       if (!n) return
       if (n.project) {
@@ -133,18 +140,28 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   useEffect(() => {
     const id = scrollToRow.current
     if (!id) return
-    scrollToRow.current = null
     const root = notesListRef.current
     const row = root?.querySelector<HTMLElement>(`[data-row="${id}"]`)
     const scrollParent = row?.closest<HTMLElement>('[data-notes-scroll]')
     if (!row || !scrollParent) return
-    const rowRect = row.getBoundingClientRect()
-    const parentRect = scrollParent.getBoundingClientRect()
-    const delta = rowRect.top - parentRect.top
-    if (delta < 0 || delta + rowRect.height > parentRect.height) {
-      scrollParent.scrollTop += delta - parentRect.height / 2 + rowRect.height / 2
-    }
-  }, [selected])
+    scrollToRow.current = null
+    const win = row.ownerDocument.defaultView ?? window
+    // Two rAFs: `[data-notes-scroll]`'s enclosing `ResizablePanel` sizes itself off a
+    // `ResizeObserver` on remount (react-resizable-panels), which settles a frame after this
+    // effect's own commit — reading `getBoundingClientRect` synchronously here (as the D9 patch
+    // text shows) races that resize and measures against its pre-settled full-height layout,
+    // scrolling short. Same coalescing idiom as `DeviceFrames.tsx`'s `bump` (rule 17).
+    win.requestAnimationFrame(() =>
+      win.requestAnimationFrame(() => {
+        const rowRect = row.getBoundingClientRect()
+        const parentRect = scrollParent.getBoundingClientRect()
+        const delta = rowRect.top - parentRect.top
+        if (delta < 0 || delta + rowRect.height > parentRect.height) {
+          scrollParent.scrollTop += delta - parentRect.height / 2 + rowRect.height / 2
+        }
+      }),
+    )
+  }, [selected, notesPanel])
 
   useEffect(() => {
     if (!marking) getStore().setUi({ reanchor: null })
@@ -164,7 +181,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
 
   const noteOnScreen = (target: 'here' | 'project' = 'here') => {
     getStore().setUi({
-      showNotes: true,
+      notesPanel: true,
       marking: false,
       reanchor: null,
       cardOpen: false,
@@ -227,7 +244,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     marking,
     draftOpen: draft?.open ?? false,
     journey: !!journey,
-    onToggleMark: () => getStore().setUi((u) => ({ marking: !u.marking })),
+    onToggleMark: () => getStore().setUi((u) => (u.marking ? { marking: false } : enterMarking())),
     onEscape: () => getStore().setUi({ marking: false, reanchor: null }),
     onNewNote: () => noteOnScreen(),
   })
@@ -285,9 +302,11 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
           }}
           reanchorId={reanchor}
           marking={marking}
-          onMarkingChange={(v) => getStore().setUi({ marking: v })}
-          showNotes={showNotes}
-          onShowNotesChange={(v) => getStore().setUi({ showNotes: v })}
+          onMarkingChange={(v) => getStore().setUi(v ? enterMarking() : { marking: false })}
+          pins={pins}
+          onPinsChange={(v) => getStore().setUi({ pins: v })}
+          notesPanel={notesPanel}
+          onNotesPanelChange={(v) => getStore().setUi({ notesPanel: v })}
           notesOnScreenCount={here.length}
           onOpenInScreens={() => getStore().setUi({ sideTab: 'screens' })}
           hasMobile={hasMobile}
@@ -303,7 +322,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             theme={config?.theme ?? null}
             title={screenLabel(route.screen)}
             notes={notes}
-            showNotes={showNotes && !journey}
+            pins={pins && !journey}
             marking={marking && !journey}
             draftByViewport={(v) => (draft && draft.viewport === v && !draft.whole ? draft.box : null)}
             ring={guideRing}
@@ -332,7 +351,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
         </div>
       </SidebarInset>
 
-      {showNotes &&
+      {notesPanel &&
         (journey ? (
           <div className="sticky top-0 flex h-svh w-80 flex-col border-l bg-sidebar">
             <JourneyPanel
@@ -378,7 +397,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
         onOpenChange={(open) => !open && getStore().setUi({ cardOpen: false })}
         onReanchor={() => {
           if (!selectedNote) return
-          getStore().setUi({ cardOpen: false, draft: null, reanchor: selectedNote.id, marking: true })
+          getStore().setUi(enterMarking({ cardOpen: false, draft: null, reanchor: selectedNote.id }))
         }}
         onReply={(text) => selectedNote && void actions.replyNote(selectedNote.id, text)}
         onVerdict={(v: Verdict) => {
@@ -394,10 +413,13 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
       <CommandPalette
         onMark={
           role === 'owner' && !journey
-            ? () => getStore().setUi({ draft: null, cardOpen: false, marking: true })
+            ? () => getStore().setUi(enterMarking({ draft: null, cardOpen: false }))
             : undefined
         }
-        onToggleNotes={role === 'owner' ? () => getStore().setUi((u) => ({ showNotes: !u.showNotes })) : undefined}
+        onToggleNotes={role === 'owner' ? () => getStore().setUi((u) => ({ notesPanel: !u.notesPanel })) : undefined}
+        onTogglePins={
+          role === 'owner' && !journey ? () => getStore().setUi((u) => ({ pins: !u.pins })) : undefined
+        }
       />
     </>
   )
