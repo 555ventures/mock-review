@@ -93,6 +93,34 @@ html.cv-html body {
   font-size: 15px;
   font-weight: 500;
 }
+.cv-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin-left: -4px;
+  padding-right: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.cv-home:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.cv-side .cv-home {
+  margin-bottom: 12px;
+}
+.cv-after {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin-top: 20px;
+}
+.cv-after .cv-home {
+  margin-left: 0;
+}
 .cv-heading {
   font-size: 20px;
   line-height: 1.3;

@@ -22,18 +22,25 @@ export function quote(sentence: string): string {
   return `“${sentence}”`
 }
 
-/** Phone: project name left, position right, progress in segments filled up to here. */
+/** The way back to the stories page: always top-left, always the same words, named after where
+ * it goes. Shown only when there is a stories page (more than one story). */
+export function HomeLink({ href }: { href: string }) {
+  return (
+    <a className="cv-home" href={href}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      All stories
+    </a>
+  )
+}
+
+/** Phone: the way back (or the project name) left, position right, progress in segments. */
 export function PhoneBar({ project, projectHref, position, total, done, always = false }: { project: string; projectHref: string | null; position: string | null; total: number; done: number; always?: boolean }) {
   return (
     <header className={always ? "cv-bar cv-bar--always" : "cv-bar"}>
       <div className="cv-bar-row">
-        {projectHref ? (
-          <a className="cv-project" href={projectHref}>
-            {project}
-          </a>
-        ) : (
-          <span className="cv-project">{project}</span>
-        )}
+        {projectHref ? <HomeLink href={projectHref} /> : <span className="cv-project">{project}</span>}
         {position && <span className="cv-steptitle">{position}</span>}
       </div>
       {total > 0 && (
@@ -69,13 +76,8 @@ export function SideColumn({
   return (
     <nav className="cv-side" aria-label="The story">
       <div className="cv-side-inner">
-      {projectHref ? (
-        <a className="cv-project" href={projectHref}>
-          {project}
-        </a>
-      ) : (
-        <span className="cv-project">{project}</span>
-      )}
+      {projectHref && <HomeLink href={projectHref} />}
+      <span className="cv-project">{project}</span>
       <span className="cv-steptitle">{title}</span>
       <ol className="cv-side-steps">
         {steps.map((s) => {

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import type { ServerJourney, ServerState } from '../../schemas/patches.js'
 import { roundOf } from '../sync/walkthrough.js'
 import { Thumb } from './ClientFrame.js'
-import { Check, PhoneBar, SideColumn, StoryChangedBand, quote, useDesktop } from './parts.js'
+import { Check, HomeLink, PhoneBar, SideColumn, StoryChangedBand, quote, useDesktop } from './parts.js'
 import { confirmStory } from './actions.js'
 import { changesOf, confirmationOf, dayMonth, isWaiting, notesOnStep, numberedNotes, plural, sentenceChanged, widthsOf, type Step } from './model.js'
 import { clientHref } from './route.js'
@@ -46,11 +46,28 @@ export function StoryPage({ data, project, journey, steps, multi }: { data: Serv
   if (journey.beats === null) {
     confirmBlock = <p>This story is not written yet.</p>
   } else if (confirmation && !stale) {
+    // Once a story is confirmed the reader is done here: offer the next one that still needs
+    // them, in the stories page's own order, and the way back.
+    const next = multi ? data.journeys.find((j) => j.id !== journey.id && j.beats !== null && (confirmationOf(j, data.approval)?.stale ?? true)) : undefined
     confirmBlock = (
-      <p className="cv-confirmed" role="status">
-        <Check />
-        You confirmed this story on {dayMonth(confirmation.at)}.
-      </p>
+      <>
+        <p className="cv-confirmed" role="status">
+          <Check />
+          You confirmed this story on {dayMonth(confirmation.at)}.
+        </p>
+        {multi && (
+          <div className="cv-after">
+            {next ? (
+              <a className="cv-btn cv-btn--ink" href={clientHref({ kind: 'step', journey: next.id, step: 1 })}>
+                Read the next story: {next.title}
+              </a>
+            ) : (
+              <p>You confirmed every story.</p>
+            )}
+            <HomeLink href="#/" />
+          </div>
+        )}
+      </>
     )
   } else {
     confirmBlock = (
