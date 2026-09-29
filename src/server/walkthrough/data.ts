@@ -117,11 +117,23 @@ export async function screenRows(db: Db, project: string, round: number): Promis
 }
 
 export type StepIn = { screen: string; beat?: string; state?: string }
-type JourneyRow = { id: string; title: string | null; persona: string | null; steps: StepIn[]; beats: string | null }
+type JourneyRow = {
+  id: string
+  title: string | null
+  persona: string | null
+  steps: StepIn[]
+  beats: string | null
+  actor: string | null
+  variant_of: string | null
+}
+
+/** A served journey plus the stories page's two optional fields (docs/design/client-view.md §5),
+ * present only when the push carried them — the frozen `ServerJourney` schema is not widened. */
+export type WalkJourney = ServerJourney & { actor?: string; variantOf?: string }
 
 export async function journeyRows(db: Db, project: string, round: number): Promise<JourneyRow[]> {
   const { rows } = await db.query<JourneyRow>(
-    'select id, title, persona, steps, beats from journeys where project = $1 and round = $2 order by ord, id',
+    'select id, title, persona, steps, beats, actor, variant_of from journeys where project = $1 and round = $2 order by ord, id',
     [project, round],
   )
   return rows
@@ -145,7 +157,7 @@ function groupScreens(rows: ScreenRow[]): { name: string; states: string[]; spec
 /** Seam B: edges = consecutive steps whose screens differ, labelled with the destination screen's
  * name; an edge resolves when the from-step's spec (its own state, else the screen's first) has an
  * element whose `navigate` target is that label. Reason strings copy src/analysis/journeys.ts. */
-function toServerJourney(row: JourneyRow, screens: ReturnType<typeof groupScreens>, kind: RoundKind): ServerJourney {
+function toServerJourney(row: JourneyRow, screens: ReturnType<typeof groupScreens>, kind: RoundKind): WalkJourney {
   const steps: Journey['steps'] = row.steps.map((s) => ({
     screen: s.screen,
     ...(s.beat !== undefined ? { beat: s.beat } : {}),
@@ -178,6 +190,8 @@ function toServerJourney(row: JourneyRow, screens: ReturnType<typeof groupScreen
     id: row.id,
     title: row.title ?? row.id,
     ...(row.persona !== null ? { persona: row.persona } : {}),
+    ...(row.actor !== null ? { actor: row.actor } : {}),
+    ...(row.variant_of !== null ? { variantOf: row.variant_of } : {}),
     steps,
     edges,
     resolved: unresolved.length === 0,
@@ -443,7 +457,7 @@ async function projectName(db: Db, project: string): Promise<string | null> {
   return rows[0]?.name ?? null
 }
 
-export async function servedJourneys(db: Db, project: string, round: RoundRow): Promise<ServerJourney[]> {
+export async function servedJourneys(db: Db, project: string, round: RoundRow): Promise<WalkJourney[]> {
   const screens = groupScreens(await screenRows(db, project, round.n))
   return (await journeyRows(db, project, round.n)).map((j) => toServerJourney(j, screens, round.kind))
 }
@@ -460,7 +474,7 @@ export async function buildState(db: Db, project: string, role: 'owner' | 'clien
     projectName(db, project),
   ])
   let screens: ServerScreen[] = []
-  let journeys: ServerJourney[] = []
+  let journeys: WalkJourney[] = []
   if (round) {
     const grouped = groupScreens(screenData)
     screens = grouped.map((s) => ({ name: s.name, file: '', states: s.states, shell: null, hash: '', lines: 0, examples: s.states }))

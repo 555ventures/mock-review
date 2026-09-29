@@ -115,6 +115,97 @@ export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
+// ---------------------------------------------------------------- the stories page (§5)
+
+/** `actor` / `variantOf` from the push (§5), read without widening the frozen journey schema. */
+export function actorOf(journey: ServerJourney): string | null {
+  const v = (journey as { actor?: unknown }).actor
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+export function variantOf(journey: ServerJourney): string | null {
+  const v = (journey as { variantOf?: unknown }).variantOf
+  return typeof v === 'string' && v ? v : null
+}
+
+export type Section = 'needs' | 'unread' | 'confirmed'
+
+/** The most urgent first. */
+export const SECTIONS: { id: Section; title: string }[] = [
+  { id: 'needs', title: 'Needs you' },
+  { id: 'unread', title: 'Not read yet' },
+  { id: 'confirmed', title: 'Confirmed' },
+]
+
+export type Mark = 'dot' | 'check' | null
+
+/** One story's (or variant's) standing for this reader. */
+export type StoryStatus = {
+  section: Section
+  /** The status line, in the exact words of §5. */
+  words: string
+  mark: Mark
+  /** Confirmed at some point (fresh or stale): the tile opens the whole story. */
+  confirmed: boolean
+}
+
+export function storyStatus(journey: ServerJourney, data: ServerState, all: NumberedNote[]): StoryStatus {
+  const steps = stepsOf(journey, data)
+  const onStory = new Map<string, UiNote>()
+  for (const s of steps) for (const { note } of notesOnStep(all, s)) onStory.set(note.id, note)
+  const notes = [...onStory.values()]
+  // "a note of theirs has an answer they have not closed": the reader wrote it, the team answered.
+  const answers = notes.filter((n) => isOwn(n) && n.status === 'answered').length
+  const waiting = notes.filter(isWaiting).length
+  const confirmation = confirmationOf(journey, data.approval)
+  const stale = confirmation?.stale ?? false
+  const confirmed = confirmation !== null
+
+  const section: Section = stale || answers > 0 ? 'needs' : confirmed ? 'confirmed' : 'unread'
+  let words: string
+  let mark: Mark = null
+  if (stale) {
+    words = 'Changed since you confirmed'
+    mark = 'dot'
+  } else if (answers > 0) {
+    words = plural(answers, 'answer to read', 'answers to read')
+    mark = 'dot'
+  } else if (waiting > 0) {
+    words = plural(waiting, 'note waiting for an answer', 'notes waiting for an answer')
+  } else if (confirmation) {
+    words = `Confirmed on ${dayMonth(confirmation.at)}`
+    mark = 'check'
+  } else {
+    words = wasRead(journey.id) ? 'Read, not confirmed yet' : 'Not read yet'
+  }
+  return { section, words, mark, confirmed }
+}
+
+const URGENCY: Record<Section, number> = { needs: 0, unread: 1, confirmed: 2 }
+
+export function mostUrgent(sections: Section[]): Section {
+  return sections.reduce((a, b) => (URGENCY[b] < URGENCY[a] ? b : a), 'confirmed')
+}
+
+/** A main story with its variants (push order). A variant whose main is missing or is itself a
+ * variant (the server refuses both, so only a hand-edited row) stands as a main story. */
+export type StoryGroup = { main: ServerJourney; variants: ServerJourney[] }
+
+export function storyGroups(journeys: ServerJourney[]): StoryGroup[] {
+  const byId = new Map(journeys.map((j) => [j.id, j]))
+  const mainOf = (j: ServerJourney): string | null => {
+    const of = variantOf(j)
+    const main = of === null || of === j.id ? undefined : byId.get(of)
+    return main && variantOf(main) === null ? main.id : null
+  }
+  const groups: StoryGroup[] = journeys.filter((j) => mainOf(j) === null).map((main) => ({ main, variants: [] }))
+  for (const j of journeys) {
+    const of = mainOf(j)
+    if (of !== null) groups.find((g) => g.main.id === of)?.variants.push(j)
+  }
+  return groups
+}
+
 // ---------------------------------------------------------------- "Not read yet" (this browser)
 
 function readKey(journeyId: string): string {

@@ -61,6 +61,8 @@ function pickImage(images: { width: number; url: string }[], width: number): { w
  * it), and a navigate press never moves the host — the client view decides what a press means. */
 const FIT = param('fit') === '1'
 
+const PINNED = param('round') !== null
+
 /** A navigate press outside a journey step moves the reviewer to that screen (inside a journey
  * step the guide intercepts the click first, in the capture phase, and advances the journey). */
 function navigateParent(to: string): void {
@@ -79,9 +81,16 @@ function Frame() {
   useEffect(() => {
     const bump = () => setTick((t) => t + 1)
     window.addEventListener('hashchange', bump)
-    const unsubscribe = subscribe((e) => {
-      if (e === 'files') bump()
-    })
+    // A frame pinned to a round (`&round=n`) never needs the `files` event: a pushed round does not
+    // change (pushing its number again is refused). Not opening a stream per pinned frame matters:
+    // the browser allows 6 connections per host, and a page of small frames (the stories page's
+    // strips, the whole story) would otherwise hold one open stream each and starve every other
+    // request.
+    const unsubscribe = PINNED
+      ? () => undefined
+      : subscribe((e) => {
+          if (e === 'files') bump()
+        })
     if (import.meta.hot) import.meta.hot.on('mock-review:frame-reload', bump)
     return () => {
       window.removeEventListener('hashchange', bump)

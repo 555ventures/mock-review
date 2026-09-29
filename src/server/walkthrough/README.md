@@ -50,8 +50,11 @@ Seam C (`Authorization: Bearer <WALKTHROUGH_API_TOKEN>`; `GET /v1` is open):
 
 - `GET /v1` → `{apiVersion:1}`
 - `POST /v1/projects/<p>/rounds` → 201 `{apiVersion, round, kind, status, viewports, screens, journeys:[{id, beats}]}`;
+  a journey may carry `actor` (≤ 60 chars) and `variantOf` (another journey id of the same push,
+  not itself a variant); both are served on `state.journeys[]` only when pushed;
   screenshots `screens[]` carry `upload` (the PUT path). 409 `round-exists`; 400 `bad-request`,
-  `bad-journey`, `beats-mismatch`, `bad-spec` (`detail: {propCheck:'gray-catalog'|'structure-only', issues:[{screen,state,elementKey?,severity,code,message}]}`).
+  `bad-journey`, `beats-mismatch`, `unknown-variant-of` (a journey's `variantOf` names no journey
+  of the push), `chained-variant` (it names a journey that is itself a variant, or itself), `bad-spec` (`detail: {propCheck:'gray-catalog'|'structure-only', issues:[{screen,state,elementKey?,severity,code,message}]}`).
 - `PUT /v1/projects/<p>/rounds/<n>/images/<name>--<state>--<width>` (raw PNG) →
   `{apiVersion, round, name, state, width, bytes, remaining, status}`; 400 `not-png`, 404
   `unknown-round` / `unknown-picture`, 409 `not-screenshots`.

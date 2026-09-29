@@ -279,6 +279,87 @@ export function ClientFrame({
   )
 }
 
+// ---------------------------------------------------------------- small frames
+
+/** How far outside the viewport a lazy small frame starts loading. */
+const NEAR = '400px 0px'
+
+/** A small, non-interactive frame: the top `width × height` of the screen, scaled to the box's
+ * width (the whole story's storyboard; the stories page's strips, cropped to 4:3). Until the
+ * screen is drawn the box is the slate placeholder at its final size. With `lazy`, the frame
+ * document is not requested until the box comes near the viewport. */
+export function Thumb({
+  round,
+  width,
+  height,
+  screen,
+  state,
+  lazy = false,
+}: {
+  round: number | null
+  width: number
+  height: number
+  screen: string
+  state: string
+  lazy?: boolean
+}) {
+  const outer = useRef<HTMLDivElement>(null)
+  const frame = useRef<HTMLIFrameElement>(null)
+  const [w, setW] = useState(0)
+  const [near, setNear] = useState(!lazy)
+  const [load, setLoad] = useState(0)
+  const [drawn, setDrawn] = useState(false)
+  useLayoutEffect(() => {
+    const el = outer.current
+    if (!el) return
+    const measure = () => setW(el.clientWidth)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  useEffect(() => {
+    const el = outer.current
+    if (near || !el) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setNear(true)
+      },
+      { rootMargin: NEAR },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [near])
+  useEffect(() => {
+    const win = frame.current?.contentWindow as (Window & typeof globalThis) | null | undefined
+    const root = win?.document.getElementById('root')
+    if (!win || !root) return
+    const hash = buildFrameHash({ kind: 'screen', screen, state })
+    const check = () => setDrawn(root.getAttribute('data-shown') === hash)
+    const mo = new win.MutationObserver(check)
+    mo.observe(root, { attributes: true, attributeFilter: ['data-shown'] })
+    check()
+    return () => mo.disconnect()
+  }, [load, screen, state])
+  const scale = w / width
+  return (
+    <div ref={outer} className="cv-thumb" style={{ aspectRatio: `${width} / ${height}` }} data-near={near}>
+      {near && (
+        <iframe
+          ref={frame}
+          src={frameSrc(round, width, screen, state)}
+          title=""
+          aria-hidden
+          tabIndex={-1}
+          data-visible={drawn}
+          onLoad={() => setLoad((n) => n + 1)}
+          style={{ width, height, transform: `scale(${scale || 0})` }}
+        />
+      )}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- hidden probes
 
 /** Measures, one at a time in hidden frames, the steps whose height is not known yet, so moving to

@@ -19,6 +19,8 @@ const Segment = z
   .regex(/^[A-Za-z0-9_.-]+$/, 'letters, digits, "_", "." and "-" only')
   .refine((s) => !s.includes('--'), 'may not contain "--"')
 
+export const ACTOR_MAX = 60
+
 const PushSchema = z
   .object({
     round: z.number().int().min(1),
@@ -32,6 +34,10 @@ const PushSchema = z
             title: z.string().optional(),
             persona: z.string().optional(),
             beats: z.string().nullable().optional(),
+            // docs/design/client-view.md §5: who the story is about ("Mika, clinic owner"), and
+            // the id of the main story this one is an alternate path of.
+            actor: z.string().trim().min(1).max(ACTOR_MAX).optional(),
+            variantOf: Segment.optional(),
             steps: z.array(z.object({ beat: z.string().optional(), screen: Segment, state: Segment.optional() }).strict()),
           })
           .strict(),
@@ -91,6 +97,21 @@ function checkPushShape(push: Push): { error: string; detail: unknown } | null {
     })
   }
   if (journeyProblems.length > 0) return { error: 'bad-journey', detail: journeyProblems }
+
+  // A variant sits under its main story, one level deep: `variantOf` names another journey of
+  // this push, and that journey is not itself a variant (nor is a journey its own variant).
+  const dangling: string[] = []
+  const chained: string[] = []
+  for (const j of push.journeys) {
+    if (j.variantOf === undefined) continue
+    const main = push.journeys.find((m) => m.id === j.variantOf)
+    if (!main) dangling.push(`journey ${j.id}: variantOf "${j.variantOf}" is not a journey of this round`)
+    else if (main.variantOf !== undefined || main.id === j.id) {
+      chained.push(`journey ${j.id}: variantOf "${j.variantOf}", which is itself a variant — a variant must name a main story`)
+    }
+  }
+  if (dangling.length > 0) return { error: 'unknown-variant-of', detail: dangling }
+  if (chained.length > 0) return { error: 'chained-variant', detail: chained }
 
   const beatProblems: string[] = []
   for (const j of push.journeys) {
@@ -179,8 +200,8 @@ async function pushRound(res: ServerResponse, project: string, raw: unknown, dep
     let jord = 0
     for (const j of push.journeys) {
       await tx.query(
-        'insert into journeys (project, round, id, title, persona, steps, beats, ord) values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)',
-        [project, push.round, j.id, j.title ?? null, j.persona ?? null, JSON.stringify(j.steps), beatHash(j.steps), jord++],
+        'insert into journeys (project, round, id, title, persona, steps, beats, ord, actor, variant_of) values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)',
+        [project, push.round, j.id, j.title ?? null, j.persona ?? null, JSON.stringify(j.steps), beatHash(j.steps), jord++, j.actor ?? null, j.variantOf ?? null],
       )
     }
     return true

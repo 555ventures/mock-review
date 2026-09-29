@@ -633,39 +633,157 @@ html.cv-html body {
   color: var(--ok);
 }
 
-/* ------------------------------------------------------------------ list, empty */
+/* ------------------------------------------------------------------ the stories page (§5) */
 
-.cv-list {
-  margin-top: 8px;
-  background: var(--sheet);
-  border-top: 1px solid var(--hair);
-  border-bottom: 1px solid var(--hair);
+.cv-stories {
+  flex: 1;
+  min-width: 0;
+  padding: 24px var(--gutter) 40px;
 }
-.cv-list li + li {
-  border-top: 1px solid var(--hair);
+.cv-tally {
+  max-width: 520px;
 }
-.cv-list a {
-  display: block;
-  padding: 16px var(--gutter);
-  text-decoration: none;
-}
-.cv-list-title {
-  display: block;
-  font-size: 16px;
+.cv-tally-line {
+  font-size: 20px;
+  line-height: 1.3;
   font-weight: 500;
 }
-.cv-list-persona {
-  display: block;
+.cv-tally-bar {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+}
+.cv-tally-bar span {
+  flex: 1;
+  height: 4px;
+  background: var(--hair);
+}
+.cv-tally-bar span.is-done {
+  background: var(--ok);
+}
+.cv-section {
+  margin-top: 32px;
+}
+.cv-section-title {
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+.cv-actor-line {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--quiet-on-slate);
+}
+.cv-tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.cv-actor-line + .cv-tiles {
+  margin-top: 8px;
+}
+.cv-tile {
+  position: relative;
+  min-width: 0;
+  padding: 16px;
+  background: var(--sheet);
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+}
+.cv-tile:hover {
+  border-color: var(--quiet);
+}
+.cv-tile-main {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+}
+/* the whole tile is the main story's link; the variant rows sit above it as their own links */
+.cv-tile-main::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 10px;
+}
+.cv .cv-tile-main:focus-visible {
+  outline: none;
+}
+.cv-tile:has(> .cv-tile-main:focus-visible) {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.cv-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 64px);
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.cv-tile-title {
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+.cv-tile-actor {
   margin-top: 2px;
+  font-size: 15px;
+  line-height: 1.4;
   color: var(--quiet);
 }
-.cv-list-status {
-  margin-top: 6px;
-  font-size: 13px;
+.cv-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.4;
 }
+.cv-status .cv-check {
+  width: 16px;
+  height: 16px;
+}
+.cv-variants {
+  position: relative;
+  z-index: 1;
+  margin-top: 12px;
+  border-top: 1px solid var(--hair);
+}
+.cv-variant {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 0 10px 24px;
+  text-decoration: none;
+}
+.cv-variants li + li {
+  border-top: 1px solid var(--hair);
+}
+.cv-variants li + li .cv-variant::before {
+  top: -1px;
+}
+/* the indent's corner: this row hangs off the story above it */
+.cv-variant::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 0;
+  width: 10px;
+  height: 22px;
+  border-left: 1px solid var(--quiet);
+  border-bottom: 1px solid var(--quiet);
+}
+.cv-variant-title {
+  font-size: 15px;
+  line-height: 1.4;
+}
+.cv-variant .cv-status {
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------ empty */
+
 .cv-empty {
   padding: 32px var(--gutter);
   max-width: 520px;
@@ -835,16 +953,27 @@ html.cv-html body {
     width: auto;
     min-width: 220px;
   }
-  .cv-list-page .cv-main,
   .cv-empty {
     padding: 64px 56px;
   }
-  .cv-list {
-    max-width: 880px;
-    border: 1px solid var(--hair);
+  .cv-stories {
+    width: 100%;
+    max-width: calc(1320px + 112px);
+    padding: 48px 56px 72px;
   }
-  .cv-list a {
-    padding: 20px 24px;
+  .cv-section {
+    margin-top: 40px;
+  }
+  .cv-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+  .cv-strip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .cv-tile {
+    padding: 20px;
   }
   .cv-topbar-desk {
     display: block;
@@ -852,6 +981,11 @@ html.cv-html body {
 }
 @media (min-width: 1280px) {
   .cv-board {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1200px) {
+  .cv-tiles {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

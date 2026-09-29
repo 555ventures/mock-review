@@ -304,5 +304,33 @@ const anchor = { node: 'cta', index: null }
   check('GET /p/<project>/?frame=1 serves the same document', frameDoc.status === 200 && (await frameDoc.text()).includes('walkthrough:entry'))
 }
 
+// ------------------------------------------------------------------ 11. actor + variantOf (client-view.md §5)
+{
+  const stories = `${project}-stories`
+  const j = (id, extra = {}) => ({ id, title: id, steps: [{ beat: `I do ${id}`, screen: 'done', state: 'default' }], ...extra })
+  const push = (journeys, round = 1) =>
+    call('POST', `/v1/projects/${stories}/rounds`, { body: { round, kind: 'wireframe', journeys, screens: [wireframe.screens[2]] } })
+
+  const dangling = await push([j('main'), j('alt', { variantOf: 'nope' })])
+  check('variantOf naming no journey of the push → 400 unknown-variant-of', dangling.status === 400 && dangling.data.error === 'unknown-variant-of', `${dangling.status} ${JSON.stringify(dangling.data)}`)
+  const chained = await push([j('main'), j('alt', { variantOf: 'main' }), j('alt2', { variantOf: 'alt' })])
+  check('variantOf naming a variant → 400 chained-variant', chained.status === 400 && chained.data.error === 'chained-variant', `${chained.status} ${JSON.stringify(chained.data)}`)
+  const self = await push([j('main', { variantOf: 'main' })])
+  check('variantOf naming itself → 400 chained-variant', self.status === 400 && self.data.error === 'chained-variant', `${self.status} ${self.data.error}`)
+  const long = await push([j('main', { actor: 'x'.repeat(61) })])
+  check('actor longer than 60 characters → 400 bad-request', long.status === 400 && long.data.error === 'bad-request', `${long.status} ${long.data.error}`)
+  const refusedLeftNothing = await call('GET', `/p/${stories}/__mock-review/state`, { auth: false })
+  check('a refused push stores nothing (no round)', refusedLeftNothing.data.round === null, JSON.stringify(refusedLeftNothing.data.round))
+
+  const ok = await push([j('main', { actor: 'Mika, clinic owner' }), j('alt', { actor: 'Mika, clinic owner', variantOf: 'main' }), j('plain')])
+  check('push with actor + variantOf → 201', ok.status === 201, `${ok.status} ${JSON.stringify(ok.data)}`)
+  const s = await call('GET', `/p/${stories}/__mock-review/state`, { auth: false })
+  const [main, alt, plain] = s.data.journeys ?? []
+  check('state.journeys[] carry actor and variantOf', main?.actor === 'Mika, clinic owner' && main.variantOf === undefined && alt?.variantOf === 'main' && alt.actor === 'Mika, clinic owner', JSON.stringify([main?.actor, main?.variantOf, alt?.actor, alt?.variantOf]))
+  check('a journey pushed without them has neither key', plain && !('actor' in plain) && !('variantOf' in plain), JSON.stringify(plain && Object.keys(plain)))
+  const old = await call('GET', `${P}/state`, { auth: false })
+  check('an older project without the fields still serves its journeys', old.status === 200 && old.data.journeys.length === 1 && !('actor' in old.data.journeys[0]))
+}
+
 console.log(`\nproject ${project}: ${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

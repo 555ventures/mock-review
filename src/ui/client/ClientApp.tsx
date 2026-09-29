@@ -3,23 +3,13 @@
 // hash (`route.ts`); data comes from the same store and `GET state` as the reviewer.
 import { useEffect, useState } from 'react'
 import './client.css'
-import type { ServerState } from '../../schemas/patches.js'
 import { useStore } from '../store/store.js'
 import { PhoneBar, useDesktop } from './parts.js'
 import { StepPage, type Device } from './StepPage.js'
+import { StoriesPage } from './StoriesPage.js'
 import { StoryPage } from './StoryPage.js'
-import {
-  confirmationOf,
-  dayMonth,
-  isWaiting,
-  notesOnStep,
-  numberedNotes,
-  plural,
-  projectTitle,
-  stepsOf,
-  wasRead,
-} from './model.js'
-import { clientHref, go, useClientRoute } from './route.js'
+import { projectTitle, stepsOf } from './model.js'
+import { go, useClientRoute } from './route.js'
 
 const NEWSREADER = 'https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap'
 
@@ -66,43 +56,6 @@ export function LinkInvalid() {
   return <Message project={null}>This link no longer works. Ask the person who sent it for a new one.</Message>
 }
 
-/** §5: several journeys — a plain list with one status each. */
-function JourneyList({ data, project }: { data: ServerState; project: string }) {
-  const all = numberedNotes(data)
-  return (
-    <div className="cv cv-page cv-list-page">
-      <PhoneBar project={project} projectHref={null} position={null} total={0} done={0} always />
-      <main className="cv-main">
-        <ul className="cv-list">
-          {data.journeys.map((j) => {
-            const steps = stepsOf(j, data)
-            const confirmation = confirmationOf(j, data.approval)
-            const waitingIds = new Set(steps.flatMap((s) => notesOnStep(all, s).filter(({ note }) => isWaiting(note)).map(({ note }) => note.id)))
-            const status = confirmation?.stale
-              ? 'Changed since you confirmed'
-              : waitingIds.size > 0
-                ? plural(waitingIds.size, 'note waiting', 'notes waiting')
-                : confirmation
-                  ? `Confirmed on ${dayMonth(confirmation.at)}`
-                  : wasRead(j.id)
-                    ? null
-                    : 'Not read yet'
-            return (
-              <li key={j.id}>
-                <a href={clientHref({ kind: 'step', journey: j.id, step: 1 })}>
-                  <span className="cv-list-title">{j.title}</span>
-                  {j.persona && <span className="cv-list-persona">{j.persona}</span>}
-                  {status && <span className="cv-list-status">{status}</span>}
-                </a>
-              </li>
-            )
-          })}
-        </ul>
-      </main>
-    </div>
-  )
-}
-
 export function ClientApp() {
   const data = useStore((s) => s.data)
   const route = useClientRoute()
@@ -129,7 +82,7 @@ export function ClientApp() {
     return <Message project={project}>Nothing to look at yet. We will send you a message when the first version is ready.</Message>
   }
   if (lost) return null
-  if (route.kind === 'home' || !journey) return <JourneyList data={data} project={project} />
+  if (route.kind === 'home' || !journey) return <StoriesPage data={data} project={project} />
 
   const steps = stepsOf(journey, data)
   const multi = journeys.length > 1

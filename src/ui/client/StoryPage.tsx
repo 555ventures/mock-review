@@ -1,59 +1,14 @@
 // docs/design/client-view.md §4: the whole story — a storyboard of small frames, each with its
 // sentence, and the confirm. Phone: one list, frame left and sentence right. Desktop: a sheet of 2
 // or 3 columns, each frame with its sentence under it; the confirm block at the end, left-aligned.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ServerJourney, ServerState } from '../../schemas/patches.js'
-import { buildFrameHash } from '../frame/frameRoute.js'
 import { roundOf } from '../sync/walkthrough.js'
-import { frameSrc } from './ClientFrame.js'
+import { Thumb } from './ClientFrame.js'
 import { Check, PhoneBar, SideColumn, StoryChangedBand, quote, useDesktop } from './parts.js'
 import { confirmStory } from './actions.js'
 import { changesOf, confirmationOf, dayMonth, isWaiting, notesOnStep, numberedNotes, plural, sentenceChanged, widthsOf, type Step } from './model.js'
 import { clientHref } from './route.js'
-
-/** A small, non-interactive frame: the top of the screen at a storyboard frame's proportions. */
-function Thumb({ round, width, height, screen, state }: { round: number | null; width: number; height: number; screen: string; state: string }) {
-  const outer = useRef<HTMLDivElement>(null)
-  const frame = useRef<HTMLIFrameElement>(null)
-  const [w, setW] = useState(0)
-  const [load, setLoad] = useState(0)
-  const [drawn, setDrawn] = useState(false)
-  useLayoutEffect(() => {
-    const el = outer.current
-    if (!el) return
-    const measure = () => setW(el.clientWidth)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-  useEffect(() => {
-    const win = frame.current?.contentWindow as (Window & typeof globalThis) | null | undefined
-    const root = win?.document.getElementById('root')
-    if (!win || !root) return
-    const hash = buildFrameHash({ kind: 'screen', screen, state })
-    const check = () => setDrawn(root.getAttribute('data-shown') === hash)
-    const mo = new win.MutationObserver(check)
-    mo.observe(root, { attributes: true, attributeFilter: ['data-shown'] })
-    check()
-    return () => mo.disconnect()
-  }, [load, screen, state])
-  const scale = w / width
-  return (
-    <div ref={outer} className="cv-thumb" style={{ aspectRatio: `${width} / ${height}` }}>
-      <iframe
-        ref={frame}
-        src={frameSrc(round, width, screen, state)}
-        title=""
-        aria-hidden
-        tabIndex={-1}
-        data-visible={drawn}
-        onLoad={() => setLoad((n) => n + 1)}
-        style={{ width, height, transform: `scale(${scale || 0})` }}
-      />
-    </div>
-  )
-}
 
 export function StoryPage({ data, project, journey, steps, multi }: { data: ServerState; project: string; journey: ServerJourney; steps: Step[]; multi: boolean }) {
   const desktop = useDesktop()

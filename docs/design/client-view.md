@@ -196,11 +196,66 @@ sentence under it; the confirm block sits at the end, left-aligned, max 520 px w
 - A journey whose steps have no sentences cannot be confirmed: the button is replaced by
   `This story is not written yet.`
 
-### 5. Several journeys
+### 5. Several journeys (the stories page)
 
-When the project has more than one journey, the entry screen is a plain list: journey title,
-persona line, and one of `Not read yet`, `2 notes waiting`, `Confirmed on 29 September`,
-`Changed since you confirmed`. With one journey the link opens straight on step 1.
+With one journey the link opens straight on step 1 and this page does not exist. With more,
+it is the entry screen, and it is a storyboard too: every story shows its frames.
+
+The push carries two new optional fields per journey: `actor` (who the story is about, short:
+`Mika, clinic owner`) and `variantOf` (the id of the main story this one is an alternate
+path of). A story with `variantOf` never stands alone; it sits under its main story.
+
+Phone:
+
+```
+┌────────────────────────────┐
+│ Hearwell                       │
+├────────────────────────────┤
+│ 3 of 8 stories confirmed       │  Geist 20/500; under it the 8-segment
+│ ━━━ ━━━ ━━━ ─── ─── ─── ─── ─── │  bar, confirmed segments in `confirmed`
+│                                │
+│ Needs you                      │  section heading, Geist 15/500 ink
+│ ┌────────────────────────────┐ │
+│ │ ▭ ▭ ▭ ▭                      │ │  strip: the story's first 4 frames,
+│ │ Owner onboarding             │ │  each 64 px wide, cropped to 4:3,
+│ │ Mika, clinic owner           │ │  then title (16/500) and actor (quiet)
+│ │ ● 1 answer to read           │ │  status line, highlighter dot
+│ │   └ If nobody is listed yet  │ │  variants: indented rows, title +
+│ │       Not read yet           │ │  status only, no strip
+│ └────────────────────────────┘ │
+│                                │
+│ Not read yet                   │
+│  …                             │
+│ Confirmed                      │
+│  …                             │
+└────────────────────────────┘
+```
+
+Desktop (≥ 960 px): the same three sections, each a grid of story tiles, 3 columns (2 below
+1200 px), 24 px gap, full content width (max 1320 px). A tile's strip shows up to 4 frames at
+the tile's width / 4. Variants are rows inside their main story's tile. The progress line and
+bar sit top-left, max 520 px wide.
+
+- Sections, in this order, each omitted when empty:
+  - `Needs you` — the story changed since the reader confirmed it, or a note of theirs has
+    an answer they have not closed.
+  - `Not read yet` — never opened in this browser, or opened and not confirmed.
+  - `Confirmed` — confirmed and unchanged.
+  A main story takes the most urgent section among itself and its variants.
+- Status line per story or variant, one of: `Changed since you confirmed`,
+  `1 answer to read` / `3 answers to read`, `1 note waiting for an answer`, `Not read yet`,
+  `Read, not confirmed yet`, `Confirmed on 29 September`. Only the first two carry the
+  highlighter dot; the last carries the `confirmed` check.
+- When the project has stories for more than one `actor` AND more than 6 main stories, each
+  section is sub-grouped by actor with the actor as a quiet 13 px line above its tiles
+  (`Mika, clinic owner`). Otherwise the actor is only the line inside the tile.
+- The progress counts main stories and variants alike (each is confirmed on its own).
+- The whole tile is one link to the story's step 1 (or to its whole-story page when it is
+  confirmed). A variant row is its own link. 44 px minimum height for a variant row.
+- Frames in the strip are real scaled wireframes (or the picture), not icons. While they
+  load, the slate placeholder holds their size.
+- No cards with shadows: a tile is a sheet-white rectangle, 10 px radius, 1 px quiet/25%
+  border, like a frame.
 
 ### 6. Empty, loading, broken
 

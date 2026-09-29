@@ -44,6 +44,12 @@ create table if not exists screens (
 alter table journeys add column if not exists ord int not null default 0;
 alter table screens add column if not exists ord int not null default 0;
 
+-- docs/design/client-view.md §5 (the stories page): who a story is about, and the main story an
+-- alternate path belongs to (the id of another journey of the same round, itself not a variant).
+-- Both optional; rows pushed before they existed read as null.
+alter table journeys add column if not exists actor text;
+alter table journeys add column if not exists variant_of text;
+
 -- One row per DECLARED picture. `bytes` is null until the PUT arrives; a screenshots round turns
 -- 'open' when no row of it has null bytes left.
 create table if not exists images (
