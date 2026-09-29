@@ -1,183 +1,136 @@
-// Reference rule 11-12: anchoring a drawn box to the smallest `[data-component]` element that
-// fully contains it (6px tolerance), falling back to the component under its centre, then the
-// screen anchor. D5: the note's `key` is that component's nth-index among same-named components
-// (as a string), and `rect` is a fraction of the anchor element's box, stored as a passthrough
-// extra (never read by the plugin).
+// A note is placed by picking (docs/design/client-view.md §2): one tap or click on an element of a
+// wireframe (`[data-node]`, plus the row number of a repeated element), or one point on a picture.
+// There is no drawn area. This module is shared by the owner's reviewer and the client view: it
+// finds what is under a point of the frame, turns it into the served anchor and the reader's words
+// for it (`pickedText`), and resolves a served anchor back to a box on the frame.
 import type { Note } from '../../schemas/index.js'
 
 export const SCREEN_ANCHOR = '__screen'
-/** U3: the `data-component` of a screenshot round's picture (`frame/mount.tsx`). */
+/** The `data-component` of a screenshots round's picture (`frame/mount.tsx`). */
 export const PICTURE_ANCHOR = '__picture'
 
 export type Box = { left: number; top: number; width: number; height: number }
-export type Rect = { x: number; y: number; w: number; h: number }
 export type Viewport = 'desktop' | 'mobile'
 
-/** PROTOTYPE-PLAN.md seam A, the one note model: a wireframe note names the node it landed on
- * (`rect` null = the whole node, `index` = the row of a repeated node); a screenshot note is a
- * fraction of the picture plus that picture's width. `null` = a whole-screen or project note. */
-export type WireAnchor = { node: string | null; index: number | null; rect: Rect | null; viewport: Viewport }
-export type PictureAnchor = { x: number; y: number; w: number | null; h: number | null; width: number }
+/** Seam A as amended by the design: `{node, index}` on a wireframe (`index` = which occurrence of a
+ * repeated node, null when the node occurs once), `{x, y, width}` on a picture (fractions of the
+ * picture plus its pixel width). `null` = the whole screen (or a project note). */
+export type WireAnchor = { node: string; index: number | null }
+export type PictureAnchor = { x: number; y: number; width: number }
 export type WalkAnchor = WireAnchor | PictureAnchor
 
-/** D5: `Note` plus the passthrough extras the page owns (`rect`, `viewport`, `whole`, and the
- * walkthrough's `anchor`) — never redeclares the schema, just types the extras `.passthrough()`
- * allows through at runtime. */
-export type UiNote = Note & { rect?: Rect; viewport?: Viewport; whole?: boolean; anchor?: WalkAnchor | null }
+/** A served note: `Note` plus the walkthrough fields the page reads. */
+export type UiNote = Note & { anchor?: WalkAnchor | null; pickedText?: string | null; whole?: boolean; round?: number; at?: string }
 
-function isPicture(a: WalkAnchor): a is PictureAnchor {
+export function isPictureAnchor(a: WalkAnchor): a is PictureAnchor {
   return 'width' in a
 }
 
-/** U3: a plain click in marking mode selects the whole node under it — the anchor is that
- * element itself (rect = its full box), found the same way `anchorFor` finds one. */
-export function anchorForElement(root: HTMLElement, el: HTMLElement): Anchor {
-  const component = el.dataset['component'] ?? SCREEN_ANCHOR
-  const key = String([...root.querySelectorAll(`[data-component="${CSS.escape(component)}"]`)].indexOf(el))
-  return { component, key, rect: { x: 0, y: 0, w: 1, h: 1 }, snippet: (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80) }
+export const PICKED_MAX = 40
+
+/** The reader's words for a picked element: its visible text, whitespace collapsed, at most 40
+ * characters (the last an ellipsis when cut). Same rule as the server's `shortenPicked`. */
+export function shortenPicked(text: string | null | undefined): string | null {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return null
+  return t.length <= PICKED_MAX ? t : `${t.slice(0, PICKED_MAX - 1).trimEnd()}…`
 }
 
-/** The `[data-component]` element under a point of the frame's viewport, or null. */
-export function elementAt(root: HTMLElement, x: number, y: number): HTMLElement | null {
-  const hit = root.ownerDocument
-    .elementsFromPoint(x, y)
-    .find((e) => root.contains(e))
-    ?.closest<HTMLElement>('[data-component]')
-  return hit && root.contains(hit) ? hit : null
+function visibleText(el: HTMLElement): string | null {
+  return (
+    shortenPicked(el.innerText) ??
+    shortenPicked(el.getAttribute('aria-label')) ??
+    shortenPicked(el.getAttribute('title')) ??
+    shortenPicked(el.getAttribute('placeholder'))
+  )
 }
 
-/** Seam A's `anchor` for a resolved `Anchor`. `wholeNode` = picked by a click (rect null). */
-export function toWalkAnchor(
-  root: HTMLElement,
-  a: Anchor,
-  opts: { kind: 'wireframe' | 'screenshots'; viewport: Viewport; width: number; wholeNode?: boolean },
-): WalkAnchor {
-  if (opts.kind === 'screenshots') {
-    // seam A bounds a picture anchor to 0..1; a box drawn past the picture's edge is clipped to it.
-    const c = (n: number) => Math.min(1, Math.max(0, n))
-    const x = c(a.rect.x)
-    const y = c(a.rect.y)
-    const w = a.rect.w > 0 ? c(Math.min(a.rect.w, 1 - x)) : null
-    const h = a.rect.h > 0 ? c(Math.min(a.rect.h, 1 - y)) : null
-    return { x, y, w: w || null, h: h || null, width: Math.round(opts.width) }
-  }
-  const el =
-    a.component === SCREEN_ANCHOR
-      ? null
-      : (root.querySelectorAll<HTMLElement>(`[data-component="${CSS.escape(a.component)}"]`)[Number(a.key)] ?? null)
-  const index = el && el.hasAttribute('data-index') ? Number(a.key) : null
-  const node = a.component === SCREEN_ANCHOR ? null : a.component
-  return { node, index, rect: opts.wholeNode ? null : a.rect, viewport: opts.viewport }
+function nodesNamed(root: HTMLElement, node: string): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(`[data-node="${CSS.escape(node)}"]`)]
 }
 
-/** Reads a served note back into the page's own fields from its `anchor`, whatever the server
- * filled in for `component`/`key`/`rect`/`viewport` (seam B maps only `component` and `key`).
- * A note without an `anchor` key (the old shape) is returned untouched. */
-export function fromWalkAnchor(note: UiNote, viewportOfWidth: (width: number) => Viewport): UiNote {
-  if (!('anchor' in note) || note.anchor === undefined) return note
-  const a = note.anchor
-  if (a === null) return note.project || note.whole ? note : { ...note, whole: true }
-  if (isPicture(a)) {
-    return {
-      ...note,
-      component: PICTURE_ANCHOR,
-      key: '0',
-      snippet: null,
-      rect: { x: a.x, y: a.y, w: a.w ?? 0, h: a.h ?? 0 },
-      viewport: viewportOfWidth(a.width),
-    }
-  }
-  return {
-    ...note,
-    component: a.node ?? SCREEN_ANCHOR,
-    key: String(a.index ?? 0),
-    // The node key is the identity now: a reworded sentence in a new round keeps the pin (plan
-    // acceptance 5), so the old snippet staleness test is not applied to a wireframe anchor.
-    snippet: null,
-    rect: a.rect ?? { x: 0, y: 0, w: 1, h: 1 },
-    viewport: a.viewport,
-  }
+function picture(root: HTMLElement): HTMLImageElement | null {
+  return root.querySelector<HTMLImageElement>(`img[data-component="${PICTURE_ANCHOR}"]`)
 }
 
-export function rectOf(note: UiNote): Rect {
-  return note.rect ?? { x: 0, y: 0, w: 1, h: 1 }
-}
-
-export type Anchor = {
-  component: string
-  key: string
-  rect: Rect
-  snippet: string
-}
-
-/** The smallest `[data-component]` element fully containing `box` (6px tolerance); failing that,
- * the component under the box's centre; failing that, the screen anchor. */
-export function anchorFor(root: HTMLElement, box: Box): Anchor {
-  const abs = { l: box.left, t: box.top, r: box.left + box.width, b: box.top + box.height }
-  const tol = 6
-  let best: HTMLElement = root
-  let bestArea = Infinity
-  root.querySelectorAll<HTMLElement>('[data-component]').forEach((el) => {
-    const r = el.getBoundingClientRect()
-    const contains = r.left - tol <= abs.l && r.top - tol <= abs.t && r.right + tol >= abs.r && r.bottom + tol >= abs.b
-    if (contains && r.width * r.height < bestArea) {
-      best = el
-      bestArea = r.width * r.height
-    }
-  })
-  if (best === root) {
-    const hit = root.ownerDocument
-      .elementsFromPoint((abs.l + abs.r) / 2, (abs.t + abs.b) / 2)
-      .find((e) => root.contains(e))
-      ?.closest<HTMLElement>('[data-component]')
-    if (hit && root.contains(hit)) best = hit
-  }
-
-  const component = best === root ? SCREEN_ANCHOR : (best.dataset['component'] ?? SCREEN_ANCHOR)
-  const key = best === root ? '0' : String([...root.querySelectorAll(`[data-component="${component}"]`)].indexOf(best))
-  const r = best.getBoundingClientRect()
-  const rect: Rect =
-    r.width > 0 && r.height > 0
-      ? { x: (abs.l - r.left) / r.width, y: (abs.t - r.top) / r.height, w: box.width / r.width, h: box.height / r.height }
-      : { x: 0, y: 0, w: 1, h: 1 }
-
-  return {
-    component,
-    key,
-    rect,
-    snippet: (best.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80),
-  }
-}
-
-/** The anchored element, or `null` when the note is outdated (its component/key no longer
- * resolves, or its snippet no longer appears in that element's text). */
-export function anchorEl(root: HTMLElement, component: string | null, key: string | null, snippet: string | null): HTMLElement | null {
-  const el =
-    component === SCREEN_ANCHOR || component === null
-      ? root
-      : (root.querySelectorAll<HTMLElement>(`[data-component="${component}"]`)[Number(key ?? '0')] ?? null)
-  if (!el) return null
-  if (snippet && !(el.innerText || '').replace(/\s+/g, ' ').trim().includes(snippet)) return null
-  return el
-}
-
-/** The note's box, resolved against its own `rect` fraction of the anchor element. */
-export function resolveBox(root: HTMLElement, component: string | null, key: string | null, snippet: string | null, rect: Rect): Box | null {
-  const el = anchorEl(root, component, key, snippet)
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return { left: r.left + rect.x * r.width, top: r.top + rect.y * r.height, width: rect.w * r.width, height: rect.h * r.height }
-}
-
-/** The whole anchored component's box — used for a ghost pin in the *other* device. */
-export function resolveGhost(root: HTMLElement, component: string | null, key: string | null, snippet: string | null): Box | null {
-  const el = anchorEl(root, component, key, snippet)
-  if (!el) return null
-  const r = el.getBoundingClientRect()
+function rectBox(r: DOMRect): Box {
   return { left: r.left, top: r.top, width: r.width, height: r.height }
 }
 
-/** Rule 12: a note is outdated when its box cannot be resolved. */
-export function isOutdated(root: HTMLElement, component: string | null, key: string | null, snippet: string | null, rect: Rect): boolean {
-  return resolveBox(root, component, key, snippet, rect) === null
+export type Pick = { anchor: WalkAnchor | null; pickedText: string | null; box: Box }
+
+/** What a tap/click at (x, y) of the frame's viewport picks, or null when it hit nothing of the
+ * screen. The outermost node of the spec (the page itself) means the whole screen. */
+export function pickAt(root: HTMLElement, x: number, y: number): Pick | null {
+  const img = picture(root)
+  if (img) {
+    const r = img.getBoundingClientRect()
+    if (r.width === 0 || r.height === 0 || x < r.left || x > r.right || y < r.top || y > r.bottom) return null
+    const width = img.naturalWidth || Math.round(r.width)
+    return {
+      anchor: { x: (x - r.left) / r.width, y: (y - r.top) / r.height, width },
+      pickedText: null,
+      box: { left: x, top: y, width: 0, height: 0 },
+    }
+  }
+  const hit = root.ownerDocument
+    .elementsFromPoint(x, y)
+    .find((e) => root.contains(e))
+    ?.closest<HTMLElement>('[data-node]')
+  if (!hit || !root.contains(hit)) return null
+  const box = rectBox(hit.getBoundingClientRect())
+  const outermost = !hit.parentElement?.closest('[data-node]')
+  if (outermost) return { anchor: null, pickedText: null, box }
+  const node = hit.dataset['node'] ?? ''
+  const all = nodesNamed(root, node)
+  return { anchor: { node, index: all.length > 1 ? Math.max(0, all.indexOf(hit)) : null }, pickedText: visibleText(hit), box }
+}
+
+/** The element a wireframe anchor names, or null when this screen no longer has it. */
+export function anchorElement(root: HTMLElement, a: WireAnchor): HTMLElement | null {
+  return nodesNamed(root, a.node)[a.index ?? 0] ?? null
+}
+
+/** Where a served anchor sits on the frame (frame-viewport pixels): the named element's box, or a
+ * zero-size box at the picked point of the picture. Null when it cannot be placed on this frame
+ * (the element is gone, or the picture is a different width). */
+export function anchorBox(root: HTMLElement, a: WalkAnchor): Box | null {
+  if (isPictureAnchor(a)) {
+    const img = picture(root)
+    if (!img) return null
+    const width = img.naturalWidth || 0
+    if (width && Math.abs(width - a.width) > 1) return null
+    const r = img.getBoundingClientRect()
+    if (r.width === 0) return null
+    return { left: r.left + a.x * r.width, top: r.top + a.y * r.height, width: 0, height: 0 }
+  }
+  const el = anchorElement(root, a)
+  return el ? rectBox(el.getBoundingClientRect()) : null
+}
+
+/** A served note with `whole` derived from its anchor (a screen note with no anchor is about the
+ * whole screen) — what the pins and lists filter on. */
+export function servedNote(n: UiNote): UiNote {
+  const whole = !n.project && n.screen !== null && (n.anchor === null || n.anchor === undefined)
+  return whole === !!n.whole ? n : { ...n, whole }
+}
+
+/** The new-note sheet's first line (client-view.md §2): "About “Ren” on this screen", "About this
+ * screen" when nothing was picked, "About this spot" on a picture. */
+export function sheetTitle(pick: Pick | null | undefined): string {
+  const anchor = pick?.anchor ?? null
+  if (!anchor) return 'About this screen'
+  if (isPictureAnchor(anchor)) return 'About this spot'
+  return pick?.pickedText ? `About “${pick.pickedText}” on this screen` : 'About this part of the screen'
+}
+
+/** "About “Ren”" — the reader's label for a note; never an element name. */
+export function aboutLabel(n: Pick | UiNote): string {
+  const anchor = n.anchor ?? null
+  if (anchor && isPictureAnchor(anchor)) return 'About this spot'
+  const picked = n.pickedText ?? null
+  if (anchor && picked) return `About “${picked}”`
+  // A picked element with no words of its own (a picture box, a divider).
+  if (anchor) return 'About this part'
+  return 'About this screen'
 }

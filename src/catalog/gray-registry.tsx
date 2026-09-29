@@ -719,8 +719,10 @@ export const grayPageStyle: CSSProperties = {
 }
 
 /** One screen: one `JSONUIProvider` per spec (the caller keys it by screen+state so its state
- * model starts fresh), the prepared spec, and `navigate` wired to `onNavigate`. */
-export function GrayScreen({ spec, onNavigate }: { spec: Spec; onNavigate?: (to: string) => void }) {
+ * model starts fresh), the prepared spec, and `navigate` wired to `onNavigate`. `fill` (default)
+ * stretches the page to the frame's height; without it the page is exactly as tall as its content,
+ * so a host that sizes the frame to its content can measure it. */
+export function GrayScreen({ spec, onNavigate, fill = true }: { spec: Spec; onNavigate?: (to: string) => void; fill?: boolean }) {
   const prepared = useMemo(() => prepareSpec(spec), [spec])
   const handlers = useMemo(
     () => ({
@@ -733,7 +735,7 @@ export function GrayScreen({ spec, onNavigate }: { spec: Spec; onNavigate?: (to:
   )
   return (
     <JSONUIProvider registry={registry} handlers={handlers} initialState={spec.state ?? {}}>
-      <div style={grayPageStyle}>
+      <div style={fill ? grayPageStyle : { ...grayPageStyle, minHeight: 0 }}>
         <Renderer spec={prepared} registry={registry} />
       </div>
     </JSONUIProvider>

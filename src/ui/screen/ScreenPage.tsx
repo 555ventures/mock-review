@@ -5,18 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SidebarInset } from '../components/ui/sidebar.js'
 import { CAPTION, GAP, DeviceFrames, type DeviceSpec } from '../frame/DeviceFrames.js'
 import { useMeasure } from '../frame/useMeasure.js'
-import {
-  anchorFor,
-  anchorForElement,
-  elementAt,
-  fromWalkAnchor,
-  toWalkAnchor,
-  type Anchor,
-  type Box,
-  type UiNote,
-  type Viewport,
-  type WalkAnchor,
-} from '../notes/anchor.js'
+import { isPictureAnchor, servedNote, type Box, type Pick, type UiNote, type Viewport } from '../notes/anchor.js'
 import { roundOf } from '../sync/walkthrough.js'
 import { NewNoteDialog, NoteThreadDialog } from '../notes/NoteDialogs.js'
 import { NotesPanel } from '../notes/NotesPanel.js'
@@ -84,14 +73,12 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   const desktopW = deviceSpecs.desktop.width
   const mobileW = deviceSpecs.mobile.width
 
-  // Seam B serves each note's `anchor`; `fromWalkAnchor` turns it back into the page's own
-  // component/key/rect/viewport, so the pins, ghosts and outdated checks below work unchanged.
+  // Seam B serves each note's `anchor` (`{node, index}`, `{x, y, width}` or null); a screen note
+  // with no anchor is about the whole screen. A picture note belongs to the device of its width.
   const rawNotes = data?.notes.notes
-  const notes = useMemo(() => {
-    if (!rawNotes) return EMPTY_NOTES
-    const viewportOfWidth = (w: number): Viewport => (Math.abs(w - desktopW) <= Math.abs(w - mobileW) ? 'desktop' : 'mobile')
-    return (rawNotes as UiNote[]).map((n) => fromWalkAnchor(n, viewportOfWidth))
-  }, [rawNotes, desktopW, mobileW])
+  const notes = useMemo(() => (rawNotes ? (rawNotes as UiNote[]).map(servedNote) : EMPTY_NOTES), [rawNotes])
+  const viewportOfNote = (n: UiNote): Viewport | null =>
+    n.anchor && isPictureAnchor(n.anchor) ? (Math.abs(n.anchor.width - desktopW) <= Math.abs(n.anchor.width - mobileW) ? 'desktop' : 'mobile') : null
 
   const journey = route.journey ? data?.journeys.find((j) => j.id === route.journey) : undefined
   const screenStateRows = (data?.screens ?? []).map((s) => ({ name: s.name, states: screenStates(s) }))
@@ -117,13 +104,12 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   }, [journey])
   const journeyIdx = journey ? (locate(journey, route.screen, state, screenStateRows, route.step) ?? -1) : -1
 
-  // D27: the note-editing session (marking/reanchor/selected/cardOpen/draft) lives in the store's
+  // D27: the note-editing session (marking/selected/cardOpen/draft) lives in the store's
   // `UiState`, not local component state — `ScreenPage` is never remounted between screens (the
   // router renders the same instance for every `screen` route, reference §11), so local state for
   // these fields used to survive navigation wholesale: a half-drawn draft or an open note from one
   // screen could follow the reviewer to another and be saved there.
   const marking = ui.marking
-  const reanchor = ui.reanchor
   const selected = ui.selected
   const cardOpen = ui.cardOpen
   const draft = ui.draft
@@ -160,7 +146,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   // scroll-to-row marker is cleared here too, so a pin click just before navigating away never
   // fires a scroll on the new screen's list.
   useEffect(() => {
-    getStore().setUi({ marking: false, reanchor: null, selected: null, cardOpen: false, draft: null })
+    getStore().setUi({ marking: false, selected: null, cardOpen: false, draft: null })
     scrollToRow.current = null
   }, [route.screen])
 
@@ -211,65 +197,15 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     )
   }, [selected, notesPanel])
 
-  useEffect(() => {
-    if (!marking) getStore().setUi({ reanchor: null })
-  }, [marking])
-
-  // Seam A's `anchor` for a resolved anchor: the node (wireframe) or the picture fraction plus
-  // the picture's width (screenshots). `wholeNode` = picked by a plain click (rect null).
-  const walkAnchor = (root: HTMLElement, a: Anchor, v: Viewport, wholeNode = false): WalkAnchor =>
-    toWalkAnchor(root, a, { kind: screenshots ? 'screenshots' : 'wireframe', viewport: v, width: deviceSpecs[v].width, wholeNode })
-
-  const reanchorTo = (id: string, root: HTMLElement, a: Anchor, v: Viewport, wholeNode = false) => {
-    void actions.reanchorNote(id, {
-      screen: route.screen,
-      state,
-      viewport: v,
-      component: a.component,
-      key: a.key,
-      rect: a.rect,
-      snippet: a.snippet,
-      anchor: walkAnchor(root, a, v, wholeNode),
-    })
-    getStore().setUi({ reanchor: null, marking: false, selected: id })
-  }
-
-  const onDraw = (v: Viewport, box: Box) => {
-    const root = rootsRef.current[v]
-    if (reanchor && root) {
-      reanchorTo(reanchor, root, anchorFor(root, box), v)
-      return
-    }
-    getStore().setUi((u) => ({ cardOpen: false, draft: { viewport: v, box, text: u.draft?.text ?? '', open: true } }))
-  }
-
-  // U3: a plain click in marking mode. On a wireframe it selects the whole node under the pointer
-  // (the draft box outlines that node; the saved anchor has rect = null). On a screenshot it is a
-  // point on the picture (anchor w/h = null).
-  const onPick = (v: Viewport, p: { x: number; y: number }) => {
-    const root = rootsRef.current[v]
-    if (!root) return
-    if (screenshots) {
-      const box = { left: p.x, top: p.y, width: 0, height: 0 }
-      if (reanchor) {
-        reanchorTo(reanchor, root, anchorFor(root, box), v)
-        return
-      }
-      getStore().setUi((u) => ({ cardOpen: false, draft: { viewport: v, box, text: u.draft?.text ?? '', open: true } }))
-      return
-    }
-    const el = elementAt(root, p.x, p.y)
-    if (!el) return
-    const a = anchorForElement(root, el)
-    if (reanchor) {
-      reanchorTo(reanchor, root, a, v, true)
-      return
-    }
-    const r = el.getBoundingClientRect()
-    const box = { left: r.left, top: r.top, width: r.width, height: r.height }
+  // "Add a note" (docs/design/client-view.md §2, the same pick mode as the client's): one click
+  // on an element of a wireframe picks that node; one click on a picture picks that point; the
+  // outermost node (the page itself) means the whole screen. The dialog then asks for the text.
+  const onPick = (v: Viewport, pick: Pick) => {
     getStore().setUi((u) => ({
       cardOpen: false,
-      draft: { viewport: v, box, text: u.draft?.text ?? '', open: true, pick: { component: a.component, key: a.key, snippet: a.snippet } },
+      draft: pick.anchor
+        ? { viewport: v, text: u.draft?.text ?? '', open: true, pick }
+        : { viewport: v, text: u.draft?.text ?? '', open: true, whole: true },
     }))
   }
 
@@ -277,11 +213,9 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     getStore().setUi({
       notesPanel: true,
       marking: false,
-      reanchor: null,
       cardOpen: false,
       draft: {
         viewport: 'desktop',
-        box: { left: 0, top: 0, width: 0, height: 0 },
         text: '',
         open: true,
         whole: true,
@@ -301,21 +235,18 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
       getStore().setUi({ draft: null, selected: id })
       return
     }
-    if (draft.whole) {
-      const id = await actions.addNote(
-        { screen: route.screen, state, component: '__screen', key: '0', snippet: null, viewport: draft.viewport, whole: true, anchor: null },
-        draft.text.trim(),
-        role,
-      )
-      getStore().setUi({ draft: null, selected: id })
-      return
-    }
-    const root = rootsRef.current[draft.viewport]
-    if (!root) return
-    const a: Anchor = draft.pick ? { ...draft.pick, rect: { x: 0, y: 0, w: 1, h: 1 } } : anchorFor(root, draft.box)
-    const anchor = walkAnchor(root, a, draft.viewport, !!draft.pick)
+    const pick = draft.pick
+    const anchor = pick?.anchor ?? null
     const id = await actions.addNote(
-      { screen: route.screen, state, component: a.component, key: a.key, snippet: a.snippet, viewport: draft.viewport, rect: a.rect, anchor },
+      {
+        screen: route.screen,
+        state,
+        component: anchor && 'node' in anchor ? anchor.node : '__screen',
+        key: anchor && 'node' in anchor ? String(anchor.index ?? 0) : '0',
+        snippet: pick?.pickedText ?? null,
+        anchor,
+        pickedText: pick?.pickedText ?? null,
+      },
       draft.text.trim(),
       role,
     )
@@ -340,8 +271,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     marking,
     draftOpen: draft?.open ?? false,
     journey: !!journey,
-    onToggleMark: () => getStore().setUi((u) => (u.marking ? { marking: false } : enterMarking())),
-    onEscape: () => getStore().setUi({ marking: false, reanchor: null }),
+    onEscape: () => getStore().setUi({ marking: false }),
     onNewNote: () => noteOnScreen(),
   })
 
@@ -357,7 +287,8 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
 
   const isOutdatedNote = (n: UiNote): boolean => {
     if (n.screen !== route.screen || !sameState(n.state, state)) return false
-    const frames = n.viewport && activeViewports.includes(n.viewport) ? [n.viewport] : activeViewports
+    const own = viewportOfNote(n)
+    const frames = own && activeViewports.includes(own) ? [own] : activeViewports
     return frames.every((v) => boxesBy[v]?.[n.id] === null)
   }
 
@@ -387,7 +318,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
           onViewChange={(v) => {
             getStore().setUi({ view: v })
           }}
-          reanchorId={reanchor}
           marking={marking}
           onMarkingChange={(v) => getStore().setUi(v ? enterMarking() : { marking: false })}
           pins={pins}
@@ -412,14 +342,13 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             notes={notes}
             pins={pins && !journey}
             marking={marking && !journey}
-            draftByViewport={(v) => (draft && draft.viewport === v && !draft.whole ? draft.box : null)}
+            pickedByViewport={(v) => (draft?.pick && draft.viewport === v ? draft.pick.box : null)}
             ring={guideRing}
             isolated={isolated}
             onFrameLoad={onFrameLoad}
             onRoot={onRoot}
             onBoxes={onBoxes}
             onSelect={(id) => select(id, false)}
-            onDraw={onDraw}
             onPick={onPick}
             onOpenDraft={() => draft && getStore().setUi({ draft: { ...draft, open: true } })}
             onPaletteKey={() => getStore().setUi((u) => ({ paletteOpen: !u.paletteOpen }))}
@@ -469,8 +398,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
         ))}
 
       <NewNoteDialog
-        screen={route.screen}
-        state={state}
         draft={draft}
         onTextChange={(text) => getStore().setUi((u) => ({ draft: u.draft ? { ...u.draft, text } : u.draft }))}
         onCancel={() => getStore().setUi({ draft: null })}
@@ -486,10 +413,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
         outdated={selectedNote ? isOutdatedNote(selectedNote) : false}
         role={role}
         onOpenChange={(open) => !open && getStore().setUi({ cardOpen: false })}
-        onReanchor={() => {
-          if (!selectedNote) return
-          getStore().setUi(enterMarking({ cardOpen: false, draft: null, reanchor: selectedNote.id }))
-        }}
         onReply={(text) => selectedNote && void actions.replyNote(selectedNote.id, text)}
         onVerdict={(v: Verdict) => {
           if (v.kind === 'approve') void actions.approveNote(v.id)

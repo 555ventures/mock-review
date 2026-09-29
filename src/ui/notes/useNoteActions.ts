@@ -4,8 +4,7 @@
 import { useCallback } from 'react'
 import { ForbiddenError, RefusedError, fetchState, patchApproval, patchNotes } from '../sync/api.js'
 import { getStore } from '../store/store.js'
-import type { Note } from '../../schemas/index.js'
-import type { Rect, Viewport, WalkAnchor } from './anchor.js'
+import type { WalkAnchor } from './anchor.js'
 
 async function refresh(): Promise<void> {
   const { seq, state } = await fetchState()
@@ -47,14 +46,23 @@ async function run<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 export function useNoteActions() {
   const addNote = useCallback(
     async (
-      note: Omit<Note, 'id' | 'status' | 'thread'> & { rect?: Rect; viewport?: Viewport; whole?: boolean; anchor?: WalkAnchor | null },
+      note: {
+        screen: string | null
+        state: string | null
+        component: string | null
+        key: string | null
+        snippet: string | null
+        project?: true
+        anchor: WalkAnchor | null
+        pickedText?: string | null
+      },
       text: string,
       by: 'owner' | 'client' = 'owner',
     ): Promise<string> =>
       run(async () => {
         const doc = await patchNotes({
           op: 'add',
-          note: { ...note, status: 'open', thread: [{ by, text }] } as Note,
+          note: { ...note, status: 'open', thread: [{ by, text }] },
         })
         await refresh()
         const last = doc.notes[doc.notes.length - 1]
@@ -98,16 +106,6 @@ export function useNoteActions() {
     }, undefined)
   }, [])
 
-  const reanchorNote = useCallback(
-    async (id: string, fields: { screen: string; state: string; viewport: Viewport; component: string; key: string; rect: Rect; snippet: string; anchor?: WalkAnchor }): Promise<void> => {
-      await run(async () => {
-        await patchNotes({ op: 'update', id, fields })
-        await refresh()
-      }, undefined)
-    },
-    [],
-  )
-
   // D2: `useNoteActions.replyJourney` loses its `role`/`by` parameter — the page always sends
   // `by: 'owner'`, exactly as `replyNote`.
   const replyJourney = useCallback(async (id: string, text: string): Promise<void> => {
@@ -142,7 +140,6 @@ export function useNoteActions() {
     approveNote,
     deferNote,
     removeNote,
-    reanchorNote,
     replyJourney,
     approveJourney,
     clientOk,

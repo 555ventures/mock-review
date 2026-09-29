@@ -25,7 +25,15 @@ const ENTRY_HTML =
   '<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>walkthrough</title></head>' +
   `<body><div id="root"></div><script type="module" src="${ENTRY_URL}"></script></body></html>`
 
-const PROJECT_ROUTE = /^\/p\/([A-Za-z0-9_-]+)(\/.*)?$/
+/** docs/design/client-view.md §6 "Link no longer valid": the one sentence, on the client view's
+ * slate page, with no script at all (the page cannot load anything without a valid link). */
+const LINK_INVALID_HTML =
+  '<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>walkthrough</title>' +
+  '<style>html,body{margin:0;background:#E9EDF1;color:#16202A;font:16px/1.5 "Geist Variable",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}' +
+  'main{min-height:100svh;box-sizing:border-box;display:flex;align-items:center;padding:24px 16px}p{margin:0 auto;max-width:520px}</style></head>' +
+  '<body><main><p>This link no longer works. Ask the person who sent it for a new one.</p></main></body></html>'
+
+const PROJECT_ROUTE =/^\/p\/([A-Za-z0-9_-]+)(\/.*)?$/
 
 /** The package root: this file is `<root>/src/server/walkthrough-plugin.ts`. */
 function packageRoot(): string {
@@ -106,8 +114,8 @@ export function walkthrough(options: WalkthroughOptions = {}): Plugin {
           sendJson(res, 403, { error: 'client token required', code: 'client-token-required', apiVersion: 1 })
         } else {
           res.statusCode = 403
-          res.setHeader('content-type', 'text/plain; charset=utf-8')
-          res.end('walkthrough: this link needs its client token')
+          res.setHeader('content-type', 'text/html; charset=utf-8')
+          res.end(LINK_INVALID_HTML)
         }
         return true
       }

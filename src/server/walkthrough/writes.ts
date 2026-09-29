@@ -47,7 +47,7 @@ function withProjectLock<T>(project: string, fn: () => Promise<T>): Promise<T> {
   return run
 }
 
-const GEOMETRY_FIELDS = ['component', 'key', 'rect', 'viewport', 'whole', 'screen', 'state']
+const GEOMETRY_FIELDS = ['component', 'key', 'screen', 'state']
 
 /**
  * Applies one notes patch for `project`. `role` is already decided and `patch` already admitted
@@ -127,7 +127,7 @@ export function writeNotes(
           const updated = result.notes.notes.find((n) => n.id === applied.id)
           if (!updated) break
           const fields = applied.fields as Record<string, unknown>
-          // re-anchoring the way today's page does it (component/key/rect/…, no `anchor`):
+          // re-anchoring by component/key without an `anchor`:
           // drop the stored anchor so it is re-derived from the new geometry.
           const touched = GEOMETRY_FIELDS.some((f) => f in fields)
           const toWrite: Note = touched && !('anchor' in fields) ? withoutAnchor(updated) : updated

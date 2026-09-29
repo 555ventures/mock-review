@@ -146,9 +146,10 @@ describeIfReady('AC-20260917-02-18: mocks-driver.js reaches journey-approved the
       }
 
       // The CLIENT's own confirm — a real POST clientOk carrying the hash `GET state` served,
-      // driven through the page exactly as a real client would (JourneyPanel's client-role
-      // "Confirm journey" control, spec 01's already-shipped trigger). No owner journey-approve
-      // anywhere in this flow (D9 removed the op).
+      // driven through the page exactly as a real client would. A client link now gets the client
+      // view (docs/design/client-view.md §4): the confirm is "This is my story" on the whole-story
+      // page, one press, no second dialog. No owner journey-approve anywhere in this flow (D9
+      // removed the op).
       //
       // The client role is STICKY: `roleOf` (src/server/plugin.ts) sets an HttpOnly
       // `mock-review-client` cookie on any `?client=<token>` request and thereafter returns
@@ -160,11 +161,10 @@ describeIfReady('AC-20260917-02-18: mocks-driver.js reaches journey-approved the
       const clientContext = await browser.newContext()
       try {
         const clientPage = await clientContext.newPage()
-        await clientPage.goto(`${serve.url}/?client=replace-me#/home?j=first-visit&step=0`, { waitUntil: 'networkidle' })
-        const confirmJourneyButton = clientPage.getByRole('button', { name: 'Confirm journey' })
+        await clientPage.goto(`${serve.url}/?client=replace-me#/j/first-visit/story`, { waitUntil: 'networkidle' })
+        const confirmJourneyButton = clientPage.getByRole('button', { name: 'This is my story' })
         await expect.poll(() => confirmJourneyButton.count(), SLOW_POLL).toBeGreaterThan(0)
         await confirmJourneyButton.click()
-        await clientPage.getByRole('button', { name: 'Confirm', exact: true }).click()
 
         // `--mark journey-approved` below reads approval.json straight off disk — wait for the
         // client's own write to land before leaving this context, rather than racing it.

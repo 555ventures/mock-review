@@ -12,16 +12,13 @@ import { Button } from './components/ui/button.js'
 import { ForbiddenError, fetchState } from './sync/api.js'
 import { subscribe } from './sync/events.js'
 import { getStore, useStore } from './store/store.js'
+import { ClientApp, LinkInvalid } from './client/ClientApp.js'
 
 /** D24: `GET state` 403s once this browser stops qualifying as `client`/loopback `owner` — most
- * often the owner rotating `config.client.token` while a client tab is still open. One line, no
- * chrome: the reference has no surface for this (spec 02 deviations sidecar). */
+ * often the client token being rotated while a client tab is still open. Only a client link can
+ * get here, so it gets the client view's own sentence (docs/design/client-view.md §6). */
 function ForbiddenNotice() {
-  return (
-    <div className="flex h-svh items-center justify-center p-6 text-center text-sm text-muted-foreground">
-      This review link is no longer valid.
-    </div>
-  )
+  return <LinkInvalid />
 }
 
 /** The one surface for a refusal the page can recover from: a write the server declined (with the
@@ -95,10 +92,20 @@ function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   if (forbidden) return <ForbiddenNotice />
+  return <>{children}</>
+}
+
+/** A `client` link gets the client view (docs/design/client-view.md), never the workbench. */
+function Page() {
+  const role = useStore((s) => s.data?.role ?? null)
+  if (role === null) return null
+  if (role === 'client') return <ClientApp />
   return (
     <>
       <Notice />
-      {children}
+      <SidebarProvider>
+        <Router />
+      </SidebarProvider>
     </>
   )
 }
@@ -109,9 +116,7 @@ if (container) {
     <StrictMode>
       <TooltipProvider>
         <StoreProvider>
-          <SidebarProvider>
-            <Router />
-          </SidebarProvider>
+          <Page />
         </StoreProvider>
       </TooltipProvider>
     </StrictMode>,

@@ -57,9 +57,14 @@ function pickImage(images: { width: number; url: string }[], width: number): { w
   return [...images].sort((a, b) => Math.abs(a.width - width) - Math.abs(b.width - width))[0]
 }
 
+/** `&fit=1` (the client view): the page is as tall as its content (the host sizes the frame to
+ * it), and a navigate press never moves the host — the client view decides what a press means. */
+const FIT = param('fit') === '1'
+
 /** A navigate press outside a journey step moves the reviewer to that screen (inside a journey
  * step the guide intercepts the click first, in the capture phase, and advances the journey). */
 function navigateParent(to: string): void {
+  if (FIT) return
   try {
     if (window.parent !== window) window.parent.location.hash = `#/${to}`
   } catch {
@@ -118,7 +123,7 @@ function Frame() {
       />
     )
   }
-  return <GrayScreen key={`${screen}|${state}`} spec={answer.spec} onNavigate={navigateParent} />
+  return <GrayScreen key={`${screen}|${state}`} spec={answer.spec} onNavigate={navigateParent} fill={!FIT} />
 }
 
 const container = document.getElementById('root')

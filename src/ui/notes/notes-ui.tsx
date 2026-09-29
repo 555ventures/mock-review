@@ -18,7 +18,7 @@ import {
 } from '../components/ui/alert-dialog.js'
 import type { ThreadEntry } from '../../schemas/index.js'
 
-export type PinTone = 'open' | 'answered' | 'approved' | 'deferred' | 'draft'
+export type PinTone = 'open' | 'answered' | 'approved' | 'deferred'
 
 /** ONE status palette. Red = pending an AI fix, yellow = pending your approval, blue = approved,
  * muted grey = parked (D9: a fourth, distinct tone — a deferred note is separable at a glance
@@ -29,15 +29,14 @@ export const TONE: Record<PinTone, { box: string; pin: string }> = {
   answered: { box: 'border-yellow-400 bg-yellow-400/10', pin: 'bg-yellow-400 text-yellow-950' },
   approved: { box: 'border-blue-500 bg-blue-500/5', pin: 'bg-blue-500 text-white' },
   deferred: { box: 'border-gray-400 bg-gray-400/10', pin: 'bg-gray-400 text-gray-950' },
-  draft: { box: 'border-dashed border-foreground bg-foreground/5', pin: '' },
 }
 
-export function StatusDot({ tone }: { tone: Exclude<PinTone, 'draft'> }) {
+export function StatusDot({ tone }: { tone: PinTone }) {
   return <span className={`size-2 shrink-0 rounded-full ${TONE[tone].pin}`} />
 }
 
-export function NotePin({ tone, children, floating }: { tone: PinTone; children: ReactNode; floating?: boolean }) {
-  return <Badge className={`${TONE[tone].pin} ${floating ? 'absolute -top-2.5 -left-2.5' : ''}`}>{children}</Badge>
+export function NotePin({ tone, children }: { tone: PinTone; children: ReactNode }) {
+  return <Badge className={TONE[tone].pin}>{children}</Badge>
 }
 
 /** One note in the panel: a plain outline Item; the status colour lives only on the id badge, the
@@ -51,7 +50,7 @@ export function NoteRow({
   what,
   text,
 }: {
-  tone: Exclude<PinTone, 'draft'>
+  tone: PinTone
   selected: boolean
   onClick: () => void
   rowId: string
@@ -168,7 +167,7 @@ export function NoteActions({
 }: {
   role: 'owner' | 'client'
   own: boolean
-  status: Exclude<PinTone, 'draft'>
+  status: PinTone
   onApprove: () => void
   onReject: () => void
   onDelete: () => void

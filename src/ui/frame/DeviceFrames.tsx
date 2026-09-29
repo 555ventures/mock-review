@@ -1,26 +1,24 @@
 // Reference §3: the device frame area. Renders the mock in a same-origin iframe per visible
 // viewport, scaled to fit the workspace (never upscaling), with the note overlay layer living
-// inside the same scaled wrapper so rectangles map 1:1 onto the frame (rule 30).
+// inside the same scaled wrapper so boxes map 1:1 onto the frame (rule 30).
+//
+// Until the frame has actually drawn the screen+state the page asks for (`#root[data-shown]`, set
+// by `frame/mount.tsx` after each render), a slate placeholder covers it: the previous screen is
+// never visible under the new header while the next one loads.
 import {
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { Card } from '../components/ui/card.js'
 import { Overlay, type VisibleNote } from '../notes/Overlay.js'
-import {
-  resolveBox,
-  resolveGhost,
-  rectOf,
-  type Box,
-  type UiNote,
-  type Viewport,
-} from '../notes/anchor.js'
+import { anchorBox, pickAt, type Box, type Pick, type UiNote, type Viewport } from '../notes/anchor.js'
 import { areaNotesOn, sameState } from '../store/selectors.js'
-import { parseFrameHash, replaceFrameHash, sameScreenState } from './frameRoute.js'
+import { buildFrameHash, parseFrameHash, replaceFrameHash, sameScreenState } from './frameRoute.js'
 import { projectBase } from '../sync/project.js'
 import { walkFrameSrc } from '../sync/walkthrough.js'
 
@@ -29,12 +27,11 @@ export type DeviceSpec = { key: Viewport; width: number; label: string }
 export const GAP = 32
 export const CAPTION = 28
 
-function ownDevice(n: UiNote, v: Viewport): boolean {
-  return !n.viewport || n.viewport === v
-}
+/** The design's slate (docs/design/client-view.md tokens): the placeholder while a screen loads. */
+export const SLATE = '#E9EDF1'
 
-/** Shallow box-map equality (both sides come from this module's own `resolveBox`/`resolveGhost`
- * output, so a reference or `null` compare per key is enough — no need for a deep numeric diff). */
+/** Shallow box-map equality (both sides come from this module's own `anchorBox` output, so a
+ * reference or `null` compare per key is enough — no need for a deep numeric diff). */
 function boxesEqual(a: Record<string, Box | null>, b: Record<string, Box | null>): boolean {
   const aKeys = Object.keys(a)
   const bKeys = Object.keys(b)
@@ -43,14 +40,7 @@ function boxesEqual(a: Record<string, Box | null>, b: Record<string, Box | null>
     const av = a[key]
     const bv = b[key]
     if (av === bv) continue
-    if (!av || !bv) return false
-    if (
-      av.left !== bv.left ||
-      av.top !== bv.top ||
-      av.width !== bv.width ||
-      av.height !== bv.height
-    )
-      return false
+    if (!av || !bv || !boxEq(av, bv)) return false
   }
   return true
 }
@@ -127,14 +117,13 @@ function Device({
   notes,
   pins,
   marking,
-  draft,
+  picked,
   ring,
   isolated,
   onFrameLoad,
   onRoot,
   onBoxes,
   onSelect,
-  onDraw,
   onPick,
   onOpenDraft,
   onPaletteKey,
@@ -149,15 +138,14 @@ function Device({
   notes: UiNote[]
   pins: boolean
   marking: boolean
-  draft: Box | null
+  picked: Box | null
   ring: string[]
   isolated: boolean
   onFrameLoad: () => void
   onRoot: (v: Viewport, root: HTMLElement | null) => void
   onBoxes: (v: Viewport, boxes: Record<string, Box | null>) => void
   onSelect: (id: string) => void
-  onDraw: (v: Viewport, box: Box) => void
-  onPick: (v: Viewport, point: { x: number; y: number }) => void
+  onPick: (v: Viewport, pick: Pick) => void
   onOpenDraft: () => void
   onPaletteKey: () => void
 }) {
@@ -177,7 +165,11 @@ function Device({
   const boxesRef = useRef<Record<string, Box | null>>({})
   const [ringBoxes, setRingBoxes] = useState<Box[]>([])
   const ringBoxesRef = useRef<Box[]>([])
-  const [drag, setDrag] = useState<{ x0: number; y0: number; box: Box } | null>(null)
+  const [hover, setHover] = useState<Box | null>(null)
+  // The hash whose content the frame has actually drawn (`#root[data-shown]`).
+  const [shown, setShown] = useState<string | null>(null)
+  const expected = buildFrameHash({ kind: 'screen', screen, state })
+  const drawn = shown === expected
 
   useEffect(() => {
     const win = frameRef.current?.contentWindow
@@ -185,11 +177,16 @@ function Device({
   }, [screen, state, frameLoad])
 
   useEffect(() => {
+    if (!marking) setHover(null)
+  }, [marking])
+
+  useEffect(() => {
     const win = frameRef.current?.contentWindow as (Window & typeof globalThis) | null | undefined
     const root = win?.document.getElementById('root')
     if (!win || !root) return
     rootRef.current = root
     onRoot(viewport, root)
+    setShown(root.getAttribute('data-shown'))
     let raf = 0
     const bump = () => {
       if (raf) return
@@ -205,6 +202,8 @@ function Device({
     ro.observe(root)
     const mo = new win.MutationObserver(bump)
     mo.observe(root, { childList: true, subtree: true })
+    const shownObserver = new win.MutationObserver(() => setShown(root.getAttribute('data-shown')))
+    shownObserver.observe(root, { attributes: true, attributeFilter: ['data-shown'] })
     win.addEventListener('scroll', onScroll, true)
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -217,6 +216,7 @@ function Device({
     return () => {
       ro.disconnect()
       mo.disconnect()
+      shownObserver.disconnect()
       win.removeEventListener('scroll', onScroll, true)
       win.removeEventListener('keydown', onKey)
       if (raf) win.cancelAnimationFrame(raf)
@@ -229,78 +229,57 @@ function Device({
     const root = rootRef.current
     if (!root) return
     const next: Record<string, Box | null> = {}
-    for (const n of notes) {
-      if (n.screen !== screen || !sameState(n.state, state)) continue
-      next[n.id] = ownDevice(n, viewport)
-        ? resolveBox(root, n.component, n.key, n.snippet, rectOf(n))
-        : resolveGhost(root, n.component, n.key, n.snippet)
+    if (drawn) {
+      for (const n of notes) {
+        if (n.screen !== screen || !sameState(n.state, state)) continue
+        const r = root.getBoundingClientRect()
+        next[n.id] = n.anchor ? anchorBox(root, n.anchor) : { left: r.left, top: r.top, width: r.width, height: r.height }
+      }
     }
     // Skip both setters when nothing actually moved. `onBoxes` fans out into ScreenPage's
     // `setBoxesBy` (a fresh `{...prev, [v]: next}` object every call), so an unconditional call
-    // here is two nested synchronous commits on every `tick`/notes/SSE-driven store update, most
-    // of which resolve to geometrically identical boxes (nothing in the mock actually moved).
+    // here is two nested synchronous commits on every `tick`/notes/SSE-driven store update.
     if (boxesEqual(boxesRef.current, next)) return
     boxesRef.current = next
     setBoxes(next)
     onBoxes(viewport, next)
-  }, [notes, state, tick, scale, h])
+  }, [notes, state, tick, scale, h, drawn])
 
   useLayoutEffect(() => {
     const root = rootRef.current
     const win = frameRef.current?.contentWindow as (Window & typeof globalThis) | null | undefined
-    const next = root && win ? resolveRing(root, win, ring, { screen, state }) : []
+    const next = root && win && drawn ? resolveRing(root, win, ring, { screen, state }) : []
     if (ringBoxesEqual(ringBoxesRef.current, next)) return
     ringBoxesRef.current = next
     setRingBoxes(next)
-  }, [ring, tick, scale, h])
+  }, [ring, tick, scale, h, drawn])
 
-  const local = (e: ReactPointerEvent) => {
+  const local = (e: { clientX: number; clientY: number }) => {
     const c = wrapRef.current?.getBoundingClientRect()
     if (!c) return { x: 0, y: 0 }
     return { x: (e.clientX - c.left) / scale, y: (e.clientY - c.top) / scale }
   }
-  const onDown = (e: ReactPointerEvent) => {
+  const pickUnder = (e: { clientX: number; clientY: number }): Pick | null => {
+    const root = rootRef.current
+    if (!root || !drawn) return null
     const p = local(e)
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-    setDrag({ x0: p.x, y0: p.y, box: { left: p.x, top: p.y, width: 0, height: 0 } })
+    return pickAt(root, p.x, p.y)
   }
-  const onMove = (e: ReactPointerEvent) => {
-    if (!drag) return
-    const p = local(e)
-    setDrag({
-      ...drag,
-      box: {
-        left: Math.min(p.x, drag.x0),
-        top: Math.min(p.y, drag.y0),
-        width: Math.abs(p.x - drag.x0),
-        height: Math.abs(p.y - drag.y0),
-      },
-    })
+  const onPointerMove = (e: ReactPointerEvent) => {
+    const pick = pickUnder(e)
+    const next = pick ? (pick.box.width === 0 ? null : pick.box) : null
+    setHover((prev) => (prev && next && boxEq(prev, next) ? prev : next))
   }
-  const onUp = () => {
-    if (!drag) return
-    const b = drag.box
-    setDrag(null)
-    // U3: a drag smaller than 8×8 was discarded; now it is a plain click, which picks the whole
-    // node under the pointer (or, on a screenshot, a point on the picture).
-    if (b.width < 8 || b.height < 8) {
-      onPick(viewport, { x: drag.x0, y: drag.y0 })
-      return
-    }
-    onDraw(viewport, b)
+  const onClick = (e: ReactMouseEvent) => {
+    const pick = pickUnder(e)
+    if (pick) onPick(viewport, pick)
   }
 
-  // Rule 39: `pins` gates the note pins and ghosts only — the draft box and the marking overlay
-  // (`marking`) are independent of it, exactly as the prototype gated them (`ReviewLayer.tsx:212`
-  // pins vs `:234` draft / `:241` overlay). Gating the whole `Overlay` on the panel's own boolean
-  // made "Mark an area" a no-op with the panel closed — the spec-02 escape pinned by
-  // AC-20260915-02-2. `areaNotesOn` (D5) owns the whole-note exclusion; measurement above still
-  // sees every note (D6) so `isOutdatedNote` keeps reading a box map that includes whole-screen
-  // notes. NOTE: rule 26 is *not* the authority here; it governs journey mode (`&& !journey`),
-  // which is the separate gate applied in `ScreenPage`.
-  const visible: VisibleNote[] = pins
-    ? areaNotesOn(screen, state, notes).map((n) => ({ note: n, box: boxes[n.id] ?? null, ownDevice: ownDevice(n, viewport) }))
-    : []
+  // Rule 39: `pins` gates the note pins only — the picked element and the pick layer (`marking`)
+  // are independent of it. `areaNotesOn` (D5) owns the whole-note exclusion; measurement above
+  // still sees every note (D6) so `isOutdatedNote` keeps reading a box map that includes
+  // whole-screen notes.
+  const visible: VisibleNote[] = pins ? areaNotesOn(screen, state, notes).map((n) => ({ note: n, box: boxes[n.id] ?? null })) : []
 
   return (
     <div className="flex flex-col gap-2">
@@ -331,6 +310,7 @@ function Device({
               className="block border-0"
               style={{ width: w, height: h }}
             />
+            {!drawn && <div data-frame-placeholder aria-hidden className="absolute inset-0 z-40" style={{ background: SLATE }} />}
             {ringBoxes.map((box, i) => (
               <div
                 key={i}
@@ -342,13 +322,13 @@ function Device({
             <Overlay
               visible={visible}
               marking={marking}
-              drag={drag?.box ?? null}
-              draft={draft}
+              hover={hover}
+              picked={picked}
               onSelect={onSelect}
               onOpenDraft={onOpenDraft}
-              onPointerDown={onDown}
-              onPointerMove={onMove}
-              onPointerUp={onUp}
+              onPointerMove={onPointerMove}
+              onPointerLeave={() => setHover(null)}
+              onClick={onClick}
               onWheel={(e) => frameRef.current?.contentWindow?.scrollBy(e.deltaX, e.deltaY)}
             />
           </div>
@@ -369,14 +349,13 @@ export function DeviceFrames({
   notes,
   pins,
   marking,
-  draftByViewport,
+  pickedByViewport,
   ring,
   isolated,
   onFrameLoad,
   onRoot,
   onBoxes,
   onSelect,
-  onDraw,
   onPick,
   onOpenDraft,
   onPaletteKey,
@@ -391,15 +370,14 @@ export function DeviceFrames({
   notes: UiNote[]
   pins: boolean
   marking: boolean
-  draftByViewport: (v: Viewport) => Box | null
+  pickedByViewport: (v: Viewport) => Box | null
   ring: string[]
   isolated: boolean
   onFrameLoad: () => void
   onRoot: (v: Viewport, root: HTMLElement | null) => void
   onBoxes: (v: Viewport, boxes: Record<string, Box | null>) => void
   onSelect: (id: string) => void
-  onDraw: (v: Viewport, box: Box) => void
-  onPick: (v: Viewport, point: { x: number; y: number }) => void
+  onPick: (v: Viewport, pick: Pick) => void
   onOpenDraft: () => void
   onPaletteKey: () => void
 }) {
@@ -418,14 +396,13 @@ export function DeviceFrames({
           notes={notes}
           pins={pins}
           marking={marking}
-          draft={draftByViewport(spec.key)}
+          picked={pickedByViewport(spec.key)}
           ring={ring}
           isolated={isolated}
           onFrameLoad={onFrameLoad}
           onRoot={onRoot}
           onBoxes={onBoxes}
           onSelect={onSelect}
-          onDraw={onDraw}
           onPick={onPick}
           onOpenDraft={onOpenDraft}
           onPaletteKey={onPaletteKey}

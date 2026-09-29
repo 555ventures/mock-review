@@ -1,6 +1,6 @@
 // Reference §9/D11: the ⌘K command palette. Client role hides the Components group and Actions.
 import { useEffect } from 'react'
-import { Monitor, PanelRight, Pin, Route, SquareDashedMousePointer } from 'lucide-react'
+import { MessageSquarePlus, Monitor, PanelRight, Pin, Route } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -113,9 +113,9 @@ export function CommandPalette({
               <CommandSeparator />
               <CommandGroup heading="Actions">
                 {onMark && (
-                  <CommandItem value="Mark an area" onSelect={() => run(onMark)}>
-                    <SquareDashedMousePointer />
-                    Mark an area
+                  <CommandItem value="Add a note" onSelect={() => run(onMark)}>
+                    <MessageSquarePlus />
+                    Add a note
                   </CommandItem>
                 )}
                 {onToggleNotes && (

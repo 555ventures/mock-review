@@ -1,57 +1,63 @@
-// Reference §4: note pins, ghosts, the draft box and the marking overlay. Presentational: every
-// box is already resolved into CSS pixels (frame-viewport coordinates) by the caller
-// (`frame/DeviceFrames.tsx`), which also owns pointer-event geometry (it knows the wrapper's scale).
-import type { PointerEvent, WheelEvent } from 'react'
+// Reference §4: note pins, the "Add a note" pick layer and the picked element. Presentational:
+// every box is already resolved into frame-viewport pixels by the caller
+// (`frame/DeviceFrames.tsx`), which also turns pointer events into frame coordinates (it knows the
+// wrapper's scale). Pick mode is the client view's (docs/design/client-view.md §2): the element
+// under the pointer gets a 2 px highlighter outline with a 4 px highlighter/30% halo, and one
+// click picks it; on a picture one click picks that point.
+import type { MouseEvent, PointerEvent, WheelEvent } from 'react'
 import { TONE, NotePin } from './notes-ui.js'
-import { SCREEN_ANCHOR, type Box, type UiNote } from './anchor.js'
+import type { Box, UiNote } from './anchor.js'
 
-export type VisibleNote = { note: UiNote; box: Box | null; ownDevice: boolean }
+export type VisibleNote = { note: UiNote; box: Box | null }
+
+/** The highlighter outline + halo (client-view.md §2), shared with the client view's CSS. */
+export const PICK_OUTLINE = '0 0 0 2px #FFD84A, 0 0 0 6px rgba(255, 216, 74, 0.3)'
+
+function isPoint(box: Box): boolean {
+  return box.width === 0 && box.height === 0
+}
 
 export function Overlay({
   visible,
   marking,
-  drag,
-  draft,
+  hover,
+  picked,
   onSelect,
   onOpenDraft,
-  onPointerDown,
   onPointerMove,
-  onPointerUp,
+  onPointerLeave,
+  onClick,
   onWheel,
 }: {
   visible: VisibleNote[]
   marking: boolean
-  drag: Box | null
-  draft: Box | null
+  hover: Box | null
+  picked: Box | null
   onSelect: (id: string) => void
   onOpenDraft: () => void
-  onPointerDown: (e: PointerEvent) => void
   onPointerMove: (e: PointerEvent) => void
-  onPointerUp: (e: PointerEvent) => void
+  onPointerLeave: () => void
+  onClick: (e: MouseEvent) => void
   onWheel: (e: WheelEvent) => void
 }) {
   return (
     <>
-      {visible.map(({ note, box, ownDevice }) => {
+      {visible.map(({ note, box }) => {
         if (!box) return null
-        if (!ownDevice) {
-          return note.component === SCREEN_ANCHOR ? null : (
-            <div
-              key={note.id}
-              data-ghost={note.id}
-              className="pointer-events-none absolute z-10 rounded-sm border-2 border-dashed border-muted-foreground/20"
-              style={box}
-            />
-          )
-        }
         const t = TONE[note.status]
+        const point = isPoint(box)
         return (
-          <div key={note.id} data-note={note.id} className={`pointer-events-none absolute z-20 rounded-sm border-2 ${t.box}`} style={box}>
+          <div
+            key={note.id}
+            data-note={note.id}
+            className={`pointer-events-none absolute z-20 ${point ? '' : `rounded-sm border-2 ${t.box}`}`}
+            style={box}
+          >
             <button
               type="button"
               aria-label={`Open note ${note.id}`}
               onClick={() => onSelect(note.id)}
-              className={`absolute -top-2.5 -left-2.5 cursor-pointer ${marking ? 'pointer-events-none' : 'pointer-events-auto'}`}
+              className={`absolute cursor-pointer ${point ? '-translate-x-1/2 -translate-y-1/2' : '-top-2.5 -left-2.5'} ${marking ? 'pointer-events-none' : 'pointer-events-auto'}`}
             >
               <NotePin tone={note.status}>{note.id}</NotePin>
             </button>
@@ -59,28 +65,25 @@ export function Overlay({
         )
       })}
 
-      {draft && (
+      {picked && (
         <div
           data-draft
-          className={`pointer-events-auto absolute z-30 cursor-pointer rounded-sm border-2 ${TONE.draft.box}`}
-          style={draft}
+          className="pointer-events-auto absolute z-30 cursor-pointer rounded-sm"
+          style={isPoint(picked) ? { ...picked, width: 12, height: 12, marginLeft: -6, marginTop: -6, borderRadius: 999, background: '#FFD84A', boxShadow: PICK_OUTLINE } : { ...picked, boxShadow: PICK_OUTLINE }}
           onClick={onOpenDraft}
-        >
-          <NotePin tone="draft" floating>
-            draft
-          </NotePin>
-        </div>
+        />
       )}
 
       {marking && (
         <div
-          className="absolute inset-0 z-25 cursor-crosshair bg-foreground/[0.03]"
-          onPointerDown={onPointerDown}
+          data-pick-layer
+          className="absolute inset-0 z-25 cursor-pointer"
           onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
+          onPointerLeave={onPointerLeave}
+          onClick={onClick}
           onWheel={onWheel}
         >
-          {drag && <div className="absolute rounded-sm border-2 border-dashed border-foreground" style={drag} />}
+          {hover && <div className="pointer-events-none absolute rounded-sm" style={{ ...hover, boxShadow: PICK_OUTLINE }} />}
         </div>
       )}
     </>

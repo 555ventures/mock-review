@@ -13,7 +13,7 @@ export function getPool(): pg.Pool {
   if (pool) return pool
   const url = process.env['DATABASE_URL']
   if (!url) throw new Error('walkthrough: DATABASE_URL is not set (expected in .env.local)')
-  pool = new pg.Pool({ connectionString: normaliseSslMode(url), max: 5, idleTimeoutMillis: 30_000 })
+  pool = new pg.Pool({ connectionString: normaliseSslMode(url), max: 12, idleTimeoutMillis: 30_000 })
   pool.on('error', (err) => {
     // an idle client dropped by Neon — the pool replaces it on the next checkout
     console.warn(`walkthrough: pg idle client error: ${err.message}`)

@@ -26,7 +26,9 @@ export type FrameAnswer =
 /** The frame document for one device: `<base>?frame=1&round=<n>&w=<width>#/<screen>?state=<s>`.
  * `round` and `w` sit in the real search string (not the hash) so rule 16's hash-only state switch
  * keeps them; a new round or width changes `src` and reloads the frame. */
-export function walkFrameSrc(base: string, route: FrameRoute, opts: { round: number | null; width: number }): string {
+export function walkFrameSrc(base: string, route: FrameRoute, opts: { round: number | null; width: number; fit?: boolean }): string {
   const round = opts.round !== null ? `&round=${opts.round}` : ''
-  return `${base}?frame=1${round}&w=${opts.width}${buildFrameHash(route)}`
+  // `fit`: the page is exactly as tall as its content (the client view sizes the frame to it).
+  const fit = opts.fit ? '&fit=1' : ''
+  return `${base}?frame=1${round}&w=${opts.width}${fit}${buildFrameHash(route)}`
 }

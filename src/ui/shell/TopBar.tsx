@@ -1,6 +1,5 @@
 // Reference §2: screen-mode top bar.
-import { ChevronDown, Columns2, Monitor, Pin, PanelRight, Smartphone, SquareDashedMousePointer } from 'lucide-react'
-import { Kbd } from '../components/ui/kbd.js'
+import { ChevronDown, Columns2, MessageSquarePlus, Monitor, Pin, PanelRight, Smartphone } from 'lucide-react'
 import { Badge } from '../components/ui/badge.js'
 import {
   Breadcrumb,
@@ -44,7 +43,6 @@ export function TopBar({
   journey,
   view,
   onViewChange,
-  reanchorId,
   marking,
   onMarkingChange,
   pins,
@@ -64,7 +62,7 @@ export function TopBar({
   view: ViewMode
   onViewChange: (v: ViewMode) => void
   hasMobile: boolean
-  reanchorId: string | null
+  /** "Add a note" pick mode. */
   marking: boolean
   onMarkingChange: (v: boolean) => void
   pins: boolean
@@ -173,11 +171,6 @@ export function TopBar({
             </Tooltip>
           )}
         </ToggleGroup>
-        {reanchorId && (
-          <span className="text-sm whitespace-nowrap text-muted-foreground">
-            Re-anchoring {reanchorId}: draw the new area · Esc cancels
-          </span>
-        )}
         {journey ? (
           <Button variant="outline" size="sm" asChild>
             <a href={href({ kind: 'screen', screen, state })} onClick={onOpenInScreens}>
@@ -187,11 +180,11 @@ export function TopBar({
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Toggle variant="outline" size="sm" pressed={marking} onPressedChange={onMarkingChange} aria-label="Mark an area">
-                <SquareDashedMousePointer /> Mark an area <Kbd>M</Kbd>
+              <Toggle variant="outline" size="sm" pressed={marking} onPressedChange={onMarkingChange} aria-label="Add a note">
+                <MessageSquarePlus /> Add a note
               </Toggle>
             </TooltipTrigger>
-            <TooltipContent>Drag over the mock to note an area · Esc exits</TooltipContent>
+            <TooltipContent>Click the part of the mock you mean · Esc exits</TooltipContent>
           </Tooltip>
         )}
         {!journey && (
@@ -201,7 +194,7 @@ export function TopBar({
                 <Pin /> Pins
               </Toggle>
             </TooltipTrigger>
-            <TooltipContent>Show note pins on the mock · Mark an area turns them on</TooltipContent>
+            <TooltipContent>Show note pins on the mock · Add a note turns them on</TooltipContent>
           </Tooltip>
         )}
         <Separator orientation="vertical" className="mx-1 data-vertical:h-4 data-vertical:self-auto" />

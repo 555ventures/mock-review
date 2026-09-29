@@ -16,41 +16,30 @@ import { Field, FieldGroup } from '../components/ui/field.js'
 import { Label } from '../components/ui/label.js'
 import { Textarea } from '../components/ui/textarea.js'
 import { NoteActions, NotePin, NoteThread, VerdictDialog, type Verdict } from './notes-ui.js'
-import { PICTURE_ANCHOR, SCREEN_ANCHOR, type UiNote, type Viewport } from './anchor.js'
-import { screenLabel, stateLabel, stepLabel } from '../store/labels.js'
+import { aboutLabel, sheetTitle, type Pick, type UiNote } from './anchor.js'
+import { stepLabel } from '../store/labels.js'
 
 export type DraftState = {
-  viewport: Viewport
   text: string
   open: boolean
-  whole?: boolean | undefined
   about?: 'project' | undefined
+  pick?: Pick | undefined
 }
 
 export function NewNoteDialog({
-  screen,
-  state,
   draft,
   onTextChange,
   onCancel,
   onSave,
   onOpenChange,
 }: {
-  screen: string
-  state: string
   draft: DraftState | null
   onTextChange: (text: string) => void
   onCancel: () => void
   onSave: () => void
   onOpenChange: (open: boolean) => void
 }) {
-  const description = draft
-    ? draft.about === 'project'
-      ? 'Project'
-      : draft.whole
-        ? `${screenLabel(screen)} – ${stateLabel(state)}`
-        : `${stepLabel(screen, state)} · ${draft.viewport}`
-    : ''
+  const description = draft ? (draft.about === 'project' ? 'Project' : sheetTitle(draft.pick)) : ''
 
   return (
     <Dialog open={!!draft?.open} onOpenChange={(o) => !o && onOpenChange(false)}>
@@ -102,7 +91,6 @@ export function NoteThreadDialog({
   outdated,
   role,
   onOpenChange,
-  onReanchor,
   onReply,
   onVerdict,
 }: {
@@ -111,7 +99,6 @@ export function NoteThreadDialog({
   outdated: boolean
   role: 'owner' | 'client'
   onOpenChange: (open: boolean) => void
-  onReanchor: () => void
   onReply: (text: string) => void
   onVerdict: (v: Verdict) => void
 }) {
@@ -136,21 +123,14 @@ export function NoteThreadDialog({
                 <DialogTitle className="flex items-center gap-2">
                   <NotePin tone={note.status}>{note.id}</NotePin>
                   {note.status === 'deferred' ? 'Deferred · ' : ''}
-                  {note.project ? 'Project note' : note.whole || note.component === SCREEN_ANCHOR ? 'Whole screen' : note.component === PICTURE_ANCHOR ? 'Picture' : note.component}
+                  {note.project ? 'Project note' : aboutLabel(note)}
                 </DialogTitle>
-                <DialogDescription>
-                  {note.project ? 'Project' : `${stepLabel(note.screen ?? '', note.state ?? '')}${note.viewport ? ` · ${note.viewport}` : ''}`}
-                </DialogDescription>
+                <DialogDescription>{note.project ? 'Project' : stepLabel(note.screen ?? '', note.state ?? '')}</DialogDescription>
               </DialogHeader>
               <div className="-mx-4 no-scrollbar flex max-h-[50vh] flex-col gap-4 overflow-y-auto px-4">
                 {outdated && (
                   <Alert>
-                    <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-                      This area changed since the note was written
-                      <Button type="button" size="sm" variant="outline" onClick={onReanchor}>
-                        Re-anchor
-                      </Button>
-                    </AlertDescription>
+                    <AlertDescription>This area changed since the note was written</AlertDescription>
                   </Alert>
                 )}
                 <NoteThread entries={note.thread} viewerRole={role} />

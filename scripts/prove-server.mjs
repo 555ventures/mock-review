@@ -134,7 +134,7 @@ let state
 
 // ------------------------------------------------------------------ 3. client adds an anchored note
 let noteId
-const anchor = { node: 'cta', index: 0, rect: { x: 0.1, y: 0.2, w: 0.5, h: 0.6 }, viewport: 'desktop' }
+const anchor = { node: 'cta', index: null }
 {
   const r = await call('POST', `${P}/notes?client=${encodeURIComponent(CLIENT)}`, {
     auth: false,
@@ -147,7 +147,7 @@ const anchor = { node: 'cta', index: 0, rect: { x: 0.1, y: 0.2, w: 0.5, h: 0.6 }
   noteId = n?.id
   check('client POST notes add → 200, new note N001', r.status === 200 && noteId === 'N001', `${r.status} ${JSON.stringify(n)}`)
   check('the thread entry was rewritten to by:client (role rule)', n?.thread?.[0]?.by === 'client')
-  check('note carries round 1, component=anchor.node, key=String(anchor.index)', n?.round === 1 && n.component === 'cta' && n.key === '0')
+  check('note carries round 1, component=anchor.node, key=String(anchor.index ?? 0)', n?.round === 1 && n.component === 'cta' && n.key === '0')
 }
 
 // ------------------------------------------------------------------ 4. read it back through the API
@@ -251,7 +251,7 @@ const anchor = { node: 'cta', index: 0, rect: { x: 0.1, y: 0.2, w: 0.5, h: 0.6 }
     auth: false,
     body: {
       op: 'add',
-      note: { screen: 'welcome', state: 'default', component: '__screen', key: '0', snippet: null, status: 'open', thread: [{ by: 'owner', text: 'Logo is blurry' }], anchor: { x: 0.2, y: 0.1, w: 0.1, h: 0.05, width: 390 } },
+      note: { screen: 'welcome', state: 'default', component: '__screen', key: '0', snippet: null, status: 'open', thread: [{ by: 'owner', text: 'Logo is blurry' }], anchor: { x: 0.2, y: 0.1, width: 390 } },
     },
   })
   const sn = shotNote.data.notes?.at(-1)

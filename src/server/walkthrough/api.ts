@@ -268,6 +268,7 @@ function apiNote(note: Note): Record<string, unknown> {
     screen: note.screen,
     state: note.state,
     anchor: rec['anchor'] ?? null,
+    pickedText: rec['pickedText'] ?? null,
     status: note.status,
     text: first?.text ?? '',
     author: first?.by ?? null,

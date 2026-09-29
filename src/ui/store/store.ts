@@ -6,24 +6,24 @@ import { useSyncExternalStore } from 'react'
 import type { ServerState } from '../../schemas/patches.js'
 import { EMPTY_APPROVAL, EMPTY_NOTES } from '../../schemas/version.js'
 import { getGuideOn, getSideTab, getView, setGuideOn, setSideTab, setView, type SideTab, type ViewMode } from '../prefs.js'
+import type { Pick } from '../notes/anchor.js'
 
 export type Draft = {
   viewport: 'desktop' | 'mobile'
-  box: { left: number; top: number; width: number; height: number }
   text: string
   open: boolean
   whole?: boolean
   about?: 'project'
-  /** U3: set when the draft came from a plain click that selected a whole node (rect = null). */
-  pick?: { component: string; key: string; snippet: string }
+  /** What "Add a note" picked: the anchor, the reader's words for it, and its box on the frame. */
+  pick?: Pick
 }
 
 export type UiState = {
   view: ViewMode
   sideTab: SideTab
   guideOn: boolean
+  /** "Add a note" pick mode (the name predates it: it used to be drag-to-mark). */
   marking: boolean
-  reanchor: string | null
   selected: string | null
   cardOpen: boolean
   draft: Draft | null
@@ -68,7 +68,6 @@ export function initialUi(): UiState {
     sideTab: getSideTab(),
     guideOn: getGuideOn(),
     marking: false,
-    reanchor: null,
     selected: null,
     cardOpen: false,
     draft: null,

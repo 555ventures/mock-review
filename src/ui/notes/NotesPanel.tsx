@@ -8,7 +8,7 @@ import { ItemGroup } from '../components/ui/item.js'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../components/ui/resizable.js'
 import { Sidebar, SidebarHeader } from '../components/ui/sidebar.js'
 import { NoteRow } from './notes-ui.js'
-import { PICTURE_ANCHOR, SCREEN_ANCHOR, type UiNote } from './anchor.js'
+import { aboutLabel, type UiNote } from './anchor.js'
 import { stateLabel } from '../store/labels.js'
 import { sameState } from '../store/selectors.js'
 
@@ -77,15 +77,9 @@ export function NotesPanel({
                   ) : (
                     <ItemGroup className="gap-1.5 px-2">
                       {g.notes.map((n) => {
-                        const part = n.project
-                          ? 'Project note'
-                          : n.whole
-                            ? 'Whole screen'
-                            : n.component === SCREEN_ANCHOR
-                              ? 'Screen'
-                              : n.component === PICTURE_ANCHOR
-                                ? 'Picture'
-                              : (n.component ?? 'Screen')
+                        // A note's label is what was picked, in the reader's words — never an
+                        // element name (docs/design/client-view.md, the owner's page).
+                        const part = n.project ? 'Project note' : aboutLabel(n)
                         const noteState = n.state ?? ''
                         const what =
                           (n.status === 'deferred' ? 'Deferred · ' : '') +

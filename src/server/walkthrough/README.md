@@ -84,9 +84,17 @@ Seam C (`Authorization: Bearer <WALKTHROUGH_API_TOKEN>`; `GET /v1` is open):
    its `round`), so a round-1 note still shows on round 2 (acceptance 5). A new note's round is the
    note's own `round` field if the page sends one, else the `?round=` of the POST, else the latest
    visible round.
-8. **Anchor**: when the page sends `anchor` it is validated against seam A's two shapes (400 on a bad
-   one) and stored as sent. When it does not (today's page), it is derived from
-   `component/key/rect/viewport`; a re-anchor `update` without `anchor` re-derives it.
+8. **Anchor** (amended by docs/design/client-view.md): `{node, index}` on a wireframe, `{x, y, width}`
+   on a picture, or null — no `rect`, `w`, `h` or `viewport` any more. A sent anchor is validated
+   against those two shapes (400 `bad-anchor` otherwise); without one it is derived from
+   `component/key`. Older rows are served in the new shape (`normalizeAnchor` drops the drag-area
+   fields; a node-less area reads as a whole-screen note).
+13. **`pickedText`** (≤ 40 chars, stored in `notes.extra`) rides on every served note and on
+    `GET /v1 …/notes`; a row written before it existed falls back to its `snippet`.
+14. **`state.changes`** = `{since, screens:[{screen, state, change:'new'|'changed'|'same'}],
+    journeys:[{id, change, steps:[i…]}]}` against the previous visible round (deep-equal specs;
+    md5 of picture bytes per width); `since: null` on a first round. **`state.projectName`** =
+    `projects.name`. `GET state` runs its reads in parallel (each is a network round-trip).
 9. **`approveScreen`** answers 400 `unsupported-op` (no screen approvals in walkthrough). Owner
    `waive` works and is stored with `by:'owner'` and its `reason`.
 10. **Approvals are per project+journey** (seam A's key); `approval.journeys[id]` also carries the
