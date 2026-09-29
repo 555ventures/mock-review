@@ -22,6 +22,7 @@ export function JourneyPill({
   hints,
   guideOn,
   setGuideOn,
+  simple = false,
 }: {
   journeyId: string
   title: string
@@ -31,9 +32,15 @@ export function JourneyPill({
   hints: GuideHint[]
   guideOn: boolean
   setGuideOn: (on: boolean) => void
+  /** U5: a screenshots round — Back / Next only, no hints, no guide ring, no "(control not found)". */
+  simple?: boolean
 }) {
-  const back = idx > 0 ? edges.find((e) => e.to === idx) : undefined
-  const skip = idx >= 0 ? edges.find((e) => e.from === idx) : undefined
+  const back = simple ? (idx > 0 ? { from: idx - 1 } : undefined) : idx > 0 ? (edges.find((e) => e.to === idx) ?? { from: idx - 1 }) : undefined
+  const skip = simple ? undefined : idx >= 0 ? edges.find((e) => e.from === idx) : undefined
+  // Steps are linear in a walkthrough journey, and two steps on the same screen have no edge
+  // between them (seam B derives edges only where the screen changes) — so with no edge out of a
+  // step that is not the last, the pill still offers the next step instead of "End of".
+  const next = idx >= 0 && idx < steps.length - 1 && (simple || (!skip && hints.length === 0)) ? idx + 1 : undefined
   const first = steps[0]
 
   return (
@@ -59,7 +66,7 @@ export function JourneyPill({
             )}
             <span className="min-w-0 truncate px-2 text-sm">
               {hints.length === 0 ? (
-                !skip && <span className="text-muted-foreground">End of {title}</span>
+                !skip && next === undefined && <span className="text-muted-foreground">End of {title}</span>
               ) : hints.length === 1 ? (
                 <span className={hints[0]?.found ? '' : 'text-destructive'}>
                   {hints[0]?.say}
@@ -83,11 +90,20 @@ export function JourneyPill({
                 </a>
               </Button>
             )}
+            {next !== undefined && (
+              <Button size="sm" variant="ghost" asChild>
+                <a href={stepHref(journeyId, steps, next)}>
+                  Next <ArrowRight />
+                </a>
+              </Button>
+            )}
           </>
         )}
-        <Toggle size="sm" pressed={guideOn} onPressedChange={setGuideOn} aria-label="Guide" title={guideOn ? 'Guide on' : 'Guide off'}>
-          <Sparkles />
-        </Toggle>
+        {!simple && (
+          <Toggle size="sm" pressed={guideOn} onPressedChange={setGuideOn} aria-label="Guide" title={guideOn ? 'Guide on' : 'Guide off'}>
+            <Sparkles />
+          </Toggle>
+        )}
       </div>
     </div>
   )

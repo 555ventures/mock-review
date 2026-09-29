@@ -8,7 +8,7 @@ import { ItemGroup } from '../components/ui/item.js'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../components/ui/resizable.js'
 import { Sidebar, SidebarHeader } from '../components/ui/sidebar.js'
 import { NoteRow } from './notes-ui.js'
-import { SCREEN_ANCHOR, type UiNote } from './anchor.js'
+import { PICTURE_ANCHOR, SCREEN_ANCHOR, type UiNote } from './anchor.js'
 import { stateLabel } from '../store/labels.js'
 import { sameState } from '../store/selectors.js'
 
@@ -83,6 +83,8 @@ export function NotesPanel({
                             ? 'Whole screen'
                             : n.component === SCREEN_ANCHOR
                               ? 'Screen'
+                              : n.component === PICTURE_ANCHOR
+                                ? 'Picture'
                               : (n.component ?? 'Screen')
                         const noteState = n.state ?? ''
                         const what =

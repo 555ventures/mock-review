@@ -51,6 +51,31 @@ export function journeyTone(id: string, journeys: Record<string, JourneyConversa
   return conv.status === 'deferred' ? 'approved' : conv.status
 }
 
+/** U4: the client's confirmation of a journey, if any — `stale` when the story (`beats`) changed
+ * since it was confirmed. `null` when nobody confirmed it. */
+export function journeyConfirmation(
+  id: string,
+  beats: string | null | undefined,
+  approval: Approval,
+): { at: string | null; stale: boolean } | null {
+  const row = approval.journeys[id]
+  if (!row || row.client !== 'ok') return null
+  return { at: row.at ?? null, stale: (row.beats ?? null) !== (beats ?? null) }
+}
+
+/** U4: the sidebar dot of a journey — blue while a client confirmation of the CURRENT story
+ * stands, otherwise the conversation's own tone (rule 5). */
+export function journeyDotTone(
+  id: string,
+  beats: string | null | undefined,
+  journeys: Record<string, JourneyConversation>,
+  approval: Approval,
+): Tone | null {
+  const c = journeyConfirmation(id, beats, approval)
+  if (c && !c.stale) return 'approved'
+  return journeyTone(id, journeys)
+}
+
 /** Every note anchored to `screen`, any state (the notes panel's "THIS SCREEN" group). */
 export function notesHere(screen: string, notes: readonly Note[]): Note[] {
   return notes.filter((n) => n.screen === screen)

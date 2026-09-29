@@ -54,6 +54,7 @@ export function TopBar({
   notesOnScreenCount,
   onOpenInScreens,
   hasMobile,
+  round = null,
 }: {
   screen: string
   state: string
@@ -72,6 +73,8 @@ export function TopBar({
   onNotesPanelChange: (v: boolean) => void
   notesOnScreenCount: number
   onOpenInScreens: () => void
+  /** U6: which version of the screens this page shows. */
+  round?: { n: number; kind: string } | null
 }) {
   return (
     <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-3">
@@ -135,6 +138,11 @@ export function TopBar({
         </Breadcrumb>
       </div>
       <div className="ml-auto flex items-center gap-2">
+        {round && (
+          <span data-round className="text-sm whitespace-nowrap text-muted-foreground">
+            Round {round.n} · {round.kind}
+          </span>
+        )}
         <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={view} onValueChange={(v) => v && onViewChange(v as ViewMode)}>
           <Tooltip>
             <TooltipTrigger asChild>

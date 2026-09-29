@@ -16,7 +16,7 @@ import { Field, FieldGroup } from '../components/ui/field.js'
 import { Label } from '../components/ui/label.js'
 import { Textarea } from '../components/ui/textarea.js'
 import { NoteActions, NotePin, NoteThread, VerdictDialog, type Verdict } from './notes-ui.js'
-import { SCREEN_ANCHOR, type UiNote, type Viewport } from './anchor.js'
+import { PICTURE_ANCHOR, SCREEN_ANCHOR, type UiNote, type Viewport } from './anchor.js'
 import { screenLabel, stateLabel, stepLabel } from '../store/labels.js'
 
 export type DraftState = {
@@ -136,7 +136,7 @@ export function NoteThreadDialog({
                 <DialogTitle className="flex items-center gap-2">
                   <NotePin tone={note.status}>{note.id}</NotePin>
                   {note.status === 'deferred' ? 'Deferred · ' : ''}
-                  {note.project ? 'Project note' : note.whole || note.component === SCREEN_ANCHOR ? 'Whole screen' : note.component}
+                  {note.project ? 'Project note' : note.whole || note.component === SCREEN_ANCHOR ? 'Whole screen' : note.component === PICTURE_ANCHOR ? 'Picture' : note.component}
                 </DialogTitle>
                 <DialogDescription>
                   {note.project ? 'Project' : `${stepLabel(note.screen ?? '', note.state ?? '')}${note.viewport ? ` · ${note.viewport}` : ''}`}

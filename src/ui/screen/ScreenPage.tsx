@@ -5,7 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SidebarInset } from '../components/ui/sidebar.js'
 import { CAPTION, GAP, DeviceFrames, type DeviceSpec } from '../frame/DeviceFrames.js'
 import { useMeasure } from '../frame/useMeasure.js'
-import { anchorFor, type Box, type UiNote, type Viewport } from '../notes/anchor.js'
+import {
+  anchorFor,
+  anchorForElement,
+  elementAt,
+  fromWalkAnchor,
+  toWalkAnchor,
+  type Anchor,
+  type Box,
+  type UiNote,
+  type Viewport,
+  type WalkAnchor,
+} from '../notes/anchor.js'
+import { roundOf } from '../sync/walkthrough.js'
 import { NewNoteDialog, NoteThreadDialog } from '../notes/NoteDialogs.js'
 import { NotesPanel } from '../notes/NotesPanel.js'
 import { useNoteActions } from '../notes/useNoteActions.js'
@@ -17,7 +29,8 @@ import { useJourneyGuide, type GuideStep } from '../journeys/useJourneyGuide.js'
 import { locate, type LocateEdge } from '../journeys/locate.js'
 import { href, type Route } from '../router/route.js'
 import { screenLabel } from '../store/labels.js'
-import { journeyTone, notesHere, projectNotes, sameState, screenStates } from '../store/selectors.js'
+import { journeyConfirmation, journeyTone, notesHere, projectNotes, sameState, screenStates } from '../store/selectors.js'
+import { EMPTY_APPROVAL } from '../../schemas/version.js'
 import { enterMarking, getStore, useStore } from '../store/store.js'
 import type { Verdict } from '../notes/notes-ui.js'
 import type { JourneyConversation } from '../../schemas/index.js'
@@ -40,8 +53,8 @@ const EMPTY_JOURNEYS: Record<string, JourneyConversation> = {}
 // would re-run it every render too.
 const EMPTY_NOTES: UiNote[] = []
 
-function parseViewport(v: string): number {
-  const [w] = v.split('x')
+function parseViewport(v: string | number): number {
+  const [w] = String(v).split('x')
   return Number(w)
 }
 
@@ -53,9 +66,32 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
   const screenRow = data?.screens.find((s) => s.name === route.screen)
   const states = screenRow ? screenStates(screenRow) : []
   const state = route.state && states.includes(route.state) ? route.state : (states[0] ?? 'default')
-  const notes = (data?.notes.notes ?? EMPTY_NOTES) as UiNote[]
   const role = data?.role ?? 'owner'
   const config = data?.config
+  // U6/U5: which round the page shows, and whether it is pictures (view only, no guide ring).
+  const round = roundOf(data)
+  const screenshots = round?.kind === 'screenshots'
+
+  const viewports: Viewport[] = ui.view === 'both' ? ['desktop', 'mobile'] : [ui.view]
+  const rawViewports = config && 'targets' in config && config.targets ? config.targets.viewports : []
+  const sortedViewports = [...rawViewports].sort((a, b) => parseViewport(b) - parseViewport(a))
+  const widest = sortedViewports[0]
+  const narrowest = sortedViewports[sortedViewports.length - 1]
+  const deviceSpecs: Record<Viewport, DeviceSpec> = {
+    desktop: { key: 'desktop', width: widest ? parseViewport(widest) : 1280, label: 'Desktop' },
+    mobile: { key: 'mobile', width: narrowest ? parseViewport(narrowest) : 360, label: 'Mobile' },
+  }
+  const desktopW = deviceSpecs.desktop.width
+  const mobileW = deviceSpecs.mobile.width
+
+  // Seam B serves each note's `anchor`; `fromWalkAnchor` turns it back into the page's own
+  // component/key/rect/viewport, so the pins, ghosts and outdated checks below work unchanged.
+  const rawNotes = data?.notes.notes
+  const notes = useMemo(() => {
+    if (!rawNotes) return EMPTY_NOTES
+    const viewportOfWidth = (w: number): Viewport => (Math.abs(w - desktopW) <= Math.abs(w - mobileW) ? 'desktop' : 'mobile')
+    return (rawNotes as UiNote[]).map((n) => fromWalkAnchor(n, viewportOfWidth))
+  }, [rawNotes, desktopW, mobileW])
 
   const journey = route.journey ? data?.journeys.find((j) => j.id === route.journey) : undefined
   const screenStateRows = (data?.screens ?? []).map((s) => ({ name: s.name, states: screenStates(s) }))
@@ -67,6 +103,18 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
       })),
     [journey?.id],
   )
+  // Seam B derives each edge's `label` from the target screen's name and may send no `say`; the
+  // pill then reads the target step's beat (or the screen's label) instead of a raw screen id.
+  // Memoised on the journey object: `useJourneyGuide` re-runs on every new `edges` array.
+  const journeyEdges: LocateEdge[] = useMemo(() => {
+    if (!journey) return EMPTY_EDGES
+    return journey.edges.map((e) => {
+      if (e.say) return e
+      const target: unknown = journey.steps[e.to]
+      const beat = target && typeof target === 'object' && 'beat' in target && typeof target.beat === 'string' ? target.beat : undefined
+      return { ...e, say: beat ?? (e.label ? screenLabel(e.label) : undefined) }
+    })
+  }, [journey])
   const journeyIdx = journey ? (locate(journey, route.screen, state, screenStateRows, route.step) ?? -1) : -1
 
   // D27: the note-editing session (marking/reanchor/selected/cardOpen/draft) lives in the store's
@@ -167,16 +215,62 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     if (!marking) getStore().setUi({ reanchor: null })
   }, [marking])
 
+  // Seam A's `anchor` for a resolved anchor: the node (wireframe) or the picture fraction plus
+  // the picture's width (screenshots). `wholeNode` = picked by a plain click (rect null).
+  const walkAnchor = (root: HTMLElement, a: Anchor, v: Viewport, wholeNode = false): WalkAnchor =>
+    toWalkAnchor(root, a, { kind: screenshots ? 'screenshots' : 'wireframe', viewport: v, width: deviceSpecs[v].width, wholeNode })
+
+  const reanchorTo = (id: string, root: HTMLElement, a: Anchor, v: Viewport, wholeNode = false) => {
+    void actions.reanchorNote(id, {
+      screen: route.screen,
+      state,
+      viewport: v,
+      component: a.component,
+      key: a.key,
+      rect: a.rect,
+      snippet: a.snippet,
+      anchor: walkAnchor(root, a, v, wholeNode),
+    })
+    getStore().setUi({ reanchor: null, marking: false, selected: id })
+  }
+
   const onDraw = (v: Viewport, box: Box) => {
     const root = rootsRef.current[v]
     if (reanchor && root) {
-      const id = reanchor
-      const a = anchorFor(root, box)
-      void actions.reanchorNote(id, { screen: route.screen, state, viewport: v, component: a.component, key: a.key, rect: a.rect, snippet: a.snippet })
-      getStore().setUi({ reanchor: null, marking: false, selected: id })
+      reanchorTo(reanchor, root, anchorFor(root, box), v)
       return
     }
     getStore().setUi((u) => ({ cardOpen: false, draft: { viewport: v, box, text: u.draft?.text ?? '', open: true } }))
+  }
+
+  // U3: a plain click in marking mode. On a wireframe it selects the whole node under the pointer
+  // (the draft box outlines that node; the saved anchor has rect = null). On a screenshot it is a
+  // point on the picture (anchor w/h = null).
+  const onPick = (v: Viewport, p: { x: number; y: number }) => {
+    const root = rootsRef.current[v]
+    if (!root) return
+    if (screenshots) {
+      const box = { left: p.x, top: p.y, width: 0, height: 0 }
+      if (reanchor) {
+        reanchorTo(reanchor, root, anchorFor(root, box), v)
+        return
+      }
+      getStore().setUi((u) => ({ cardOpen: false, draft: { viewport: v, box, text: u.draft?.text ?? '', open: true } }))
+      return
+    }
+    const el = elementAt(root, p.x, p.y)
+    if (!el) return
+    const a = anchorForElement(root, el)
+    if (reanchor) {
+      reanchorTo(reanchor, root, a, v, true)
+      return
+    }
+    const r = el.getBoundingClientRect()
+    const box = { left: r.left, top: r.top, width: r.width, height: r.height }
+    getStore().setUi((u) => ({
+      cardOpen: false,
+      draft: { viewport: v, box, text: u.draft?.text ?? '', open: true, pick: { component: a.component, key: a.key, snippet: a.snippet } },
+    }))
   }
 
   const noteOnScreen = (target: 'here' | 'project' = 'here') => {
@@ -200,7 +294,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     if (!draft || !draft.text.trim()) return
     if (draft.about === 'project') {
       const id = await actions.addNote(
-        { screen: null, state: null, component: null, key: null, snippet: null, project: true },
+        { screen: null, state: null, component: null, key: null, snippet: null, project: true, anchor: null },
         draft.text.trim(),
         role,
       )
@@ -209,7 +303,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     }
     if (draft.whole) {
       const id = await actions.addNote(
-        { screen: route.screen, state, component: '__screen', key: '0', snippet: null, viewport: draft.viewport, whole: true },
+        { screen: route.screen, state, component: '__screen', key: '0', snippet: null, viewport: draft.viewport, whole: true, anchor: null },
         draft.text.trim(),
         role,
       )
@@ -218,9 +312,10 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     }
     const root = rootsRef.current[draft.viewport]
     if (!root) return
-    const a = anchorFor(root, draft.box)
+    const a: Anchor = draft.pick ? { ...draft.pick, rect: { x: 0, y: 0, w: 1, h: 1 } } : anchorFor(root, draft.box)
+    const anchor = walkAnchor(root, a, draft.viewport, !!draft.pick)
     const id = await actions.addNote(
-      { screen: route.screen, state, component: a.component, key: a.key, snippet: a.snippet, viewport: draft.viewport, rect: a.rect },
+      { screen: route.screen, state, component: a.component, key: a.key, snippet: a.snippet, viewport: draft.viewport, rect: a.rect, anchor },
       draft.text.trim(),
       role,
     )
@@ -232,9 +327,10 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     rootsRef,
     count: ui.view === 'both' ? 2 : 1,
     steps: journeySteps,
-    edges: journey?.edges ?? EMPTY_EDGES,
+    edges: journeyEdges,
     idx: journeyIdx,
-    enabled: !marking && !isolated,
+    // U5: a screenshots round has no controls to find — no ring, no hints, no red "not found".
+    enabled: !marking && !isolated && !screenshots,
     ring: ui.guideOn,
     frame: frameLoads,
     journeyId: journey?.id ?? '',
@@ -249,15 +345,6 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
     onNewNote: () => noteOnScreen(),
   })
 
-  const viewports: Viewport[] = ui.view === 'both' ? ['desktop', 'mobile'] : [ui.view]
-  const rawViewports = config && 'targets' in config && config.targets ? config.targets.viewports : []
-  const sortedViewports = [...rawViewports].sort((a, b) => parseViewport(b) - parseViewport(a))
-  const widest = sortedViewports[0]
-  const narrowest = sortedViewports[sortedViewports.length - 1]
-  const deviceSpecs: Record<Viewport, DeviceSpec> = {
-    desktop: { key: 'desktop', width: widest ? parseViewport(widest) : 1280, label: 'Desktop' },
-    mobile: { key: 'mobile', width: narrowest ? parseViewport(narrowest) : 360, label: 'Mobile' },
-  }
   const hasMobile = sortedViewports.length > 1
   const activeViewports = hasMobile ? viewports : (['desktop'] as Viewport[])
   const devices: DeviceSpec[] = activeViewports.map((v) => deviceSpecs[v])
@@ -310,6 +397,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
           notesOnScreenCount={here.length}
           onOpenInScreens={() => getStore().setUi({ sideTab: 'screens' })}
           hasMobile={hasMobile}
+          round={round}
         />
 
         <div ref={wsRef} className="relative flex min-w-0 flex-1 flex-col items-center bg-muted px-8 py-6">
@@ -319,7 +407,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             h={deviceH}
             screen={route.screen}
             state={state}
-            theme={config?.theme ?? null}
+            round={round?.n ?? null}
             title={screenLabel(route.screen)}
             notes={notes}
             pins={pins && !journey}
@@ -332,6 +420,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
             onBoxes={onBoxes}
             onSelect={(id) => select(id, false)}
             onDraw={onDraw}
+            onPick={onPick}
             onOpenDraft={() => draft && getStore().setUi({ draft: { ...draft, open: true } })}
             onPaletteKey={() => getStore().setUi((u) => ({ paletteOpen: !u.paletteOpen }))}
           />
@@ -341,7 +430,8 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
               journeyId={journey.id}
               title={journey.title}
               steps={journeySteps}
-              edges={journey.edges}
+              edges={journeyEdges}
+              simple={screenshots}
               idx={journeyIdx}
               hints={guideHints}
               guideOn={ui.guideOn}
@@ -363,6 +453,7 @@ export function ScreenPage({ route }: { route: Route & { kind: 'screen' } }) {
               onReply={(text) => void actions.replyJourney(journey.id, text)}
               onApprove={() => void actions.approveJourney(journey.id)}
               onConfirm={() => void actions.clientOk(journey.id, journey.beats ?? '')}
+              confirmed={journeyConfirmation(journey.id, journey.beats, data?.approval ?? EMPTY_APPROVAL)}
             />
           </div>
         ) : (

@@ -1,6 +1,6 @@
 // Reference §9/D11: the ⌘K command palette. Client role hides the Components group and Actions.
 import { useEffect } from 'react'
-import { Blocks, LayoutGrid, Monitor, PanelRight, Pin, Route, SquareDashedMousePointer } from 'lucide-react'
+import { Monitor, PanelRight, Pin, Route, SquareDashedMousePointer } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -11,7 +11,7 @@ import {
   CommandList,
   CommandSeparator,
 } from '../components/ui/command.js'
-import { componentsHref, href } from '../router/route.js'
+import { href } from '../router/route.js'
 import { screenLabel, stateLabel, stepLabel } from '../store/labels.js'
 import { screenStates } from '../store/selectors.js'
 import { getStore, useStore } from '../store/store.js'
@@ -53,7 +53,6 @@ export function CommandPalette({
   const screens = data?.screens ?? []
   const journeys = data?.journeys ?? []
   const role = data?.role ?? 'owner'
-  const components = data?.inventory ?? []
 
   return (
     <CommandDialog open={paletteOpen} onOpenChange={setOpen} title="Search" description="Jump to a screen, state or journey, or run an action.">
@@ -108,23 +107,11 @@ export function CommandPalette({
               )),
             ])}
           </CommandGroup>
-          {role === 'owner' && (
+          {/* U7: the Components group and the "Components" action need a host app — hidden. */}
+          {role === 'owner' && (onMark || onToggleNotes || onTogglePins) && (
             <>
               <CommandSeparator />
-              <CommandGroup heading="Components">
-                {components.map((c) => (
-                  <CommandItem key={c.name} value={`${c.name}`} keywords={[c.name]} onSelect={() => nav(componentsHref(c.name))}>
-                    <Blocks />
-                    {c.name}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-              <CommandSeparator />
               <CommandGroup heading="Actions">
-                <CommandItem value="Components" onSelect={() => nav(componentsHref())}>
-                  <LayoutGrid />
-                  Components
-                </CommandItem>
                 {onMark && (
                   <CommandItem value="Mark an area" onSelect={() => run(onMark)}>
                     <SquareDashedMousePointer />

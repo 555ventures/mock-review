@@ -1,6 +1,5 @@
 // D2: route -> ScreenPage / ComponentsPage / UnknownScreen (reference §11).
 import { useMemo } from 'react'
-import { ComponentsPage } from '../catalog/ComponentsPage.js'
 import { AppSidebar } from '../shell/AppSidebar.js'
 import { UnknownScreen } from '../shell/UnknownScreen.js'
 import { ScreenPage } from '../screen/ScreenPage.js'
@@ -28,12 +27,11 @@ export function Router() {
   return (
     <>
       <AppSidebar route={route} />
-      {route.kind === 'components' ? (
-        <ComponentsPage selected={route.c ?? null} from={route.from ?? null} />
-      ) : route.kind === 'screen' ? (
+      {/* U7: the Components page needs a host app; its route falls through to the fallback. */}
+      {route.kind === 'screen' ? (
         <ScreenPage route={route} />
       ) : (
-        <UnknownScreen path={route.path} screens={screens} />
+        <UnknownScreen path={route.kind === 'unknown' ? route.path : 'components'} screens={screens} />
       )}
     </>
   )

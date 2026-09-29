@@ -1,0 +1,13 @@
+/* The frame document's only stylesheet: the font and a blank page. Every wireframe component
+ * styles itself inline (gray-registry.tsx). */
+@import "@fontsource-variable/geist";
+
+html,
+body {
+  margin: 0;
+  background: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}

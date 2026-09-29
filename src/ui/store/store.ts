@@ -14,6 +14,8 @@ export type Draft = {
   open: boolean
   whole?: boolean
   about?: 'project'
+  /** U3: set when the draft came from a plain click that selected a whole node (rect = null). */
+  pick?: { component: string; key: string; snippet: string }
 }
 
 export type UiState = {

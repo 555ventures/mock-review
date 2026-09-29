@@ -1,6 +1,6 @@
 // Reference §1: left sidebar — navigation only, one list at a time (Journeys | Screens).
 import { useEffect } from 'react'
-import { LayoutGrid, Monitor, Route as RouteIcon, Search } from 'lucide-react'
+import { Monitor, Route as RouteIcon, Search } from 'lucide-react'
 import { Kbd, KbdGroup } from '../components/ui/kbd.js'
 import {
   Sidebar,
@@ -19,9 +19,9 @@ import {
 } from '../components/ui/sidebar.js'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js'
 import { StatusDot } from '../notes/notes-ui.js'
-import { componentsHref, href, type Route } from '../router/route.js'
+import { href, type Route } from '../router/route.js'
 import { screenLabel, stateLabel } from '../store/labels.js'
-import { journeyTone, screenStates, screenTone, stateTone } from '../store/selectors.js'
+import { journeyDotTone, screenStates, screenTone, stateTone } from '../store/selectors.js'
 import { locate } from '../journeys/locate.js'
 import { getStore, useStore } from '../store/store.js'
 import type { SideTab } from '../prefs.js'
@@ -81,7 +81,8 @@ export function AppSidebar({ route }: { route: Route }) {
             <SidebarMenu>
               {journeys.map((j) => {
                 const on = activeJourney?.id === j.id
-                const jTone = journeyTone(j.id, journeysConv)
+                // U4: blue while the client's confirmation of the current story stands.
+                const jTone = journeyDotTone(j.id, j.beats, journeysConv, approval)
                 return (
                   <SidebarMenuItem key={j.id}>
                     <SidebarMenuButton asChild tooltip={j.persona} isActive={on && activeIdx < 0}>
@@ -170,16 +171,7 @@ export function AppSidebar({ route }: { route: Route }) {
 
       <SidebarFooter>
         <SidebarMenu>
-          {role === 'owner' && (
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Components" isActive={route.kind === 'components'}>
-                <a href={componentsHref(null, screens.some((s) => s.name === curScreen) ? curScreen : null)}>
-                  <LayoutGrid />
-                  <span>Components</span>
-                </a>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
+          {/* U7: the Components page needs a host app, so it is hidden in the walkthrough. */}
           {role === 'owner' && (
             <SidebarMenuItem>
               <SidebarMenuButton

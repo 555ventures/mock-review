@@ -65,7 +65,10 @@ export function useJourneyGuide({
     const onThisStep = (r: HTMLElement): boolean => {
       const win = r.ownerDocument.defaultView
       const route = win ? parseFrameHash(win.location.hash) : undefined
-      return !!route && sameScreenState(route, here)
+      // The walkthrough frame fetches each state's screen after the hash changes; `data-shown`
+      // is the hash whose content is actually drawn, so never scan the previous state's controls.
+      const shown = r.getAttribute('data-shown')
+      return !!route && sameScreenState(route, here) && (shown === null || shown === win?.location.hash)
     }
 
     const scan = () => {

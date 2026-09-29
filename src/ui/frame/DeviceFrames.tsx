@@ -20,7 +20,9 @@ import {
   type Viewport,
 } from '../notes/anchor.js'
 import { areaNotesOn, sameState } from '../store/selectors.js'
-import { frameSrc, parseFrameHash, replaceFrameHash, sameScreenState } from './frameRoute.js'
+import { parseFrameHash, replaceFrameHash, sameScreenState } from './frameRoute.js'
+import { projectBase } from '../sync/project.js'
+import { walkFrameSrc } from '../sync/walkthrough.js'
 
 export type DeviceSpec = { key: Viewport; width: number; label: string }
 
@@ -120,7 +122,7 @@ function Device({
   h,
   screen,
   state,
-  theme,
+  round,
   title,
   notes,
   pins,
@@ -133,6 +135,7 @@ function Device({
   onBoxes,
   onSelect,
   onDraw,
+  onPick,
   onOpenDraft,
   onPaletteKey,
 }: {
@@ -141,7 +144,7 @@ function Device({
   h: number
   screen: string
   state: string
-  theme: string | null
+  round: number | null
   title: string
   notes: UiNote[]
   pins: boolean
@@ -154,6 +157,7 @@ function Device({
   onBoxes: (v: Viewport, boxes: Record<string, Box | null>) => void
   onSelect: (id: string) => void
   onDraw: (v: Viewport, box: Box) => void
+  onPick: (v: Viewport, point: { x: number; y: number }) => void
   onOpenDraft: () => void
   onPaletteKey: () => void
 }) {
@@ -161,9 +165,12 @@ function Device({
   const frameRef = useRef<HTMLIFrameElement>(null)
   const rootRef = useRef<HTMLElement | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
-  // D10: `theme` is a dependency (not just `screen`) so picking a theme changes `src` and forces
-  // a real iframe reload — the frame entry reads its theme once from the `_theme` query parameter, at script load.
-  const src = useMemo(() => frameSrc({ kind: 'screen', screen, state }, theme), [screen, theme])
+  // U2/U8: the project's own frame document; `round` and the device width are real search params,
+  // so a new round or width reloads the frame while a state switch stays a hash replace (rule 16).
+  const src = useMemo(
+    () => walkFrameSrc(projectBase(), { kind: 'screen', screen, state }, { round, width: w }),
+    [screen, round, w],
+  )
   const [frameLoad, setFrameLoad] = useState(0)
   const [tick, setTick] = useState(0)
   const [boxes, setBoxes] = useState<Record<string, Box | null>>({})
@@ -274,7 +281,12 @@ function Device({
     if (!drag) return
     const b = drag.box
     setDrag(null)
-    if (b.width < 8 || b.height < 8) return
+    // U3: a drag smaller than 8×8 was discarded; now it is a plain click, which picks the whole
+    // node under the pointer (or, on a screenshot, a point on the picture).
+    if (b.width < 8 || b.height < 8) {
+      onPick(viewport, { x: drag.x0, y: drag.y0 })
+      return
+    }
     onDraw(viewport, b)
   }
 
@@ -352,7 +364,7 @@ export function DeviceFrames({
   h,
   screen,
   state,
-  theme,
+  round,
   title,
   notes,
   pins,
@@ -365,6 +377,7 @@ export function DeviceFrames({
   onBoxes,
   onSelect,
   onDraw,
+  onPick,
   onOpenDraft,
   onPaletteKey,
 }: {
@@ -373,7 +386,7 @@ export function DeviceFrames({
   h: number
   screen: string
   state: string
-  theme: string | null
+  round: number | null
   title: string
   notes: UiNote[]
   pins: boolean
@@ -386,6 +399,7 @@ export function DeviceFrames({
   onBoxes: (v: Viewport, boxes: Record<string, Box | null>) => void
   onSelect: (id: string) => void
   onDraw: (v: Viewport, box: Box) => void
+  onPick: (v: Viewport, point: { x: number; y: number }) => void
   onOpenDraft: () => void
   onPaletteKey: () => void
 }) {
@@ -399,7 +413,7 @@ export function DeviceFrames({
           h={h}
           screen={screen}
           state={state}
-          theme={theme}
+          round={round}
           title={title}
           notes={notes}
           pins={pins}
@@ -412,6 +426,7 @@ export function DeviceFrames({
           onBoxes={onBoxes}
           onSelect={onSelect}
           onDraw={onDraw}
+          onPick={onPick}
           onOpenDraft={onOpenDraft}
           onPaletteKey={onPaletteKey}
         />

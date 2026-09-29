@@ -5,7 +5,7 @@ import { useCallback } from 'react'
 import { ForbiddenError, RefusedError, fetchState, patchApproval, patchNotes } from '../sync/api.js'
 import { getStore } from '../store/store.js'
 import type { Note } from '../../schemas/index.js'
-import type { Rect, Viewport } from './anchor.js'
+import type { Rect, Viewport, WalkAnchor } from './anchor.js'
 
 async function refresh(): Promise<void> {
   const { seq, state } = await fetchState()
@@ -38,7 +38,7 @@ async function run<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
     store.setNotice(
       e instanceof RefusedError
         ? e.message
-        : 'The reviewer server did not answer — check that `mock-review serve` is still running, then reload.',
+        : 'The reviewer server did not answer — check that `npm run walkthrough` is still running, then reload.',
     )
     return fallback
   }
@@ -47,7 +47,7 @@ async function run<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 export function useNoteActions() {
   const addNote = useCallback(
     async (
-      note: Omit<Note, 'id' | 'status' | 'thread'> & { rect?: Rect; viewport?: Viewport; whole?: boolean },
+      note: Omit<Note, 'id' | 'status' | 'thread'> & { rect?: Rect; viewport?: Viewport; whole?: boolean; anchor?: WalkAnchor | null },
       text: string,
       by: 'owner' | 'client' = 'owner',
     ): Promise<string> =>
@@ -99,7 +99,7 @@ export function useNoteActions() {
   }, [])
 
   const reanchorNote = useCallback(
-    async (id: string, fields: { screen: string; state: string; viewport: Viewport; component: string; key: string; rect: Rect; snippet: string }): Promise<void> => {
+    async (id: string, fields: { screen: string; state: string; viewport: Viewport; component: string; key: string; rect: Rect; snippet: string; anchor?: WalkAnchor }): Promise<void> => {
       await run(async () => {
         await patchNotes({ op: 'update', id, fields })
         await refresh()

@@ -6,14 +6,98 @@
 import type { Note } from '../../schemas/index.js'
 
 export const SCREEN_ANCHOR = '__screen'
+/** U3: the `data-component` of a screenshot round's picture (`frame/mount.tsx`). */
+export const PICTURE_ANCHOR = '__picture'
 
 export type Box = { left: number; top: number; width: number; height: number }
 export type Rect = { x: number; y: number; w: number; h: number }
 export type Viewport = 'desktop' | 'mobile'
 
-/** D5: `Note` plus the passthrough extras the page owns (`rect`, `viewport`, `whole`) — never
- * redeclares the schema, just types the extras `.passthrough()` allows through at runtime. */
-export type UiNote = Note & { rect?: Rect; viewport?: Viewport; whole?: boolean }
+/** PROTOTYPE-PLAN.md seam A, the one note model: a wireframe note names the node it landed on
+ * (`rect` null = the whole node, `index` = the row of a repeated node); a screenshot note is a
+ * fraction of the picture plus that picture's width. `null` = a whole-screen or project note. */
+export type WireAnchor = { node: string | null; index: number | null; rect: Rect | null; viewport: Viewport }
+export type PictureAnchor = { x: number; y: number; w: number | null; h: number | null; width: number }
+export type WalkAnchor = WireAnchor | PictureAnchor
+
+/** D5: `Note` plus the passthrough extras the page owns (`rect`, `viewport`, `whole`, and the
+ * walkthrough's `anchor`) — never redeclares the schema, just types the extras `.passthrough()`
+ * allows through at runtime. */
+export type UiNote = Note & { rect?: Rect; viewport?: Viewport; whole?: boolean; anchor?: WalkAnchor | null }
+
+function isPicture(a: WalkAnchor): a is PictureAnchor {
+  return 'width' in a
+}
+
+/** U3: a plain click in marking mode selects the whole node under it — the anchor is that
+ * element itself (rect = its full box), found the same way `anchorFor` finds one. */
+export function anchorForElement(root: HTMLElement, el: HTMLElement): Anchor {
+  const component = el.dataset['component'] ?? SCREEN_ANCHOR
+  const key = String([...root.querySelectorAll(`[data-component="${CSS.escape(component)}"]`)].indexOf(el))
+  return { component, key, rect: { x: 0, y: 0, w: 1, h: 1 }, snippet: (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80) }
+}
+
+/** The `[data-component]` element under a point of the frame's viewport, or null. */
+export function elementAt(root: HTMLElement, x: number, y: number): HTMLElement | null {
+  const hit = root.ownerDocument
+    .elementsFromPoint(x, y)
+    .find((e) => root.contains(e))
+    ?.closest<HTMLElement>('[data-component]')
+  return hit && root.contains(hit) ? hit : null
+}
+
+/** Seam A's `anchor` for a resolved `Anchor`. `wholeNode` = picked by a click (rect null). */
+export function toWalkAnchor(
+  root: HTMLElement,
+  a: Anchor,
+  opts: { kind: 'wireframe' | 'screenshots'; viewport: Viewport; width: number; wholeNode?: boolean },
+): WalkAnchor {
+  if (opts.kind === 'screenshots') {
+    // seam A bounds a picture anchor to 0..1; a box drawn past the picture's edge is clipped to it.
+    const c = (n: number) => Math.min(1, Math.max(0, n))
+    const x = c(a.rect.x)
+    const y = c(a.rect.y)
+    const w = a.rect.w > 0 ? c(Math.min(a.rect.w, 1 - x)) : null
+    const h = a.rect.h > 0 ? c(Math.min(a.rect.h, 1 - y)) : null
+    return { x, y, w: w || null, h: h || null, width: Math.round(opts.width) }
+  }
+  const el =
+    a.component === SCREEN_ANCHOR
+      ? null
+      : (root.querySelectorAll<HTMLElement>(`[data-component="${CSS.escape(a.component)}"]`)[Number(a.key)] ?? null)
+  const index = el && el.hasAttribute('data-index') ? Number(a.key) : null
+  const node = a.component === SCREEN_ANCHOR ? null : a.component
+  return { node, index, rect: opts.wholeNode ? null : a.rect, viewport: opts.viewport }
+}
+
+/** Reads a served note back into the page's own fields from its `anchor`, whatever the server
+ * filled in for `component`/`key`/`rect`/`viewport` (seam B maps only `component` and `key`).
+ * A note without an `anchor` key (the old shape) is returned untouched. */
+export function fromWalkAnchor(note: UiNote, viewportOfWidth: (width: number) => Viewport): UiNote {
+  if (!('anchor' in note) || note.anchor === undefined) return note
+  const a = note.anchor
+  if (a === null) return note.project || note.whole ? note : { ...note, whole: true }
+  if (isPicture(a)) {
+    return {
+      ...note,
+      component: PICTURE_ANCHOR,
+      key: '0',
+      snippet: null,
+      rect: { x: a.x, y: a.y, w: a.w ?? 0, h: a.h ?? 0 },
+      viewport: viewportOfWidth(a.width),
+    }
+  }
+  return {
+    ...note,
+    component: a.node ?? SCREEN_ANCHOR,
+    key: String(a.index ?? 0),
+    // The node key is the identity now: a reworded sentence in a new round keeps the pin (plan
+    // acceptance 5), so the old snippet staleness test is not applied to a wireframe anchor.
+    snippet: null,
+    rect: a.rect ?? { x: 0, y: 0, w: 1, h: 1 },
+    viewport: a.viewport,
+  }
+}
 
 export function rectOf(note: UiNote): Rect {
   return note.rect ?? { x: 0, y: 0, w: 1, h: 1 }

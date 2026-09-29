@@ -4,8 +4,10 @@
 // serialised by `withDesignLock` (src/files/json.ts), not by any single writer owning the files.
 import type { ApprovalPatch, NotesPatch, ServerState } from '../../schemas/patches.js'
 import type { Approval, Notes } from '../../schemas/index.js'
+import { projectBase, roundOverride } from './project.js'
 
-const BASE = '/__mock-review'
+// U8: under `/p/<project>/` every call goes to that project's endpoints.
+const BASE = `${projectBase()}__mock-review`
 
 /** D24: the server 403s a request it cannot place as `client` or a loopback `owner` — most often
  * because the owner changed `config.client.token` while a client tab was still open. A typed
@@ -45,7 +47,9 @@ async function refusalOf(res: Response, url: string): Promise<RefusedError> {
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
+  // a pinned `?round=` applies to writes too, so a note lands on the round the page shows.
+  const round = roundOverride()
+  const res = await fetch(round ? `${url}?round=${round}` : url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -68,7 +72,8 @@ export type StateFetch = { seq: number; state: ServerState }
 
 export async function fetchState(): Promise<StateFetch> {
   const seq = ++requestSeq
-  const res = await fetch(`${BASE}/state`)
+  const round = roundOverride()
+  const res = await fetch(`${BASE}/state${round ? `?round=${round}` : ''}`)
   if (res.status === 403) throw new ForbiddenError(`${BASE}/state`)
   if (!res.ok) throw new Error(`${BASE}/state -> ${res.status}`)
   return { seq, state: (await res.json()) as ServerState }
