@@ -8,7 +8,7 @@ import { PhoneBar, useDesktop } from './parts.js'
 import { StepPage, type Device } from './StepPage.js'
 import { StoriesPage } from './StoriesPage.js'
 import { StoryPage } from './StoryPage.js'
-import { projectTitle, stepsOf } from './model.js'
+import { projectTitle, saveDevice, savedDevice, stepsOf } from './model.js'
 import { go, useClientRoute } from './route.js'
 
 const NEWSREADER = 'https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap'
@@ -60,7 +60,11 @@ export function ClientApp() {
   const data = useStore((s) => s.data)
   const route = useClientRoute()
   const desktop = useDesktop()
-  const [device, setDevice] = useState<Device>('desktop')
+  const [device, setDeviceState] = useState<Device>(savedDevice)
+  const setDevice = (d: Device) => {
+    saveDevice(d)
+    setDeviceState(d)
+  }
   const project = projectTitle(data)
   useClientDocument(project)
 

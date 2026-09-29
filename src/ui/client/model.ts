@@ -206,6 +206,48 @@ export function storyGroups(journeys: ServerJourney[]): StoryGroup[] {
   return groups
 }
 
+// ---------------------------------------------------------------- how the screen is shown (this browser)
+
+// Remembered per browser, for every project: which width the reader looks at on a desktop, and
+// how far they zoomed each one. Never synced: a zoom that suits one monitor is wrong on another.
+
+const DEVICE_KEY = 'walkthrough:view:device'
+const zoomKey = (device: 'phone' | 'desktop') => `walkthrough:view:zoom:${device}`
+
+export function savedDevice(): 'phone' | 'desktop' {
+  try {
+    return localStorage.getItem(DEVICE_KEY) === 'phone' ? 'phone' : 'desktop'
+  } catch {
+    return 'desktop'
+  }
+}
+
+export function saveDevice(device: 'phone' | 'desktop'): void {
+  try {
+    localStorage.setItem(DEVICE_KEY, device)
+  } catch {
+    // storage unavailable: the choice lasts until the page is reloaded
+  }
+}
+
+export function savedZoom(device: 'phone' | 'desktop', min: number, max: number): number {
+  try {
+    const z = Number(localStorage.getItem(zoomKey(device)))
+    return Number.isFinite(z) && z >= min && z <= max ? z : 1
+  } catch {
+    return 1
+  }
+}
+
+export function saveZoom(device: 'phone' | 'desktop', zoom: number): void {
+  try {
+    if (zoom === 1) localStorage.removeItem(zoomKey(device))
+    else localStorage.setItem(zoomKey(device), String(zoom))
+  } catch {
+    // storage unavailable: the zoom lasts until the page is reloaded
+  }
+}
+
 // ---------------------------------------------------------------- "Not read yet" (this browser)
 
 function readKey(journeyId: string): string {

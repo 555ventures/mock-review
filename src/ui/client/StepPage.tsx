@@ -17,6 +17,8 @@ import {
   markRead,
   notesOnStep,
   numberedNotes,
+  saveZoom,
+  savedZoom,
   stepChanged,
   widthsOf,
   type Step,
@@ -71,8 +73,15 @@ export function StepPage({
   // On a desktop the frame is never stretched past its own width: a phone screen is shown so a
   // whole phone's height fits the window, a desktop screen at most at its real size. `zoom`
   // multiplies that fit; the column's width is the ceiling either way.
-  const [zoom, setZoom] = useState(1)
-  useEffect(() => setZoom(1), [device])
+  // Each width keeps its own zoom, remembered in this browser.
+  const [zoom, setZoomState] = useState(() => savedZoom(device, ZOOM_MIN, ZOOM_MAX))
+  useEffect(() => setZoomState(savedZoom(device, ZOOM_MIN, ZOOM_MAX)), [device])
+  const setZoom = (next: (z: number) => number) =>
+    setZoomState((z) => {
+      const to = next(z)
+      saveZoom(device, to)
+      return to
+    })
   const fit = desktop ? { below: FRAME_BELOW, zoom, minHeight: width < 600 ? PHONE_HEIGHT : DESKTOP_HEIGHT } : undefined
 
   useEffect(() => {
@@ -216,7 +225,7 @@ export function StepPage({
                     Larger
                   </button>
                   {zoom !== 1 && (
-                    <button type="button" onClick={() => setZoom(1)}>
+                    <button type="button" onClick={() => setZoom(() => 1)}>
                       Fit to window
                     </button>
                   )}
