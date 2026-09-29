@@ -1,4 +1,6 @@
 node_modules/
+.env.local
+.env*.local
 .test-dist/
 .test-dist-build.lock/
 *.log

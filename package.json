@@ -38,7 +38,10 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "login": "npm login --auth-type=web",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "db:push": "node scripts/db-push.mjs",
+    "walkthrough": "vite --config vite.walkthrough.config.ts --configLoader runner",
+    "prove:server": "node scripts/prove-server.mjs"
   },
   "peerDependencies": {
     "playwright": "^1.63.0",
@@ -54,10 +57,14 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
+    "@json-render/core": "^0.21.0",
+    "@json-render/react": "^0.21.0",
+    "@types/pg": "^8.23.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "lucide-react": "^1.46.0",
+    "pg": "^8.23.0",
     "radix-ui": "^1.6.7",
     "react-docgen-typescript": "^2.4.0",
     "react-resizable-panels": "^4.12.4",
