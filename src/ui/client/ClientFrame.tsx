@@ -83,6 +83,7 @@ export function ClientFrame({
   state,
   round,
   width,
+  shownWidth,
   title,
   notes,
   pickMode,
@@ -96,6 +97,8 @@ export function ClientFrame({
   state: string
   round: number | null
   width: number
+  /** How wide the frame is shown (CSS px), never wider than its column; absent = the column. */
+  shownWidth?: number
   title: string
   notes: NumberedNote[]
   pickMode: boolean
@@ -230,7 +233,7 @@ export function ClientFrame({
   const scaled = (b: Box) => ({ left: b.left * scale, top: b.top * scale, width: b.width * scale, height: b.height * scale })
 
   return (
-    <div ref={outerRef} className="cv-frame" style={{ height: frameH }} data-drawn={drawn}>
+    <div ref={outerRef} className="cv-frame" style={{ height: frameH, ...(shownWidth ? { width: shownWidth, maxWidth: '100%' } : {}) }} data-drawn={drawn}>
       <div className="cv-frame-inner" data-visible={drawn} style={{ width, height, transform: `scale(${scale})` }}>
         <iframe
           ref={frameRef}

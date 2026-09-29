@@ -25,7 +25,14 @@ import { go } from './route.js'
 
 export type Device = 'phone' | 'desktop'
 
-type SheetState = { kind: 'new'; pick: Pick | null } | { kind: 'notes' } | null
+/** A phone's height, and the room the sentence and the controls take around the frame (CSS px). */
+const PHONE_HEIGHT = 844
+const FRAME_CHROME = 300
+const ZOOM_STEP = 1.25
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 2.5
+
+type SheetState ={ kind: 'new'; pick: Pick | null } | { kind: 'notes' } | null
 
 export function StepPage({
   data,
@@ -59,6 +66,20 @@ export function StepPage({
   const [sheet, setSheet] = useState<SheetState>(null)
   const [saved, flashSaved] = useFlash(4000)
   const [pulse, setPulse] = useState<{ id: string; n: number } | null>(null)
+
+  // On a desktop the frame is never stretched past its own width: a phone screen is shown so a
+  // whole phone's height fits the window, a desktop screen at most at its real size. `zoom`
+  // multiplies that fit; the column's width is the ceiling either way.
+  const [zoom, setZoom] = useState(1)
+  const [windowH, setWindowH] = useState(() => window.innerHeight)
+  useEffect(() => {
+    const onResize = () => setWindowH(window.innerHeight)
+    addEventListener('resize', onResize)
+    return () => removeEventListener('resize', onResize)
+  }, [])
+  useEffect(() => setZoom(1), [device])
+  const fit = width < 600 ? Math.min(1, Math.max(0.4, (windowH - FRAME_CHROME) / PHONE_HEIGHT)) : 1
+  const shownWidth = desktop ? Math.round(width * fit * zoom) : undefined
 
   useEffect(() => {
     setPicking(false)
@@ -168,6 +189,7 @@ export function StepPage({
             state={step.state}
             round={round}
             width={width}
+            {...(shownWidth ? { shownWidth } : {})}
             title={step.sentence ? `The screen for “${step.sentence}”` : `The screen for step ${index + 1}`}
             notes={here}
             pickMode={picking && !sheet}
@@ -178,19 +200,33 @@ export function StepPage({
             onPin={() => setSheet({ kind: 'notes' })}
           />
 
-          {(here.length > 0 || (desktop && widths.both)) && (
+          {(here.length > 0 || desktop) && (
             <div className="cv-under">
-              {desktop && widths.both ? (
-                <div className="cv-switch" role="group" aria-label="Screen width">
-                  <button type="button" aria-pressed={device === 'phone'} onClick={() => onDevice('phone')}>
-                    Phone
+              {desktop ? (
+                <div className="cv-switch" role="group" aria-label="How the screen is shown">
+                  {widths.both && (
+                    <>
+                      <button type="button" aria-pressed={device === 'phone'} onClick={() => onDevice('phone')}>
+                        Phone
+                      </button>
+                      <button type="button" aria-pressed={device === 'desktop'} onClick={() => onDevice('desktop')}>
+                        Desktop
+                      </button>
+                      <span className="cv-switch-gap" aria-hidden />
+                    </>
+                  )}
+                  <button type="button" disabled={zoom <= ZOOM_MIN} onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z / ZOOM_STEP))}>
+                    Smaller
                   </button>
-                  <button type="button" aria-pressed={device === 'desktop'} onClick={() => onDevice('desktop')}>
-                    Desktop
+                  <button type="button" disabled={zoom >= ZOOM_MAX} onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z * ZOOM_STEP))}>
+                    Larger
                   </button>
+                  {zoom !== 1 && (
+                    <button type="button" onClick={() => setZoom(1)}>
+                      Fit to window
+                    </button>
+                  )}
                 </div>
-              ) : desktop ? (
-                <span />
               ) : null}
               {here.length > 0 && (
                 <button type="button" className="cv-noterow" onClick={() => setSheet({ kind: 'notes' })}>
