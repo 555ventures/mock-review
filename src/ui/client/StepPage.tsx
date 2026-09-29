@@ -25,9 +25,10 @@ import { go } from './route.js'
 
 export type Device = 'phone' | 'desktop'
 
-/** A phone's height, and the room the sentence and the controls take around the frame (CSS px). */
+/** The devices' own heights, and the room the controls under the frame take (CSS px). */
 const PHONE_HEIGHT = 844
-const FRAME_CHROME = 300
+const DESKTOP_HEIGHT = 800
+const FRAME_BELOW = 176
 const ZOOM_STEP = 1.25
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2.5
@@ -71,15 +72,8 @@ export function StepPage({
   // whole phone's height fits the window, a desktop screen at most at its real size. `zoom`
   // multiplies that fit; the column's width is the ceiling either way.
   const [zoom, setZoom] = useState(1)
-  const [windowH, setWindowH] = useState(() => window.innerHeight)
-  useEffect(() => {
-    const onResize = () => setWindowH(window.innerHeight)
-    addEventListener('resize', onResize)
-    return () => removeEventListener('resize', onResize)
-  }, [])
   useEffect(() => setZoom(1), [device])
-  const fit = width < 600 ? Math.min(1, Math.max(0.4, (windowH - FRAME_CHROME) / PHONE_HEIGHT)) : 1
-  const shownWidth = desktop ? Math.round(width * fit * zoom) : undefined
+  const fit = desktop ? { below: FRAME_BELOW, zoom, minHeight: width < 600 ? PHONE_HEIGHT : DESKTOP_HEIGHT } : undefined
 
   useEffect(() => {
     setPicking(false)
@@ -189,7 +183,7 @@ export function StepPage({
             state={step.state}
             round={round}
             width={width}
-            {...(shownWidth ? { shownWidth } : {})}
+            {...(fit ? { fit } : {})}
             title={step.sentence ? `The screen for “${step.sentence}”` : `The screen for step ${index + 1}`}
             notes={here}
             pickMode={picking && !sheet}

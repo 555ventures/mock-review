@@ -75,6 +75,9 @@ export function frameSrc(round: number | null, width: number, screen: string, st
 const PIN = 26
 const PIN_SMALL = 20
 
+/** The smallest a fitted frame is ever shown: below this a screen cannot be read. */
+const MIN_SCALE = 0.3
+
 /** A pin in frame pixels (already scaled), plus the element's highlighter mark. */
 type PinAt = { id: string; number: number; left: number; top: number; mark: Box | null }
 
@@ -83,7 +86,7 @@ export function ClientFrame({
   state,
   round,
   width,
-  shownWidth,
+  fit,
   title,
   notes,
   pickMode,
@@ -97,8 +100,11 @@ export function ClientFrame({
   state: string
   round: number | null
   width: number
-  /** How wide the frame is shown (CSS px), never wider than its column; absent = the column. */
-  shownWidth?: number
+  /** Fit the whole frame between its own top and the window's bottom, keeping `below` px under it
+   * for the controls, as well as into the column's width; then multiply by `zoom`. The column's
+   * width stays the ceiling. `minHeight` is the device's own height (unscaled), so a short screen
+   * is still shown device-shaped. Absent = fill the column. */
+  fit?: { below: number; zoom: number; minHeight: number }
   title: string
   notes: NumberedNote[]
   pickMode: boolean
@@ -111,6 +117,7 @@ export function ClientFrame({
   const outerRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [outerW, setOuterW] = useState(0)
+  const [room, setRoom] = useState(0)
   const [load, setLoad] = useState(0)
   const [shown, setShown] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -121,11 +128,13 @@ export function ClientFrame({
   const key = heightKey(round, width, screen, state)
   const measured = useHeight(key)
   const lastHeight = useRef<number>(width < 600 ? 844 : 800)
-  const height = measured ?? lastHeight.current
+  const height = Math.max(fit?.minHeight ?? 0, measured ?? lastHeight.current)
   useEffect(() => {
     if (measured) lastHeight.current = measured
   }, [measured])
-  const scale = outerW > 0 ? outerW / width : 0
+  // `outerW` is the COLUMN's width (the frame's parent), so the frame may be narrower than it.
+  const fill = outerW > 0 ? outerW / width : 0
+  const scale = fit && fill > 0 && room > 0 ? Math.min(fill, Math.max(MIN_SCALE, Math.min(fill, (room - fit.below) / height) * fit.zoom)) : fill
   // below 60% the frame is small enough that full-size pins would crowd its rows
   const small = scale > 0 && scale < 0.6
   const pin = small ? PIN_SMALL : PIN
@@ -139,12 +148,22 @@ export function ClientFrame({
   useLayoutEffect(() => {
     const el = outerRef.current
     if (!el) return
-    const measure = () => setOuterW(el.clientWidth)
+    const column = el.parentElement ?? el
+    const measure = () => {
+      const cs = getComputedStyle(column)
+      setOuterW(column.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight))
+      // from the frame's top (in the document) to the window's bottom
+      setRoom(window.innerHeight - (el.getBoundingClientRect().top + window.scrollY))
+    }
     measure()
     const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+    ro.observe(column)
+    addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      removeEventListener('resize', measure)
+    }
+  }, [screen, state])
 
   useEffect(() => {
     const f = frameRoot(frameRef.current)
@@ -214,6 +233,7 @@ export function ClientFrame({
   const toFrame = (e: { clientX: number; clientY: number }) => {
     const r = outerRef.current?.getBoundingClientRect()
     if (!r || !scale) return null
+    // (the frame's own box, which is what the pointer is over)
     return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale }
   }
   const pickUnder = (e: { clientX: number; clientY: number }): Pick | null => {
@@ -230,10 +250,11 @@ export function ClientFrame({
 
   const clamp = (v: number, max: number) => Math.min(Math.max(v, pin / 2 + 2), Math.max(pin / 2 + 2, max - pin / 2 - 2))
   const frameH = height * scale
-  const scaled = (b: Box) => ({ left: b.left * scale, top: b.top * scale, width: b.width * scale, height: b.height * scale })
+  const frameW = width * scale
+  const scaled =(b: Box) => ({ left: b.left * scale, top: b.top * scale, width: b.width * scale, height: b.height * scale })
 
   return (
-    <div ref={outerRef} className="cv-frame" style={{ height: frameH, ...(shownWidth ? { width: shownWidth, maxWidth: '100%' } : {}) }} data-drawn={drawn}>
+    <div ref={outerRef} className="cv-frame" style={{ height: frameH, width: frameW }} data-drawn={drawn}>
       <div className="cv-frame-inner" data-visible={drawn} style={{ width, height, transform: `scale(${scale})` }}>
         <iframe
           ref={frameRef}
@@ -253,7 +274,7 @@ export function ClientFrame({
             type="button"
             data-pin={p.id}
             className={`cv-pin${small ? " is-small" : ""}${pulse?.id === p.id ? " is-pulsing" : ""}`}
-            style={{ left: clamp(p.left, outerW), top: clamp(p.top, frameH) }}
+            style={{ left: clamp(p.left, frameW), top: clamp(p.top, frameH) }}
             aria-label={`Note ${p.number}`}
             tabIndex={pickMode ? -1 : 0}
             onClick={() => onPin(p.id)}
